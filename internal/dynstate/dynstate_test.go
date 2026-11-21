@@ -21,7 +21,7 @@ import (
 )
 
 func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
-	return seams.AnalyzeBracketedSeams(audited, p, nil, nil).Exempt
+	return seams.AnalyzeBracketedSeams(audited, p, nil).Exempt
 }
 
 func syntheticPackageImports(tp *types.Package, nonStd map[string]*types.Package) map[string]*packages.Package {

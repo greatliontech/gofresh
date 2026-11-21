@@ -121,7 +121,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			base.Raw = expr
 			return base, true
 		case types.MethodExpr:
-			l.scanTypeExprNestedGoto(e.X)
+			l.scanTypeExprNestedHazards(e.X)
 			fn, _ := sel.Obj().(*types.Func)
 			return Place{
 				Root:         RootFunc,
@@ -139,7 +139,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 
 	case *ast.IndexExpr:
 		if tv, ok := l.info.Types[syntaxutil.UnparenExpr(e.Index)]; ok && tv.IsType() {
-			l.scanTypeExprNestedGoto(e.Index)
+			l.scanTypeExprNestedHazards(e.Index)
 			base, ok := l.tryLowerPlace(e.X)
 			if !ok {
 				return Place{}, false
@@ -162,7 +162,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 
 	case *ast.IndexListExpr:
 		for _, idx := range e.Indices {
-			l.scanTypeExprNestedGoto(idx)
+			l.scanTypeExprNestedHazards(idx)
 		}
 		base, ok := l.tryLowerPlace(e.X)
 		if !ok {
@@ -251,7 +251,7 @@ func (l *lowerer) lowerValueRaw(expr ast.Expr) *Value {
 		return nil
 	}
 	if tv, ok := l.info.Types[syntaxutil.UnparenExpr(expr)]; ok && tv.IsType() {
-		l.scanTypeExprNestedGoto(expr)
+		l.scanTypeExprNestedHazards(expr)
 		return &Value{
 			Kind:       ValScalarLitOrConst,
 			Type:       tv.Type,
@@ -269,10 +269,10 @@ func (l *lowerer) lowerValueRaw(expr ast.Expr) *Value {
 		}
 
 	case *ast.FuncLit:
-		if e.Type != nil {
-			l.scanTypeExprNestedGoto(e.Type)
-		}
 		child := LowerFuncLit(l.info, l.pkg, e)
+		if child == nil && e.Type != nil {
+			l.scanTypeExprNestedHazards(e.Type)
+		}
 		l.bubbleChild(child)
 		return &Value{
 			Kind:    ValMakeClosure,
@@ -374,7 +374,7 @@ func (l *lowerer) lowerValueRaw(expr ast.Expr) *Value {
 
 	case *ast.TypeAssertExpr:
 		if e.Type != nil {
-			l.scanTypeExprNestedGoto(e.Type)
+			l.scanTypeExprNestedHazards(e.Type)
 		}
 		return &Value{
 			Kind:         ValConvert,
@@ -414,7 +414,7 @@ func (l *lowerer) lowerValueRaw(expr ast.Expr) *Value {
 
 func (l *lowerer) lowerCompositeLit(lit *ast.CompositeLit, outerExpr ast.Expr) *Value {
 	if lit.Type != nil {
-		l.scanTypeExprNestedGoto(lit.Type)
+		l.scanTypeExprNestedHazards(lit.Type)
 	}
 	litT := l.info.TypeOf(lit)
 	elemT := litT
@@ -471,7 +471,7 @@ func (l *lowerer) lowerCompositeLit(lit *ast.CompositeLit, outerExpr ast.Expr) *
 func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 	// 1. Type conversion `T(x)`
 	if tv, ok := l.info.Types[syntaxutil.UnparenExpr(call.Fun)]; ok && tv.IsType() {
-		l.scanTypeExprNestedGoto(call.Fun)
+		l.scanTypeExprNestedHazards(call.Fun)
 		if len(call.Args) == 1 && !call.Ellipsis.IsValid() {
 			return &Value{
 				Kind: ValConvert,
@@ -494,7 +494,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 		switch b.Name() {
 		case "make":
 			if len(call.Args) > 0 {
-				l.scanTypeExprNestedGoto(call.Args[0])
+				l.scanTypeExprNestedHazards(call.Args[0])
 			}
 			var sizeArgs []*Value
 			if len(call.Args) > 1 {
@@ -510,7 +510,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 		case "new":
 			if syntaxutil.IsBuiltinNewType(l.info, call) {
 				if len(call.Args) > 0 {
-					l.scanTypeExprNestedGoto(call.Args[0])
+					l.scanTypeExprNestedHazards(call.Args[0])
 				}
 				return &Value{
 					Kind:      ValAllocFresh,
@@ -531,7 +531,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 			var valArgs []*Value
 			for _, a := range call.Args {
 				if tv, ok := l.info.Types[syntaxutil.UnparenExpr(a)]; ok && tv.IsType() {
-					l.scanTypeExprNestedGoto(a)
+					l.scanTypeExprNestedHazards(a)
 					continue
 				}
 				valArgs = append(valArgs, l.lowerValue(a))
@@ -552,10 +552,10 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 
 	// 3. Direct IIFE `(func(...) { ... })(args...)`
 	if lit, ok := syntaxutil.UnparenExpr(call.Fun).(*ast.FuncLit); ok {
-		if lit.Type != nil {
-			l.scanTypeExprNestedGoto(lit.Type)
-		}
 		child := LowerFuncLit(l.info, l.pkg, lit)
+		if child == nil && lit.Type != nil {
+			l.scanTypeExprNestedHazards(lit.Type)
+		}
 		l.bubbleChild(child)
 		return &Value{
 			Kind:      ValCall,
@@ -613,7 +613,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 					Ellipsis:     call.Ellipsis.IsValid(),
 				}
 			case types.MethodExpr:
-				l.scanTypeExprNestedGoto(calleeSel.X)
+				l.scanTypeExprNestedHazards(calleeSel.X)
 				if len(call.Args) >= 1 {
 					fn, _ := selection.Obj().(*types.Func)
 					rp, hasRP := l.tryLowerPlace(call.Args[0])
@@ -662,12 +662,12 @@ func (l *lowerer) resolvePlainCallee(fun ast.Expr) (*types.Func, string, *types.
 		switch x := cur.(type) {
 		case *ast.IndexListExpr:
 			for _, idx := range x.Indices {
-				l.scanTypeExprNestedGoto(idx)
+				l.scanTypeExprNestedHazards(idx)
 			}
 			cur = syntaxutil.UnparenExpr(x.X)
 		case *ast.IndexExpr:
 			if tv, ok := l.info.Types[syntaxutil.UnparenExpr(x.Index)]; ok && tv.IsType() {
-				l.scanTypeExprNestedGoto(x.Index)
+				l.scanTypeExprNestedHazards(x.Index)
 				cur = syntaxutil.UnparenExpr(x.X)
 				continue
 			}

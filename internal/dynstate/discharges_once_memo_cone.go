@@ -7,8 +7,8 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -18,7 +18,7 @@ func verifyOnceMemoConstructor(
 	p *packages.Package,
 	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
-	pkgFresh *freshstruct.PkgFreshConstructors,
+	pkgFresh *freshalloc.PkgFreshConstructors,
 	fd *ast.FuncDecl,
 	sig *types.Signature,
 	named *types.Named,
@@ -183,8 +183,8 @@ func verifyOnceMemoConstructor(
 func verifyOnceMemoResultClosure(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
-	pkgFresh *freshstruct.PkgFreshConstructors,
+	freshCache *freshalloc.FreshLocalsCache,
+	pkgFresh *freshalloc.PkgFreshConstructors,
 	funcDecls map[*types.Func]*ast.FuncDecl,
 	ownerNamed *types.Named,
 	ownerRef syntaxutil.TypeRef,
@@ -348,7 +348,7 @@ func verifyOnceMemoResultClosure(
 			}
 			syncFD := idx.SyncEnclFuncDecl(sel)
 			fresh, freshEsc := freshCache.Get(syncFD)
-			if freshstruct.IsRootedAtFreshLocal(p, sel, fresh, freshEsc) || pkgFresh.IsFreshMutationTarget(syncFD, sel) {
+			if freshalloc.IsRootedAtFreshLocal(p, sel, fresh, freshEsc) || pkgFresh.IsFreshMutationTarget(syncFD, sel) {
 				continue
 			}
 			if refconfine.ExprPrefixIsWrittenOrAddrTaken(p, idx, sel) {
@@ -543,7 +543,7 @@ func verifyOnceMemoSiblingMethod(
 	p *packages.Package,
 	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
-	pkgFresh *freshstruct.PkgFreshConstructors,
+	pkgFresh *freshalloc.PkgFreshConstructors,
 	funcDecls map[*types.Func]*ast.FuncDecl,
 	isSettledConeGlobal func(*types.Var) bool,
 	ownerNamed *types.Named,
@@ -704,7 +704,7 @@ func isSingleGuardSetStructOrPtr(t types.Type, guardSet map[syntaxutil.TypeRef]b
 
 func siblingReturnsFreshStructValue(
 	audited bool,
-	pkgFresh *freshstruct.PkgFreshConstructors,
+	pkgFresh *freshalloc.PkgFreshConstructors,
 	mfd *ast.FuncDecl,
 	rt types.Type,
 	ownerNamed *types.Named,

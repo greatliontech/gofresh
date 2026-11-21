@@ -417,9 +417,9 @@ func TestExportedSurfaceInventory(t *testing.T) {
 	internalPkgs := map[string]bool{
 		"asmverify": true, "auditset": true, "cachefile": true,
 		"capsule": true, "closure": true, "cprep": true, "dynstate": true, "flowir": true,
-		"freshstruct": true, "gotool": true, "guard": true, "jsonrecord": true,
-		"outcome": true, "propharness": true, "refconfine": true,
-		"runtimeinput": true, "seams": true, "syntaxutil": true,
+		"freshalloc": true, "gotool": true, "guard": true, "jsonrecord": true,
+		"observability": true, "outcome": true, "propharness": true, "refconfine": true,
+		"rta": true, "runtimeinput": true, "seams": true, "structmut": true, "syntaxutil": true,
 		"testenv": true, "testvariant": true, "toolchain": true, "trace": true,
 	}
 	fset := token.NewFileSet()

@@ -15,23 +15,28 @@ import (
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
-// ExportedSeamMarkHook is an optional callback invoked when an exported
-// function is marked as exposing a bracketed mutating seam.
-type ExportedSeamMarkHook func(p *packages.Package, fn syntaxutil.FuncKey, key string, at token.Pos)
+// ExportedSeamSite records one AST write position inside a package that exposes
+// an exported function Func as a bracketed mutating seam on Key.
+type ExportedSeamSite struct {
+	Func syntaxutil.FuncKey
+	Key  string
+	Pos  token.Pos
+}
 
 // Result holds the package-level bracketed seam analysis summary.
 type Result struct {
-	Exempt         map[ast.Node]bool
-	ExportedSeams  []syntaxutil.ExportedSeam
-	NonSeqFuncUses []syntaxutil.FuncKey
-	SeqFuncEdges   []syntaxutil.FuncDepEdge
-	ParallelFuncs  []syntaxutil.FuncKey
-	ParallelEdges  []syntaxutil.FuncDepEdge
+	Exempt            map[ast.Node]bool
+	ExportedSeams     []syntaxutil.ExportedSeam
+	ExportedSeamSites []ExportedSeamSite
+	NonSeqFuncUses    []syntaxutil.FuncKey
+	SeqFuncEdges      []syntaxutil.FuncDepEdge
+	ParallelFuncs     []syntaxutil.FuncKey
+	ParallelEdges     []syntaxutil.FuncDepEdge
 }
 
-// CallGraph summarizes sequential vs. non-sequential/parallel reachability
+// callGraph summarizes sequential vs. non-sequential/parallel reachability
 // across plain functions and closures in a package.
-type CallGraph struct {
+type callGraph struct {
 	DeclPlainFuncs map[*types.Func]*ast.FuncDecl
 	Blocked        map[*types.Func]bool
 	NonSeqLits     map[*ast.FuncLit]bool

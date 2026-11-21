@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -27,7 +27,7 @@ func deriveOnceMemoTypes(
 	p *packages.Package,
 	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	pkgConf *packageConfinementSummary,
 ) ([]syntaxutil.OnceMemoTypeFact, map[ast.Node]bool) {
 	if !audited || p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 || p.Module == nil || idx == nil || pkgConf == nil {
@@ -40,9 +40,9 @@ func deriveOnceMemoTypes(
 	}
 
 	if freshCache == nil {
-		freshCache = freshstruct.NewFreshLocalsCache(p, idx)
+		freshCache = freshalloc.NewFreshLocalsCache(p, idx)
 	}
-	pkgFresh := freshstruct.ComputePackageFreshConstructors(p, idx, nil)
+	pkgFresh := freshalloc.ComputePackageFreshConstructors(p, idx, nil)
 	funcDecls := map[*types.Func]*ast.FuncDecl{}
 	convertedStructs := collectConvertedTargetStructs(p)
 	compositeLitsByStruct := map[*types.Named][]*ast.CompositeLit{}
@@ -423,8 +423,8 @@ func verifyOnceMemoStructType(
 	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgConf *packageConfinementSummary,
-	freshCache *freshstruct.FreshLocalsCache,
-	pkgFresh *freshstruct.PkgFreshConstructors,
+	freshCache *freshalloc.FreshLocalsCache,
+	pkgFresh *freshalloc.PkgFreshConstructors,
 	funcDecls map[*types.Func]*ast.FuncDecl,
 	structLits []*ast.CompositeLit,
 	isSettledConeGlobal func(*types.Var) bool,

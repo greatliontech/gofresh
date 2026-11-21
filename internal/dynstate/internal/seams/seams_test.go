@@ -68,7 +68,7 @@ func ParallelHelper(t *testing.T) {
 }
 `)
 	idx := refconfine.BuildPkgIndex(p)
-	res := AnalyzeBracketedSeams(true, p, idx, nil)
+	res := AnalyzeBracketedSeams(true, p, idx)
 	if len(res.Exempt) != 4 {
 		t.Fatalf("expected 4 exempted LHS assignment nodes (2 in WithHook, 2 in TestSequentialCleanup), got %d", len(res.Exempt))
 	}
@@ -84,6 +84,20 @@ func ParallelHelper(t *testing.T) {
 	}
 	if !foundWithHook {
 		t.Fatalf("expected ExportedSeams to contain %+v, got %+v", wantSeam, res.ExportedSeams)
+	}
+	if len(res.ExportedSeamSites) != 2 {
+		t.Fatalf("expected 2 ExportedSeamSites (WithHook + TestSequentialCleanup), got %+v", res.ExportedSeamSites)
+	}
+	wantTestSeamFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "TestSequentialCleanup"}
+	seenSiteFns := map[syntaxutil.FuncKey]bool{}
+	for _, site := range res.ExportedSeamSites {
+		if site.Key != wantSeam.Key || site.Pos == token.NoPos {
+			t.Fatalf("unexpected ExportedSeamSite %+v, want Key=%q non-zero Pos", site, wantSeam.Key)
+		}
+		seenSiteFns[site.Func] = true
+	}
+	if !seenSiteFns[wantSeam.Func] || !seenSiteFns[wantTestSeamFn] {
+		t.Fatalf("expected ExportedSeamSites for both %+v and %+v, got %+v", wantSeam.Func, wantTestSeamFn, res.ExportedSeamSites)
 	}
 	wantPar := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "ParallelHelper"}
 	foundPar := false
@@ -175,7 +189,7 @@ func Caller4(b dep.Box) { hubBeta(b) }
 		TypesInfo: hostInfo,
 	}
 	idx := refconfine.BuildPkgIndex(hostPkg)
-	res := AnalyzeBracketedSeams(true, hostPkg, idx, nil)
+	res := AnalyzeBracketedSeams(true, hostPkg, idx)
 
 	sawHub0 := false
 	sawHub1 := false
@@ -194,7 +208,7 @@ func Caller4(b dep.Box) { hubBeta(b) }
 		t.Fatalf("expected shared internal hubs to be retained as #par#0 and #par#1 in ParallelEdges, got %+v", res.ParallelEdges)
 	}
 	for iter := 0; iter < 25; iter++ {
-		again := AnalyzeBracketedSeams(true, hostPkg, idx, nil)
+		again := AnalyzeBracketedSeams(true, hostPkg, idx)
 		if !slices.Equal(again.ParallelEdges, res.ParallelEdges) {
 			t.Fatalf("iter %d: non-deterministic ParallelEdges:\ngot:  %+v\nwant: %+v", iter, again.ParallelEdges, res.ParallelEdges)
 		}

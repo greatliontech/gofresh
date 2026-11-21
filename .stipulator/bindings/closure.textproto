@@ -2844,9 +2844,9 @@ bindings {
   content_hash: "12d455f81e29368843c159764b289946fb2611dc50b79b150273e8d7145f83fc"
   source_hash: "daf7a92e6e5cbdaf7b41c5f1144fbf2018f2d45605bc5d1cd23a90dec62193f3"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct.TestTwoLevelMapCommaOkSelfAppendAndClosureFieldFreshness"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/structmut.TestTwoLevelMapCommaOkSelfAppendAndClosureFieldFreshness"
   role: BINDING_ROLE_TESTS
-  shape_hash: "020e9b34662c06a6ab258b0098910419a4b3f200f7ad75c81fe0207995170b1a"
+  shape_hash: "c996bd3153d23f49a4549d667abd7409856bbe5871c083a36cc8425d57aa9584"
 }
 
 bindings {
@@ -2854,9 +2854,9 @@ bindings {
   content_hash: "12d455f81e29368843c159764b289946fb2611dc50b79b150273e8d7145f83fc"
   source_hash: "daf7a92e6e5cbdaf7b41c5f1144fbf2018f2d45605bc5d1cd23a90dec62193f3"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct.TestRapidFreshStructConstructorAndFieldFreshnessOracle"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/structmut.TestRapidFreshStructConstructorAndFieldFreshnessOracle"
   role: BINDING_ROLE_TESTS
-  shape_hash: "b9413daf51bc9fe9b57bc3c410fbd71d759a442c94b4c96a2498047d295331d6"
+  shape_hash: "9736cf7a1f2d0b4253bdb7023d9c66150354196f52a71fe4dc68ebba1a4db2ec"
 }
 
 bindings {

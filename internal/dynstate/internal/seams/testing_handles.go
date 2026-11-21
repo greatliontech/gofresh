@@ -70,7 +70,7 @@ func pkgMutatesTestingStruct(p *packages.Package) bool {
 // sequential FuncLit.Body) in *_test.go files of p, the set of own concrete
 // *testing.T/*testing.B/*testing.F parameter variables proven to originate
 // solely from uncalled Go test/benchmark/fuzz runner entries.
-func computeLiveTestingHandles(p *packages.Package, graph CallGraph) map[*ast.BlockStmt]map[*types.Var]bool {
+func computeLiveTestingHandles(p *packages.Package, graph callGraph) map[*ast.BlockStmt]map[*types.Var]bool {
 	if p == nil || p.TypesInfo == nil || p.Fset == nil || pkgMutatesTestingStruct(p) {
 		return nil
 	}

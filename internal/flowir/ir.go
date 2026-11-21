@@ -48,16 +48,23 @@ type Body struct {
 	HasDefer         bool
 	HasGo            bool
 
-	// HasNestedGoto reports whether any nested FuncLit inside b (including
-	// closures, IIFEs, and compile-time type expressions) contains a goto
-	// statement.
+	// HasNestedGoto and HasNestedGo report whether any nested FuncLit inside b
+	// (including closures, IIFEs, and compile-time type expressions) contains a
+	// goto or go statement.
 	HasNestedGoto bool
+	HasNestedGo   bool
 }
 
 // HasGotoAnywhere reports whether b or any nested FuncLit inside b contains a
 // goto statement.
 func (b *Body) HasGotoAnywhere() bool {
 	return b != nil && (b.HasGoto || b.HasNestedGoto)
+}
+
+// HasGoAnywhere reports whether b or any nested FuncLit inside b contains a go
+// statement.
+func (b *Body) HasGoAnywhere() bool {
+	return b != nil && (b.HasGo || b.HasNestedGo)
 }
 
 // HasGotoOrLabel reports whether b's own synchronous scope (excluding nested

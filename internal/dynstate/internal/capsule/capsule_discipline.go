@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -64,7 +64,7 @@ func isSafeProtectedIfaceElemValue(
 func verifyLockedStructFamilyDiscipline(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	rootNamed *types.Named,
 	family map[*types.Named]bool,
 	childProtected map[*types.Named]bool,
@@ -145,7 +145,7 @@ func verifyLockedStructFamilyDiscipline(
 	}
 
 	if freshCache == nil {
-		freshCache = freshstruct.NewFreshLocalsCache(p, idx)
+		freshCache = freshalloc.NewFreshLocalsCache(p, idx)
 	}
 	expGuardFields, guardedExpLHS, badExpNode, okExpGuards := deriveOnceExportedWriteGuardFields(
 		p, idx, freshCache, rootNamed, family, onceFn, onceCone, builderExempt,
@@ -223,7 +223,7 @@ func verifyLockedStructFamilyDiscipline(
 					return false
 				}
 				if childProtected[st] {
-					return inAllowedWriter || freshstruct.IsRootedAtFreshLocal(p, star.X, freshVars, freshEsc)
+					return inAllowedWriter || freshalloc.IsRootedAtFreshLocal(p, star.X, freshVars, freshEsc)
 				}
 			}
 		}
@@ -231,7 +231,7 @@ func verifyLockedStructFamilyDiscipline(
 		if hitSt == nil {
 			return true
 		}
-		if freshstruct.IsRootedAtFreshLocal(p, expr, freshVars, freshEsc) {
+		if freshalloc.IsRootedAtFreshLocal(p, expr, freshVars, freshEsc) {
 			return true
 		}
 		if !inAllowedWriter {
@@ -276,7 +276,7 @@ func verifyLockedStructFamilyDiscipline(
 						failWith("family_mutation_outside_once_cone", x)
 						return false
 					}
-					if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX && !freshstruct.IsRootedAtFreshLocal(p, ix, freshVars, freshEsc) {
+					if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX && !freshalloc.IsRootedAtFreshLocal(p, ix, freshVars, freshEsc) {
 						if hitSt, _ := lhsRootFamilyField(p, ix, allProtected); hitSt != nil {
 							if elemT := p.TypesInfo.TypeOf(ix); elemT != nil && types.IsInterface(elemT) {
 								if len(x.Lhs) != len(x.Rhs) || !isSafeProtectedIfaceElemValue(p, x.Rhs[li], allProtected, isImmPtr) {
@@ -300,7 +300,7 @@ func verifyLockedStructFamilyDiscipline(
 						return false
 					}
 					for _, be := range []ast.Expr{x.Key, x.Value} {
-						if ix, isIX := ast.Unparen(be).(*ast.IndexExpr); isIX && !freshstruct.IsRootedAtFreshLocal(p, ix, freshVars, freshEsc) {
+						if ix, isIX := ast.Unparen(be).(*ast.IndexExpr); isIX && !freshalloc.IsRootedAtFreshLocal(p, ix, freshVars, freshEsc) {
 							if hitSt, _ := lhsRootFamilyField(p, ix, allProtected); hitSt != nil {
 								if elemT := p.TypesInfo.TypeOf(ix); elemT != nil && types.IsInterface(elemT) {
 									failWith("unsafe_iface_container_elem_write", x)
@@ -319,7 +319,7 @@ func verifyLockedStructFamilyDiscipline(
 								failWith("family_mutation_outside_once_cone", x)
 								return false
 							}
-							if (b.Name() == "append" || b.Name() == "copy") && !freshstruct.IsRootedAtFreshLocal(p, x.Args[0], freshVars, freshEsc) {
+							if (b.Name() == "append" || b.Name() == "copy") && !freshalloc.IsRootedAtFreshLocal(p, x.Args[0], freshVars, freshEsc) {
 								if hitSt, _ := lhsRootFamilyField(p, x.Args[0], allProtected); hitSt != nil {
 									if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl && types.IsInterface(sl.Elem()) {
 										if b.Name() == "copy" {
@@ -359,7 +359,7 @@ func verifyLockedStructFamilyDiscipline(
 				if x.Op != token.AND {
 					return true
 				}
-				if builderExempt[x] || freshstruct.IsRootedAtFreshLocal(p, x.X, freshVars, freshEsc) {
+				if builderExempt[x] || freshalloc.IsRootedAtFreshLocal(p, x.X, freshVars, freshEsc) {
 					return true
 				}
 				if sel, isSel := ast.Unparen(x.X).(*ast.SelectorExpr); isSel {
@@ -464,7 +464,7 @@ func verifyLockedStructFamilyDiscipline(
 			}
 			syncEncl := idx.SyncEnclFuncDecl(sel)
 			freshVars, freshEsc := freshCache.Get(syncEncl)
-			if freshstruct.IsRootedAtFreshLocal(p, sel, freshVars, freshEsc) {
+			if freshalloc.IsRootedAtFreshLocal(p, sel, freshVars, freshEsc) {
 				return false, false
 			}
 			var enclFn *types.Func

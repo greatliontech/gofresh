@@ -15,10 +15,13 @@ func LowerFunc(info *types.Info, pkg *types.Package, fd *ast.FuncDecl) *Body {
 	}
 	b := newBody(fd, fd.Body, fd.Pos(), fd.End())
 	l := &lowerer{info: info, pkg: pkg, body: b}
-	if fd.Recv != nil && len(fd.Recv.List) == 1 {
-		if names := fd.Recv.List[0].Names; len(names) == 1 && names[0] != nil && names[0].Name != "_" {
-			if v, ok := info.Defs[names[0]].(*types.Var); ok {
-				b.Recv = v
+	if fd.Recv != nil {
+		l.scanTypeExprNestedHazards(fd.Recv)
+		if len(fd.Recv.List) == 1 {
+			if names := fd.Recv.List[0].Names; len(names) == 1 && names[0] != nil && names[0].Name != "_" {
+				if v, ok := info.Defs[names[0]].(*types.Var); ok {
+					b.Recv = v
+				}
 			}
 		}
 	}
@@ -121,6 +124,7 @@ type lowerer struct {
 }
 
 func (l *lowerer) populateSigParamsAndResults(ft *ast.FuncType) {
+	l.scanTypeExprNestedHazards(ft)
 	if ft.Params != nil {
 		idx := 0
 		for _, field := range ft.Params.List {
@@ -191,24 +195,31 @@ func (l *lowerer) bubbleChild(child *Body) {
 	if child.HasGoto || child.HasNestedGoto {
 		l.body.HasNestedGoto = true
 	}
+	if child.HasGo || child.HasNestedGo {
+		l.body.HasNestedGo = true
+	}
 }
 
-func (l *lowerer) scanTypeExprNestedGoto(root ast.Node) {
-	if l.body.HasNestedGoto || root == nil {
+func (l *lowerer) scanTypeExprNestedHazards(root ast.Node) {
+	if (l.body.HasNestedGoto && l.body.HasNestedGo) || root == nil {
 		return
 	}
 	ast.Inspect(root, func(n ast.Node) bool {
-		if l.body.HasNestedGoto || n == nil {
+		if (l.body.HasNestedGoto && l.body.HasNestedGo) || n == nil {
 			return false
 		}
 		if lit, isFL := n.(*ast.FuncLit); isFL {
 			ast.Inspect(lit, func(sub ast.Node) bool {
-				if l.body.HasNestedGoto || sub == nil {
+				if (l.body.HasNestedGoto && l.body.HasNestedGo) || sub == nil {
 					return false
 				}
-				if bs, ok := sub.(*ast.BranchStmt); ok && bs.Tok == token.GOTO {
-					l.body.HasNestedGoto = true
-					return false
+				switch x := sub.(type) {
+				case *ast.BranchStmt:
+					if x.Tok == token.GOTO {
+						l.body.HasNestedGoto = true
+					}
+				case *ast.GoStmt:
+					l.body.HasNestedGo = true
 				}
 				return true
 			})
@@ -265,6 +276,9 @@ func (l *lowerer) lowerSubBlock(blk *ast.BlockStmt) *Body {
 	}
 	if sub.HasGo {
 		l.body.HasGo = true
+	}
+	if sub.HasNestedGo {
+		l.body.HasNestedGo = true
 	}
 	return sub
 }
@@ -487,7 +501,7 @@ func (l *lowerer) lowerStmt(stmt ast.Stmt, topLevel bool) {
 					continue
 				}
 				for _, ce := range cc.List {
-					l.scanTypeExprNestedGoto(ce)
+					l.scanTypeExprNestedHazards(ce)
 				}
 				if impVar, ok := l.info.Implicits[cc].(*types.Var); ok && impVar != nil && switchedVal != nil {
 					l.body.Ops = append(l.body.Ops, Op{
@@ -606,7 +620,7 @@ func (l *lowerer) lowerGenDecl(gd *ast.GenDecl, topLevel bool) {
 		return
 	}
 	if gd.Tok == token.TYPE {
-		l.scanTypeExprNestedGoto(gd)
+		l.scanTypeExprNestedHazards(gd)
 		return
 	}
 	if gd.Tok != token.VAR && gd.Tok != token.CONST {
@@ -626,7 +640,7 @@ func (l *lowerer) lowerValueSpec(vs *ast.ValueSpec, tok token.Token, topLevel bo
 		return
 	}
 	if vs.Type != nil {
-		l.scanTypeExprNestedGoto(vs.Type)
+		l.scanTypeExprNestedHazards(vs.Type)
 	}
 	switch tok {
 	case token.VAR:

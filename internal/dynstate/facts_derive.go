@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/capsule"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/seams"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/structmut"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -94,11 +94,12 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	poolMutated := map[string]bool{}
 	poolEscaped := map[string]bool{}
 	var poolAttributedUses []syntaxutil.AttributedUse
-	var seamHook seams.ExportedSeamMarkHook
+	seamAnalysis := seams.AnalyzeBracketedSeams(audited, p, idx)
 	if hooks != nil && hooks.ExportedSeamSite != nil {
-		seamHook = hooks.ExportedSeamSite
+		for _, site := range seamAnalysis.ExportedSeamSites {
+			hooks.ExportedSeamSite(p, site.Func, site.Key, site.Pos)
+		}
 	}
-	seamAnalysis := seams.AnalyzeBracketedSeams(audited, p, idx, seamHook)
 	fact.ExportedSeams = seamAnalysis.ExportedSeams
 	fact.NonSeqFuncUses = seamAnalysis.NonSeqFuncUses
 	fact.SeqFuncEdges = seamAnalysis.SeqFuncEdges
@@ -464,12 +465,12 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	}
 	recordPackageMethodDirectives(p, &fact)
 	if idx != nil {
-		fact.DirectVarWrites = capsule.CollectDirectCrossPkgVarWrites(audited, p, idx)
+		fact.DirectVarWrites = collectDirectCrossPkgVarWrites(audited, p, idx)
 	}
 	if p.Types != nil && p.Module != nil {
 		if idx != nil {
-			freshCache := freshstruct.NewFreshLocalsCache(p, idx)
-			confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+			freshCache := freshalloc.NewFreshLocalsCache(p, idx)
+			confinedCacheMaps := freshalloc.FindMutexConfinedConstructorCaches(p, idx)
 			fact.MappingDischarges = deriveMappingDischarges(ctx, audited, p, fc, idx)
 			fact.MemoDischarges = deriveMemoDischarges(ctx, audited, p, fc, idx)
 			var onceMemoExempt map[ast.Node]bool
@@ -488,24 +489,25 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 			}
 			var claimedVars map[*types.Var]bool
 			fact.InitSettledClusters, fact.InitBuilders, fact.LazyOnceCapsuleTypes, fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets, claimedVars =
-				capsule.DeriveCapsuleAndStructFactsCtx(ctx, audited, p, idx, freshCache, confinedCacheMaps, initOnly, unattestedMutated, onceMemoExempt)
+				structmut.DeriveCapsuleAndStructFactsCtx(ctx, audited, p, idx, freshCache, confinedCacheMaps, initOnly, unattestedMutated, onceMemoExempt)
 			var exemptAliasIdents map[*ast.Ident]bool
 			fact.ReadOnlyVarAliases, exemptAliasIdents = deriveReadOnlyVarAliases(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
 			fact.StaticCompositeGlobals = deriveStaticCompositeGlobals(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
 			fact.OnceMemoCandidates = deriveOnceMemoCandidates(ctx, audited, p, fc, idx, singleSubjectSet, exemptAliasIdents)
-			fact.NonMethodVarUses = capsule.CollectNonMethodCrossPkgVarUses(audited, p, idx, exemptAliasIdents)
-			fact.NonMutatingMethods = capsule.DeriveNonMutatingMethods(audited, p, idx)
+			fact.NonMethodVarUses = collectNonMethodCrossPkgVarUses(audited, p, idx, exemptAliasIdents)
+			fact.NonMutatingMethods = deriveNonMutatingMethods(audited, p, idx)
 			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
-				capsule.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
+				deriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 		}
 	} else if idx != nil {
-		freshCache := freshstruct.NewFreshLocalsCache(p, idx)
-		confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
-		fact.NonMethodVarUses = capsule.CollectNonMethodCrossPkgVarUses(audited, p, idx, nil)
-		fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets = freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(ctx, p, idx, freshCache, confinedCacheMaps, nil, nil, nil, nil, nil)
-		fact.NonMutatingMethods = capsule.DeriveNonMutatingMethods(audited, p, idx)
+		freshCache := freshalloc.NewFreshLocalsCache(p, idx)
+		confinedCacheMaps := freshalloc.FindMutexConfinedConstructorCaches(p, idx)
+		fact.NonMethodVarUses = collectNonMethodCrossPkgVarUses(audited, p, idx, nil)
+		fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets =
+			structmut.CollectMutatedStructTypesWithCapsuleCtx(ctx, p, idx, freshCache, confinedCacheMaps, nil)
+		fact.NonMutatingMethods = deriveNonMutatingMethods(audited, p, idx)
 		fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
-			capsule.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
+			deriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 	}
 	if tracing {
 		for _, v := range fact.Mutates {

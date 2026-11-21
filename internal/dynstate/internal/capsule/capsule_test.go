@@ -1,4 +1,4 @@
-package capsule
+package capsule_test
 
 import (
 	"context"
@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/capsule"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/structmut"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -83,7 +85,7 @@ func typecheckSinglePkg(t *testing.T, pkgPath, src string) *packages.Package {
 	return typecheckOrderedPkgs(t, []testPkgSpec{{pkgPath: pkgPath, src: src}})[pkgPath]
 }
 
-func TestDeriveNonMutatingMethodsAndNoPostInitCarrierWrites(t *testing.T) {
+func TestDerivePackageFactsLockedAndReadOnlyCapsules(t *testing.T) {
 	p := typecheckSinglePkg(t, "example.com/p", `package p
 
 import (
@@ -91,23 +93,6 @@ import (
 	"sync"
 	"sync/atomic"
 )
-
-type Reader struct {
-	n int
-}
-
-func (r *Reader) helper() int {
-	x := r.n + 1
-	return x
-}
-
-func (r *Reader) ReadCount() int {
-	return r.helper()
-}
-
-func (r *Reader) MutateCount() {
-	r.n++
-}
 
 type CatalogIface interface {
 	CatalogLabel() string
@@ -136,38 +121,19 @@ func (rc *LockedRecordCapsule) initOnce() {
 }
 `)
 	idx := refconfine.BuildPkgIndex(p)
-	methods := DeriveNonMutatingMethods(true, p, idx)
-	want := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Reader.ReadCount"}
-	bad := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Reader.MutateCount"}
-	foundWant := false
-	for _, m := range methods {
-		if m == want {
-			foundWant = true
-		}
-		if m == bad {
-			t.Fatalf("unexpected mutating method in DeriveNonMutatingMethods: %v", m)
-		}
-	}
-	if !foundWant {
-		t.Fatalf("expected %v in DeriveNonMutatingMethods, got %v", want, methods)
-	}
-	if clean, culprits := DeriveNoPostInitCarrierWrites(true, p, idx, idx.InitOnly, nil); !clean || len(culprits) > 0 {
-		t.Fatalf("expected DeriveNoPostInitCarrierWrites=(true, nil) on carrier-clean package, got (%v, %v)", clean, culprits)
-	}
-
-	_, _, capsules, _, _, _, _ := DeriveCapsuleAndStructFacts(true, p, idx, nil, nil, idx.InitOnly, nil, nil)
+	facts := capsule.DerivePackageFacts(true, p, idx, nil, nil, idx.InitOnly, nil, nil)
 	byName := map[string]syntaxutil.LazyOnceCapsuleType{}
-	for _, ct := range capsules {
+	for _, ct := range facts.Capsules {
 		if !ct.Valid() {
 			t.Fatalf("invalid LazyOnceCapsuleType: %+v", ct)
 		}
 		byName[ct.Type.Name] = ct
 	}
 	if _, ok := byName["LockedRecordCapsule"]; !ok {
-		t.Fatalf("expected LockedRecordCapsule in capsules, got %+v", capsules)
+		t.Fatalf("expected LockedRecordCapsule in capsules, got %+v", facts.Capsules)
 	}
 	if _, ok := byName["ReadOnlyTagCapsule"]; !ok {
-		t.Fatalf("expected ReadOnlyTagCapsule in capsules, got %+v", capsules)
+		t.Fatalf("expected ReadOnlyTagCapsule in capsules, got %+v", facts.Capsules)
 	}
 }
 
@@ -595,7 +561,7 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 		})
 
 		rawPkg := pkgs["example.com/rawbuild"]
-		_, rawBuilders, _, rawMutated, rawConds, _, _ := DeriveCapsuleAndStructFactsCtx(
+		_, rawBuilders, _, rawMutated, rawConds, _, _ := structmut.DeriveCapsuleAndStructFactsCtx(
 			ctx, true, rawPkg, refconfine.BuildPkgIndex(rawPkg), nil, nil, nil, nil, nil,
 		)
 		if len(rawBuilders) != 1 || !rawBuilders[0].CoversImmutableCapsules || rawBuilders[0].Type.Name != "RawAssembler" || rawBuilders[0].BuildMethod != "Assemble" || rawBuilders[0].OutIfaceField != "Catalog" {
@@ -615,7 +581,7 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 		}
 
 		capPkg := pkgs["example.com/schemacap"]
-		_, _, capTypes, capMutated, _, _, _ := DeriveCapsuleAndStructFactsCtx(
+		_, _, capTypes, capMutated, _, _, _ := structmut.DeriveCapsuleAndStructFactsCtx(
 			ctx, true, capPkg, refconfine.BuildPkgIndex(capPkg), nil, nil, nil, nil, nil,
 		)
 		if len(capMutated) != 0 {
@@ -623,7 +589,7 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 		}
 
 		tbPkg := pkgs["example.com/typebuild"]
-		_, capBuilders, _, tbMutated, _, _, _ := DeriveCapsuleAndStructFactsCtx(
+		_, capBuilders, _, tbMutated, _, _, _ := structmut.DeriveCapsuleAndStructFactsCtx(
 			ctx, true, tbPkg, refconfine.BuildPkgIndex(tbPkg), nil, nil, nil, nil, nil,
 		)
 		for _, m := range tbMutated {
@@ -659,7 +625,7 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 		}
 
 		genPkg := pkgs["example.com/genpkg"]
-		clusters, _, _, _, _, _, _ := DeriveCapsuleAndStructFacts(
+		clusters, _, _, _, _, _, _ := structmut.DeriveCapsuleAndStructFacts(
 			true, genPkg, refconfine.BuildPkgIndex(genPkg), nil, nil, nil, nil, nil,
 		)
 		if len(clusters) != 1 || !clusters[0].Valid() {
@@ -860,11 +826,11 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 			}()
 
 			tp := pkgs[tc.targetPkg]
-			clusters, _, _, _, _, _, _ := DeriveCapsuleAndStructFactsCtx(
+			capFacts := capsule.DerivePackageFactsCtx(
 				ctx, true, tp, refconfine.BuildPkgIndex(tp), nil, nil, nil, nil, nil,
 			)
 			if tc.checkCluster != nil {
-				tc.checkCluster(t, clusters)
+				tc.checkCluster(t, capFacts.Clusters)
 				return
 			}
 
@@ -881,123 +847,6 @@ func TestSyntheticNonProtoCapsuleBuilderAndCluster(t *testing.T) {
 			if !matched {
 				t.Fatalf("missing causal dynstate.capsule.reject(struct=%q, reason=%q) on %s; got events=%+v",
 					tc.wantStruct, tc.wantReason, tc.targetPkg, rejects)
-			}
-		})
-	}
-}
-
-func TestDeriveNonMutatingAndNoPostInitRejectMutatingAndSendingStdlibCalls(t *testing.T) {
-	mutPkg := typecheckSinglePkg(t, "example.com/mut", `package mut
-
-import (
-	"bytes"
-	"encoding/binary"
-	"reflect"
-	"slices"
-	"sort"
-	"strconv"
-	"sync"
-	"unicode/utf8"
-)
-
-type Mutator interface {
-	Mutate()
-}
-
-type Box struct {
-	raw   []byte
-	nums  []int
-	buf   *bytes.Buffer
-	mu    *sync.Mutex
-	rw    *sync.RWMutex
-	once  *sync.Once
-	pool  *sync.Pool
-	iface Mutator
-}
-
-func (b Box) CleanLen() int {
-	if bytes.Equal(b.raw, []byte("ok")) && utf8.Valid(b.raw) {
-		return len(b.raw)
-	}
-	return 0
-}
-
-func (b Box) ReverseRaw() { slices.Reverse(b.raw) }
-func (b Box) SortNums()   { sort.Ints(b.nums) }
-func (b Box) PutBin()     { binary.LittleEndian.PutUint64(b.raw, 1) }
-func (b Box) EncodeUTF8() { utf8.EncodeRune(b.raw, 'x') }
-func (b Box) AppendNum()  { _ = strconv.AppendInt(b.raw, 1, 10) }
-func (b Box) ClearRefl()  { reflect.ValueOf(b.raw).Clear() }
-func (b Box) ResetBuf()   { b.buf.Reset() }
-func (b Box) UnlockMu()   { b.mu.Unlock() }
-func (b Box) RLockRW()    { b.rw.RLock() }
-func (b Box) DoOnce()     { b.once.Do(func() {}) }
-func (b Box) GetPool()    { _ = b.pool.Get() }
-func (b Box) CallIface()  { b.iface.Mutate() }
-`)
-	mutIdx := refconfine.BuildPkgIndex(mutPkg)
-	gotMethods := DeriveNonMutatingMethods(true, mutPkg, mutIdx)
-	wantOnly := []syntaxutil.FuncKey{{Pkg: "example.com/mut", Name: "Box.CleanLen"}}
-	if !slices.Equal(gotMethods, wantOnly) {
-		t.Fatalf("DeriveNonMutatingMethods = %v, want exact %v", gotMethods, wantOnly)
-	}
-
-	for _, tc := range []struct {
-		name      string
-		src       string
-		wantClean bool
-	}{
-		{
-			name: "local_unexported_pool_carrier_free_put_clean",
-			src: `package p
-import "sync"
-type scratch struct{ buf [16]byte }
-var pool sync.Pool
-func Run() {
-	v := pool.Get()
-	_ = v
-	pool.Put(&scratch{})
-}
-`,
-			wantClean: true,
-		},
-		{
-			name: "param_pool_put_rejected",
-			src: `package p
-import "sync"
-func Stash(pool *sync.Pool, x any) {
-	pool.Put(x)
-}
-`,
-			wantClean: false,
-		},
-		{
-			name: "reflect_value_send_rejected",
-			src: `package p
-import "reflect"
-func Forward(ch, v any) {
-	reflect.ValueOf(ch).Send(reflect.ValueOf(v))
-}
-`,
-			wantClean: false,
-		},
-		{
-			name: "reflect_value_trysend_rejected",
-			src: `package p
-import "reflect"
-func TryForward(ch, v any) bool {
-	return reflect.ValueOf(ch).TrySend(reflect.ValueOf(v))
-}
-`,
-			wantClean: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pkg := typecheckSinglePkg(t, "example.com/p", tc.src)
-			idx := refconfine.BuildPkgIndex(pkg)
-			clean, culprits := DeriveNoPostInitCarrierWrites(true, pkg, idx, idx.InitOnly, nil)
-			if clean != tc.wantClean {
-				t.Fatalf("DeriveNoPostInitCarrierWrites = (%v, %v), want clean=%v", clean, culprits, tc.wantClean)
 			}
 		})
 	}

@@ -792,13 +792,25 @@ func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
 		closureGoto := rapid.Bool().Draw(rt, "closureGoto")
 		iifeGoto := rapid.Bool().Draw(rt, "iifeGoto")
 		typeExprGoto := rapid.Bool().Draw(rt, "typeExprGoto")
+		sigTypeGoto := rapid.Bool().Draw(rt, "sigTypeGoto")
+		closureGo := rapid.Bool().Draw(rt, "closureGo")
+		iifeGo := rapid.Bool().Draw(rt, "iifeGo")
+		typeExprGo := rapid.Bool().Draw(rt, "typeExprGo")
+		sigTypeGo := rapid.Bool().Draw(rt, "sigTypeGo")
 
 		var sb strings.Builder
 		sb.WriteString("package p\n")
-		if typeExprGoto {
+		if typeExprGoto || typeExprGo || sigTypeGoto || sigTypeGo {
 			sb.WriteString("import \"unsafe\"\n")
 		}
-		sb.WriteString("func F(xs []int, n int) {\n")
+		sb.WriteString("func F(xs []int, n int")
+		if sigTypeGoto {
+			sb.WriteString(", _ [unsafe.Sizeof(func() { goto SL; SL: })]byte")
+		}
+		if sigTypeGo {
+			sb.WriteString(", _ [unsafe.Sizeof(func() { go func() {}() })]byte")
+		}
+		sb.WriteString(") {\n")
 
 		if emitDefer {
 			sb.WriteString("\tdefer func() {}()\n")
@@ -817,11 +829,20 @@ func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
 		} else {
 			sb.WriteString("\t_ = func() { defer func() {}() }\n")
 		}
+		if closureGo {
+			sb.WriteString("\t_ = func() { go func() {}() }\n")
+		}
 		if iifeGoto {
 			sb.WriteString("\tfunc() { goto IL; IL: }()\n")
 		}
+		if iifeGo {
+			sb.WriteString("\tfunc() { go func() {}() }()\n")
+		}
 		if typeExprGoto {
 			sb.WriteString("\tfor range xs { _ = [unsafe.Sizeof(func() { goto TL; TL: })]byte{} }\n")
+		}
+		if typeExprGo {
+			sb.WriteString("\tfor range xs { _ = [unsafe.Sizeof(func() { go func() {}() })]byte{} }\n")
 		}
 		if emitGoto {
 			sb.WriteString("\tgoto Target\nTarget:\n")
@@ -859,7 +880,7 @@ func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
 		b := LowerFunc(info, pkg, fd)
 		cachedB := NewPkgCache(info, pkg, []*ast.File{file}).FuncBody(fd)
 
-		var wantGoto, wantNestedGoto, wantLabel, wantFT, wantLabBr, wantDefer, wantGo bool
+		var wantGoto, wantNestedGoto, wantLabel, wantFT, wantLabBr, wantDefer, wantGo, wantNestedGo bool
 		var walkAST func(n ast.Node, inLit bool)
 		walkAST = func(n ast.Node, inLit bool) {
 			if n == nil {
@@ -885,7 +906,9 @@ func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
 					wantDefer = true
 				}
 			case *ast.GoStmt:
-				if !inLit {
+				if inLit {
+					wantNestedGo = true
+				} else {
 					wantGo = true
 				}
 			case *ast.BranchStmt:
@@ -911,13 +934,21 @@ func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
 				return false
 			})
 		}
+		if fd.Recv != nil {
+			walkAST(fd.Recv, false)
+		}
+		if fd.Type != nil {
+			walkAST(fd.Type, false)
+		}
 		walkAST(fd.Body, false)
 
 		for _, got := range []*Body{b, cachedB} {
 			if got.HasGoto != wantGoto || got.HasNestedGoto != wantNestedGoto ||
 				got.HasGotoAnywhere() != (wantGoto || wantNestedGoto) ||
+				got.HasGo != wantGo || got.HasNestedGo != wantNestedGo ||
+				got.HasGoAnywhere() != (wantGo || wantNestedGo) ||
 				got.HasLabel != wantLabel || got.HasFallthrough != wantFT ||
-				got.HasLabeledBranch != wantLabBr || got.HasDefer != wantDefer || got.HasGo != wantGo {
+				got.HasLabeledBranch != wantLabBr || got.HasDefer != wantDefer {
 				rt.Fatalf("oracle mismatch on:\n%s\ngot: %+v", sb.String(), got)
 			}
 		}
@@ -1044,11 +1075,25 @@ func Ops(in *Box[int]) int {
 		t.Fatal("PlaceEntersInterior(slice[0], true) = false, want true (container write beyond 1st hop)")
 	}
 
-	var syncCount, allCount int
+	var syncCount, allCount, nestedCount, pkgCount int
 	VisitSyncAndIIFEOps(opsBody, func(*Op) { syncCount++ })
 	VisitAllOps(opsBody, func(*Op) { allCount++ })
+	ForEachNestedOp(nil, nil, opsBody, opsBody, func(*types.Func, *ast.FuncLit, *Body, *Op) bool {
+		nestedCount++
+		return true
+	})
+	cache.ForEachOp(func(*types.Func, *ast.FuncLit, *Body, *Op) bool {
+		pkgCount++
+		return true
+	})
 	if allCount <= syncCount {
 		t.Fatalf("VisitAllOps (%d) should exceed VisitSyncAndIIFEOps (%d) due to uncalled closure", allCount, syncCount)
+	}
+	if nestedCount != allCount {
+		t.Fatalf("ForEachNestedOp (%d) != VisitAllOps (%d)", nestedCount, allCount)
+	}
+	if pkgCount <= nestedCount {
+		t.Fatalf("PkgCache.ForEachOp (%d) should exceed Ops nestedCount (%d) due to Counter.Inc + package inits", pkgCount, nestedCount)
 	}
 }
 
@@ -1112,6 +1157,28 @@ func LinkViaPromotedEmbeddedPtr() {
 	})
 	if litCount != 4 {
 		t.Fatalf("visited %d FuncLits, want 4", litCount)
+	}
+	// The outer FuncLit in NestedSig must carry HasNestedGoto on its own Body.
+	var outerNestedSigLit *ast.FuncLit
+	for _, decl := range file.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, sp := range gd.Specs {
+			if ts, ok := sp.(*ast.TypeSpec); ok && ts.Name.Name == "NestedSig" {
+				ast.Inspect(ts, func(n ast.Node) bool {
+					if fl, ok := n.(*ast.FuncLit); ok {
+						outerNestedSigLit = fl
+						return false
+					}
+					return true
+				})
+			}
+		}
+	}
+	if outerNestedSigLit == nil || !cache.LitBody(outerNestedSigLit).HasNestedGoto || !LowerFuncLit(info, pkg, outerNestedSigLit).HasNestedGoto {
+		t.Fatalf("outer FuncLit in NestedSig missing HasNestedGoto on its own Body: %+v", outerNestedSigLit)
 	}
 
 	localTypeGotoFD := findFuncDecl(t, file, "LocalTypeExprGoto")

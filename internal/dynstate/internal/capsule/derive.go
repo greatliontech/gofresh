@@ -1,7 +1,6 @@
 // Package capsule mechanically derives lazy once-initialized capsule types,
-// raw and sample-aligned immutable builder types, idempotent init-settled
-// builder clusters, non-mutating exported methods, and post-init carrier
-// immutability summaries across a package's syntax.
+// raw and sample-aligned immutable builder types, and idempotent init-settled
+// builder clusters across a package's syntax.
 package capsule
 
 import (
@@ -11,7 +10,7 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -30,7 +29,9 @@ func pkgTraceTarget(p *packages.Package) string {
 	return ""
 }
 
-func emitCapsuleReject(ctx context.Context, p *packages.Package, symbol, reason string, at ast.Node) {
+// EmitCapsuleReject emits a dynstate.capsule.reject trace event when
+// trace.DomainDynstate is enabled for p.
+func EmitCapsuleReject(ctx context.Context, p *packages.Package, symbol, reason string, at ast.Node) {
 	target := pkgTraceTarget(p)
 	if !trace.Enabled(ctx, trace.DomainDynstate, target) {
 		return
@@ -46,54 +47,57 @@ func emitCapsuleReject(ctx context.Context, p *packages.Package, symbol, reason 
 	)
 }
 
-// DeriveCapsuleAndStructFacts extracts init-settled builder clusters, builder
-// facts, lazy once-capsule facts, and non-exempted struct/interface mutation
-// summaries across p.Syntax.
-func DeriveCapsuleAndStructFacts(
+func emitCapsuleReject(ctx context.Context, p *packages.Package, symbol, reason string, at ast.Node) {
+	EmitCapsuleReject(ctx, p, symbol, reason, at)
+}
+
+// PackageFacts holds the capsule, builder, and init-settled cluster facts and
+// mutation exemptions derived for a single package. Higher-layer passes treat
+// its maps and slices as read-only inputs.
+type PackageFacts struct {
+	Clusters                []syntaxutil.InitSettledClusterFact
+	Builders                []syntaxutil.InitBuilderFact
+	Capsules                []syntaxutil.LazyOnceCapsuleType
+	CondMutations           []syntaxutil.ConditionalStructMutation
+	ClaimedVars             map[*types.Var]bool
+	ExemptNodes             map[ast.Node]bool
+	ExemptFamilyByFunc      map[*ast.FuncDecl]map[*types.Named]bool
+	ExemptReadFields        map[*types.Var]bool
+	ForeignReflectFields    map[*types.Var]bool
+	ClusterCapsuleElemTypes map[*types.Var][]*types.Named
+}
+
+// DerivePackageFacts derives init-settled builder clusters, builder facts, lazy
+// once-capsule facts, and capsule-scoped mutation exemptions across p.Syntax.
+func DerivePackageFacts(
 	audited bool,
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
 	initOnly map[string]bool,
 	mutatedVars map[string]bool,
 	extraExemptNodes map[ast.Node]bool,
-) (
-	[]syntaxutil.InitSettledClusterFact,
-	[]syntaxutil.InitBuilderFact,
-	[]syntaxutil.LazyOnceCapsuleType,
-	[]syntaxutil.TypeRef,
-	[]syntaxutil.ConditionalStructMutation,
-	[]syntaxutil.ReflectedIfaceFact,
-	map[*types.Var]bool,
-) {
-	return DeriveCapsuleAndStructFactsCtx(nil, audited, p, idx, freshCache, confinedCacheMaps, initOnly, mutatedVars, extraExemptNodes)
+) *PackageFacts {
+	return DerivePackageFactsCtx(nil, audited, p, idx, freshCache, confinedCacheMaps, initOnly, mutatedVars, extraExemptNodes)
 }
 
-// DeriveCapsuleAndStructFactsCtx derives init-settled clusters, builders, lazy
-// once-capsules, and struct/interface mutation facts with ctx-scoped
+// DerivePackageFactsCtx derives init-settled clusters, builders, lazy
+// once-capsules, and capsule-scoped mutation exemptions with ctx-scoped
 // trace.DomainDynstate provenance emission.
-func DeriveCapsuleAndStructFactsCtx(
+func DerivePackageFactsCtx(
 	ctx context.Context,
 	audited bool,
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
 	initOnly map[string]bool,
 	mutatedVars map[string]bool,
 	extraExemptNodes map[ast.Node]bool,
-) (
-	[]syntaxutil.InitSettledClusterFact,
-	[]syntaxutil.InitBuilderFact,
-	[]syntaxutil.LazyOnceCapsuleType,
-	[]syntaxutil.TypeRef,
-	[]syntaxutil.ConditionalStructMutation,
-	[]syntaxutil.ReflectedIfaceFact,
-	map[*types.Var]bool,
-) {
+) *PackageFacts {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
-		return nil, nil, nil, nil, nil, nil, nil
+		return &PackageFacts{}
 	}
 	if idx == nil {
 		idx = refconfine.BuildPkgIndex(p)
@@ -102,10 +106,10 @@ func DeriveCapsuleAndStructFactsCtx(
 		initOnly = idx.InitOnly
 	}
 	if freshCache == nil {
-		freshCache = freshstruct.NewFreshLocalsCache(p, idx)
+		freshCache = freshalloc.NewFreshLocalsCache(p, idx)
 	}
 	if confinedCacheMaps == nil {
-		confinedCacheMaps = freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+		confinedCacheMaps = freshalloc.FindMutexConfinedConstructorCaches(p, idx)
 	}
 	exempted := make(map[ast.Node]bool, len(extraExemptNodes))
 	for n, v := range extraExemptNodes {
@@ -113,60 +117,39 @@ func DeriveCapsuleAndStructFactsCtx(
 			exempted[n] = true
 		}
 	}
-	exemptFamilyByFunc := map[*ast.FuncDecl]map[*types.Named]bool{}
-	exemptReadFields := map[*types.Var]bool{}
-	foreignReflectFields := map[*types.Var]bool{}
-
-	var clusters []syntaxutil.InitSettledClusterFact
-	var claimedVars map[*types.Var]bool
-	var clusterCapsuleElemTypes map[*types.Var][]*types.Named
-	var builders []syntaxutil.InitBuilderFact
-	var capsules []syntaxutil.LazyOnceCapsuleType
-	var capConds []syntaxutil.ConditionalStructMutation
-
+	out := &PackageFacts{
+		ExemptNodes:          exempted,
+		ExemptFamilyByFunc:   map[*ast.FuncDecl]map[*types.Named]bool{},
+		ExemptReadFields:     map[*types.Var]bool{},
+		ForeignReflectFields: map[*types.Var]bool{},
+	}
 	if audited {
-		clusters, claimedVars, clusterCapsuleElemTypes = deriveInitSettledClusters(ctx, audited, p, idx, initOnly, exempted)
-		builders, capsules, capConds = deriveBuildersAndCapsules(ctx, p, idx, freshCache, confinedCacheMaps, mutatedVars, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields)
+		out.Clusters, out.ClaimedVars, out.ClusterCapsuleElemTypes = deriveInitSettledClusters(ctx, audited, p, idx, initOnly, out.ExemptNodes)
+		out.Builders, out.Capsules, out.CondMutations = deriveBuildersAndCapsules(
+			ctx, p, idx, freshCache, confinedCacheMaps, mutatedVars,
+			out.ExemptNodes, out.ExemptFamilyByFunc, out.ExemptReadFields, out.ForeignReflectFields,
+		)
 	}
-	mutatedStructs, condMutations, reflectedIfaces := freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(
-		ctx, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterCapsuleElemTypes,
-	)
-	if len(capsules) > 0 && freshstruct.PkgCastsUnsafePtrToMutatedStructCtx(ctx, p, idx, mutatedStructs, foreignReflectFields) {
-		for i := range capsules {
-			if capsules[i].CapsuleReflectSafe {
-				emitCapsuleReject(ctx, p, capsules[i].Type.Key(), "unsafe_ptr_cast_to_mutated_struct", nil)
-			}
-			capsules[i].CapsuleReflectSafe = false
-			capsules[i].SafePtrWrapperParams = nil
-			capsules[i].SafeAtomicPtrCopyFuncs = nil
-		}
+	return out
+}
+
+func addExemptStructInFunc(m map[*ast.FuncDecl]map[*types.Named]bool, fd *ast.FuncDecl, st *types.Named) {
+	if fd == nil || st == nil {
+		return
 	}
-	if len(capConds) > 0 {
-		seenCond := make(map[syntaxutil.ConditionalStructMutation]bool, len(condMutations)+len(capConds))
-		merged := make([]syntaxutil.ConditionalStructMutation, 0, len(condMutations)+len(capConds))
-		for _, cm := range condMutations {
-			if cm.Valid() && !seenCond[cm] {
-				seenCond[cm] = true
-				merged = append(merged, cm)
-			}
-		}
-		for _, cm := range capConds {
-			if cm.Valid() && !seenCond[cm] {
-				seenCond[cm] = true
-				merged = append(merged, cm)
-			}
-		}
-		slices.SortFunc(merged, syntaxutil.ConditionalStructMutation.Compare)
-		condMutations = merged
+	sub := m[fd]
+	if sub == nil {
+		sub = map[*types.Named]bool{}
+		m[fd] = sub
 	}
-	return clusters, builders, capsules, mutatedStructs, condMutations, reflectedIfaces, claimedVars
+	sub[st] = true
 }
 
 func deriveBuildersAndCapsules(
 	ctx context.Context,
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
 	mutatedVars map[string]bool,
 	exempted map[ast.Node]bool,
@@ -182,11 +165,11 @@ func deriveBuildersAndCapsules(
 	var candidates []candidate
 	for _, name := range p.Types.Scope().Names() {
 		tn, ok := p.Types.Scope().Lookup(name).(*types.TypeName)
-		if !ok || tn.IsAlias() {
+		if !ok || tn == nil || tn.IsAlias() {
 			continue
 		}
 		named, ok := tn.Type().(*types.Named)
-		if !ok {
+		if !ok || named == nil {
 			continue
 		}
 		st, ok := named.Underlying().(*types.Struct)
@@ -206,7 +189,7 @@ func deriveBuildersAndCapsules(
 	builderExempt := map[ast.Node]bool{}
 	builderHelperIdents := map[*ast.Ident]bool{}
 	if confinedCacheMaps == nil {
-		confinedCacheMaps = freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+		confinedCacheMaps = freshalloc.FindMutexConfinedConstructorCaches(p, idx)
 	}
 
 	for _, c := range candidates {
@@ -289,7 +272,7 @@ func deriveBuildersAndCapsules(
 	capsuleReflectSafe := false
 	if len(verifiedLockedRoots) > 0 {
 		rejectReason := ""
-		if freshstruct.PkgCanStepUnexportedReflectField(p, idx) {
+		if freshalloc.PkgCanStepUnexportedReflectField(p, idx) {
 			rejectReason = "step_unexported_reflect_field"
 		} else if pkgTakesUnsafeAddrOfMatchingIface(p, idx, verifiedLockedRoots, nil) {
 			rejectReason = "unsafe_addr_matching_iface"

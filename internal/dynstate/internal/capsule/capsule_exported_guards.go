@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -36,7 +36,7 @@ func isNilComparableType(t types.Type) bool {
 func deriveOnceExportedWriteGuardFields(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	rootNamed *types.Named,
 	family map[*types.Named]bool,
 	onceFn *types.Func,
@@ -48,7 +48,7 @@ func deriveOnceExportedWriteGuardFields(
 			return false
 		}
 		freshVars, freshEsc := freshCache.Get(fd)
-		if freshstruct.IsRootedAtFreshLocal(p, expr, freshVars, freshEsc) {
+		if freshalloc.IsRootedAtFreshLocal(p, expr, freshVars, freshEsc) {
 			return false
 		}
 		hitSt, fld := lhsRootFamilyField(p, expr, family)

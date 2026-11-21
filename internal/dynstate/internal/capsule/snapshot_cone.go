@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -101,7 +101,7 @@ func collectSnapshotGuardedValueFields(
 	builderFamily map[*types.Named]bool,
 	extraGuards map[syntaxutil.TypeRef]bool,
 	initAndBuildConeFDs map[*ast.FuncDecl]bool,
-	pf *freshstruct.PkgFreshConstructors,
+	pf *freshalloc.PkgFreshConstructors,
 ) (map[*types.Var]bool, []syntaxutil.ConditionalStructMutation) {
 	out := map[*types.Var]bool{}
 	condSet := map[syntaxutil.ConditionalStructMutation]bool{}
@@ -270,7 +270,7 @@ func collectSnapshotGuardedValueFields(
 func verifySnapshotValueConstructor(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	pf *freshstruct.PkgFreshConstructors,
+	pf *freshalloc.PkgFreshConstructors,
 	fd *ast.FuncDecl,
 	ownerNamed *types.Named,
 	extNamed *types.Named,

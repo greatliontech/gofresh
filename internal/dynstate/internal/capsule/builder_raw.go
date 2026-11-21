@@ -7,7 +7,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -587,7 +587,7 @@ func verifyRawCapsuleBuilderType(
 		return nil, nil, false
 	}
 
-	pf := freshstruct.ComputePackageFreshConstructors(p, idx, nil)
+	pf := freshalloc.ComputePackageFreshConstructors(p, idx, nil)
 	fastRootInitMethods := collectFastOnceWrapperMethods(p, idx, rootNamed, rootOnceFn, rootOnceField)
 
 	onceMutatedSubStructs := map[*types.Named]bool{}

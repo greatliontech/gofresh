@@ -618,3 +618,30 @@ func IsFreshStringSliceCopy(srcType, dstType types.Type) bool {
 	}
 	return (isStr(srcT) && isByteOrRuneSlice(dstT)) || (isByteOrRuneSlice(srcT) && isStr(dstT))
 }
+
+// IsOpaqueUnexportedForeignStruct reports whether named is an unexported
+// non-empty struct from a package other than curPkg with exclusively
+// non-embedded unexported fields and zero exported methods on *named.
+func IsOpaqueUnexportedForeignStruct(curPkg *types.Package, named *types.Named) bool {
+	if named == nil || named.Obj() == nil || named.Obj().Exported() ||
+		named.Obj().Pkg() == nil || named.Obj().Pkg() == curPkg {
+		return false
+	}
+	st, isSt := named.Underlying().(*types.Struct)
+	if !isSt || st.NumFields() == 0 {
+		return false
+	}
+	for i := 0; i < st.NumFields(); i++ {
+		f := st.Field(i)
+		if f.Exported() || f.Embedded() {
+			return false
+		}
+	}
+	mset := types.NewMethodSet(types.NewPointer(named))
+	for i := 0; i < mset.Len(); i++ {
+		if mset.At(i).Obj().Exported() {
+			return false
+		}
+	}
+	return true
+}

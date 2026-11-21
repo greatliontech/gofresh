@@ -6,7 +6,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -218,7 +218,7 @@ func matchLocalSyncOnceDoCallback(
 			if !isV || uv == nil || uv.IsField() || uv == reqCachedVar || innerDefs[uv] {
 				return true
 			}
-			if freshstruct.IdentReachesMutatedOrAddrPrefix(p, idx, sid) {
+			if freshalloc.IdentReachesMutatedOrAddrPrefix(p, idx, sid) {
 				outerMutated = true
 				return false
 			}
@@ -259,7 +259,7 @@ func matchLocalSyncOnceDoCallback(
 			writtenOuter[uv] = true
 			return true
 		}
-		if !allowCachedSubmut && freshstruct.IdentReachesMutatedOrAddrPrefix(p, idx, sid) {
+		if !allowCachedSubmut && freshalloc.IdentReachesMutatedOrAddrPrefix(p, idx, sid) {
 			badOuter = true
 			return false
 		}

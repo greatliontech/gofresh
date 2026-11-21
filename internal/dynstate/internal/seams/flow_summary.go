@@ -10,10 +10,10 @@ import (
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
-// AnalyzeCallGraph builds the intra-package and cross-package sequential and
+// analyzeCallGraph builds the intra-package and cross-package sequential and
 // parallel call/dataflow graph for package p.
-func AnalyzeCallGraph(p *packages.Package) CallGraph {
-	var out CallGraph
+func analyzeCallGraph(p *packages.Package) callGraph {
+	var out callGraph
 	if p == nil || p.TypesInfo == nil {
 		return out
 	}

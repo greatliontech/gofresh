@@ -7,7 +7,7 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -29,7 +29,7 @@ func verifyRawBuilderConfinementAndGuards(
 	enclosingOnceBlock func(ast.Node) (*ast.BlockStmt, *types.Named, bool),
 	exempt map[ast.Node]bool,
 	exemptReadFields map[*types.Var]bool,
-	pf *freshstruct.PkgFreshConstructors,
+	pf *freshalloc.PkgFreshConstructors,
 ) ([]syntaxutil.TypeRef, bool) {
 	nonSnapshotExtraGuards := map[syntaxutil.TypeRef]bool{}
 	seenNonSnap := map[types.Type]bool{}

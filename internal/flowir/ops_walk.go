@@ -1,6 +1,7 @@
 package flowir
 
 import (
+	"go/ast"
 	"go/types"
 
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
@@ -370,4 +371,101 @@ func BodyMentionsVar(b *Body, target *types.Var) bool {
 		return false
 	}
 	return bodyMentionsMatch(b, func(cand *types.Var) bool { return cand == target })
+}
+
+// ForEachNestedOp visits every operation in curBody and recursively descends
+// into nested ValMakeClosure, CallIIFE, and RangeBody bodies, passing the
+// enclosing *types.Func (for top-level FuncDecls), *ast.FuncLit (for closures
+// and IIFEs), and enclosing declaration/closure *Body, stopping early when
+// visit returns false.
+func ForEachNestedOp(
+	fn *types.Func,
+	fl *ast.FuncLit,
+	declBody *Body,
+	curBody *Body,
+	visit func(enclFn *types.Func, enclLit *ast.FuncLit, enclDeclBody *Body, op *Op) bool,
+) bool {
+	if curBody == nil || visit == nil {
+		return true
+	}
+	if declBody == nil {
+		declBody = curBody
+	}
+	for i := range curBody.Ops {
+		op := &curBody.Ops[i]
+		if !visit(fn, fl, declBody, op) {
+			return false
+		}
+		stop := false
+		op.ForEachValue(func(root *Value) bool {
+			root.WalkValues(func(v *Value) bool {
+				if stop || v == nil {
+					return false
+				}
+				switch v.Kind {
+				case ValMakeClosure:
+					if v.Closure != nil && !ForEachNestedOp(nil, v.Lit, v.Closure, v.Closure, visit) {
+						stop = true
+						return false
+					}
+				case ValCall:
+					if v.CallKind == CallIIFE && v.IIFE != nil {
+						var iifeLit *ast.FuncLit
+						if v.CallAST != nil {
+							iifeLit, _ = syntaxutil.UnparenExpr(v.CallAST.Fun).(*ast.FuncLit)
+						}
+						if !ForEachNestedOp(nil, iifeLit, v.IIFE, v.IIFE, visit) {
+							stop = true
+							return false
+						}
+					}
+				}
+				return true
+			})
+			return !stop
+		})
+		if stop {
+			return false
+		}
+		if op.Kind == OpAssign && op.AssignKind == AssignRange && op.RangeBody != nil {
+			if !ForEachNestedOp(fn, fl, declBody, op.RangeBody, visit) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// ForEachOp visits every operation across all lowered FuncDecls and GenDecls in
+// c (descending into closures, IIFEs, and range loops via ForEachNestedOp),
+// stopping early when visit returns false.
+func (c *PkgCache) ForEachOp(
+	visit func(enclFn *types.Func, enclLit *ast.FuncLit, enclDeclBody *Body, op *Op) bool,
+) bool {
+	if c == nil || c.Info == nil || visit == nil {
+		return true
+	}
+	for _, fd := range c.FuncDecls {
+		if fd == nil || fd.Body == nil {
+			continue
+		}
+		var fn *types.Func
+		if fd.Name != nil {
+			fn, _ = c.Info.Defs[fd.Name].(*types.Func)
+		}
+		b := c.FuncBody(fd)
+		if !ForEachNestedOp(fn, nil, b, b, visit) {
+			return false
+		}
+	}
+	for _, gd := range c.GenDecls {
+		if gd == nil {
+			continue
+		}
+		b := c.Body(gd)
+		if !ForEachNestedOp(nil, nil, b, b, visit) {
+			return false
+		}
+	}
+	return true
 }

@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshalloc"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
@@ -192,7 +192,7 @@ func verifyLockedOnceCapsuleType(
 	ctx context.Context,
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	freshCache *freshstruct.FreshLocalsCache,
+	freshCache *freshalloc.FreshLocalsCache,
 	ownerRef syntaxutil.TypeRef,
 	named *types.Named,
 	st *types.Struct,
