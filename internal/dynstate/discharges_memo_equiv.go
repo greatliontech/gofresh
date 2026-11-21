@@ -166,7 +166,7 @@ func verifyMemoGetOrComputeEquivalence(
 
 	errSlot := -1
 	for ri := 0; ri < memoSig.Results().Len(); ri++ {
-		if isUniverseErrorType(memoSig.Results().At(ri).Type()) {
+		if syntaxutil.IsErrorType(memoSig.Results().At(ri).Type()) {
 			if errSlot != -1 {
 				return false, "multiple error result slots"
 			}

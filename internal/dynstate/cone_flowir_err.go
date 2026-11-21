@@ -31,7 +31,7 @@ func verifyFlowIRErrorOrigins(
 	if p == nil || p.Types == nil || p.TypesInfo == nil || rootSig == nil || rootBody == nil {
 		return false
 	}
-	if cfg.allowReflectTypeValues && !isTrueStdlibInPkg(p, "reflect") {
+	if cfg.allowReflectTypeValues && !syntaxutil.IsTrueStdlibInPkg(p, "reflect") {
 		cfg.allowReflectTypeValues = false
 	}
 
@@ -53,7 +53,7 @@ func verifyFlowIRErrorOrigins(
 		pv := rootSig.Params().At(i)
 		rootParams[pv] = true
 		pt := pv.Type()
-		if cfg.allowRootErrParams && isUniverseErrorType(pt) {
+		if cfg.allowRootErrParams && syntaxutil.IsErrorType(pt) {
 			continue
 		}
 		if paramDisallowed(pt) {
@@ -80,7 +80,7 @@ func verifyFlowIRErrorOrigins(
 		}
 		for i := 0; i < sig.Results().Len(); i++ {
 			rt := sig.Results().At(i).Type()
-			if refconfine.TypeMayCarryUnknownDynamic(true, rt) && !isUniverseErrorType(rt) {
+			if refconfine.TypeMayCarryUnknownDynamic(true, rt) && !syntaxutil.IsErrorType(rt) {
 				return false
 			}
 		}
@@ -99,7 +99,7 @@ func verifyFlowIRErrorOrigins(
 		}
 		for i := 0; i < sig.Results().Len(); i++ {
 			rt := sig.Results().At(i).Type()
-			if refconfine.TypeMayCarryUnknownDynamic(true, rt) && !isUniverseErrorType(rt) {
+			if refconfine.TypeMayCarryUnknownDynamic(true, rt) && !syntaxutil.IsErrorType(rt) {
 				return false
 			}
 		}
@@ -144,7 +144,7 @@ func verifyFlowIRErrorOrigins(
 				return false
 			}
 			lv := v.Place.Obj
-			if !isUniverseErrorType(lv.Type()) {
+			if !syntaxutil.IsErrorType(lv.Type()) {
 				return false
 			}
 			if rootParams[lv] {
@@ -154,11 +154,11 @@ func verifyFlowIRErrorOrigins(
 
 		case flowir.ValCall:
 			if csig := resolveVerifiedConeCallSig(v); csig != nil {
-				return csig.Results().Len() == 1 && isUniverseErrorType(csig.Results().At(0).Type())
+				return csig.Results().Len() == 1 && syntaxutil.IsErrorType(csig.Results().At(0).Type())
 			}
 			if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil && v.CalleeFunc.Pkg() != nil {
 				pkgPath := v.CalleeFunc.Pkg().Path()
-				if !isTrueStdlibInPkg(p, pkgPath) {
+				if !syntaxutil.IsTrueStdlibInPkg(p, pkgPath) {
 					return false
 				}
 				if pkgPath == "errors" && v.CalleeFunc.Name() == "New" && len(v.Args) == 1 && !v.Ellipsis {
@@ -175,13 +175,13 @@ func verifyFlowIRErrorOrigins(
 	}
 
 	checkErrorSlot := func(lhsT types.Type, slotIdx int, rhs *flowir.Value, multiCall bool) bool {
-		if !isUniverseErrorType(lhsT) {
+		if !syntaxutil.IsErrorType(lhsT) {
 			return true
 		}
 		if multiCall {
 			csig := resolveVerifiedConeCallSig(rhs)
 			return csig != nil && slotIdx >= 0 && slotIdx < csig.Results().Len() &&
-				isUniverseErrorType(csig.Results().At(slotIdx).Type())
+				syntaxutil.IsErrorType(csig.Results().At(slotIdx).Type())
 		}
 		return isPureErrorValue(rhs, 0)
 	}
@@ -203,13 +203,13 @@ func verifyFlowIRErrorOrigins(
 				}
 				switch cur.Kind {
 				case flowir.ValAddrOf:
-					if isUniverseErrorType(cur.AddrPlace.Type) {
+					if syntaxutil.IsErrorType(cur.AddrPlace.Type) {
 						okScope = false
 						return false
 					}
 				case flowir.ValCall:
 					if cur.CallKind == flowir.CallBuiltin && cur.BuiltinName == "panic" &&
-						len(cur.Args) == 1 && cur.Args[0] != nil && isUniverseErrorType(cur.Args[0].Type) {
+						len(cur.Args) == 1 && cur.Args[0] != nil && syntaxutil.IsErrorType(cur.Args[0].Type) {
 						if !isPureErrorValue(cur.Args[0], 0) {
 							okScope = false
 							return false
@@ -217,7 +217,7 @@ func verifyFlowIRErrorOrigins(
 						return true
 					}
 					if cur.CallKind == flowir.CallMethod && cur.Selection != nil && types.IsInterface(cur.Selection.Recv()) {
-						if isUniverseErrorType(cur.Selection.Recv()) {
+						if syntaxutil.IsErrorType(cur.Selection.Recv()) {
 							if cur.CalleeFunc == nil || cur.CalleeFunc.Name() != "Error" ||
 								len(cur.Args) != 0 || cur.Ellipsis || !isPureErrorValue(cur.Recv, 0) {
 								okScope = false
@@ -265,7 +265,7 @@ func verifyFlowIRErrorOrigins(
 								pt = sl.Elem()
 							}
 							if typeReachesUniverseError(pt) {
-								if !isUniverseErrorType(pt) || !checkErrorSlot(pt, paramIdx, arg, false) {
+								if !syntaxutil.IsErrorType(pt) || !checkErrorSlot(pt, paramIdx, arg, false) {
 									okScope = false
 									return false
 								}
@@ -276,7 +276,7 @@ func verifyFlowIRErrorOrigins(
 					}
 					if cur.CallKind == flowir.CallPlain && !cur.IsMethodExprCall && cur.CalleeFunc != nil &&
 						cur.CalleeFunc.Pkg() != nil && cur.CalleeFunc.Pkg().Path() == "fmt" &&
-						isTrueStdlibInPkg(p, "fmt") && cur.CalleeFunc.Name() == "Errorf" {
+						syntaxutil.IsTrueStdlibInPkg(p, "fmt") && cur.CalleeFunc.Name() == "Errorf" {
 						if cur.Ellipsis || len(cur.Args) == 0 ||
 							!verifyPureFmtFormatArgsFlowIR(p, cur.Args[0], cur.Args[1:], true, cfg.allowReflectTypeValues, func(arg *flowir.Value) bool {
 								return isPureErrorValue(arg, 0)
@@ -296,7 +296,7 @@ func verifyFlowIRErrorOrigins(
 			}
 			switch op.Kind {
 			case flowir.OpTypeSwitchBind:
-				if op.SwitchDst != nil && isUniverseErrorType(op.SwitchDst.Type()) {
+				if op.SwitchDst != nil && syntaxutil.IsErrorType(op.SwitchDst.Type()) {
 					okScope = false
 					return false
 				}
@@ -354,7 +354,7 @@ func verifyFlowIRErrorOrigins(
 				case flowir.AssignZeroDecl:
 				case flowir.AssignRange:
 					for _, dst := range op.Dsts {
-						if isUniverseErrorType(dst.Type) {
+						if syntaxutil.IsErrorType(dst.Type) {
 							okScope = false
 							return false
 						}
@@ -369,7 +369,7 @@ func verifyFlowIRErrorOrigins(
 				case flowir.AssignMulti:
 					if len(op.Srcs) != 1 {
 						for _, dst := range op.Dsts {
-							if isUniverseErrorType(dst.Type) {
+							if syntaxutil.IsErrorType(dst.Type) {
 								okScope = false
 								return false
 							}
@@ -384,7 +384,7 @@ func verifyFlowIRErrorOrigins(
 					}
 				default:
 					for _, dst := range op.Dsts {
-						if isUniverseErrorType(dst.Type) {
+						if syntaxutil.IsErrorType(dst.Type) {
 							okScope = false
 							return false
 						}

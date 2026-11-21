@@ -11,17 +11,44 @@ import (
 
 // valuePurityPolicy parameterizes the shared *flowir.Value purity and freshness
 // classifier so callers across registration confinement, return freshness,
-// once-field initialization, and memoizer input checking evaluate one structural
-// tree walker without Raw AST back-edges.
+// once-field initialization, local fresh-allocation fixed points, and memoizer
+// input checking evaluate one structural tree walker without Raw AST back-edges.
 type valuePurityPolicy struct {
-	allowVar             func(*types.Var) bool
-	allowPlace           func(*flowir.Value) bool
-	allowAppend          bool
-	allowValuePlane      bool
-	allowRuntimeOps      bool
-	allowTypeAssert      bool
-	allowNonMutableReach bool
-	allowSigLeaf         func(*flowir.Value) bool
+	allowVar                func(*types.Var) bool
+	allowPlace              func(*flowir.Value) bool
+	allowAppend             bool
+	allowValuePlane         bool
+	allowRuntimeOps         bool
+	allowTypeAssert         bool
+	allowNonMutableReach    bool
+	allowSigLeaf            func(*flowir.Value) bool
+	allowSyncNoCopy         bool
+	ignoreSizeAndIndexArgs  bool
+	preserveAppendBasePlace bool
+	skipContainerElems      bool
+	allocTypeOK             func(types.Type) bool
+	convertOK               func(*flowir.Value) bool
+	elemOK                  func(*flowir.Value) bool
+}
+
+func typeHandsOutReachOrAddr(t types.Type) bool {
+	return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t)
+}
+
+func containerElemHandsOutReach(t types.Type) bool {
+	if t == nil {
+		return true
+	}
+	switch u := types.Unalias(t).Underlying().(type) {
+	case *types.Slice:
+		return typeHandsOutReachOrAddr(u.Elem())
+	case *types.Array:
+		return typeHandsOutReachOrAddr(u.Elem())
+	case *types.Map:
+		return typeHandsOutReachOrAddr(u.Key()) || typeHandsOutReachOrAddr(u.Elem())
+	default:
+		return true
+	}
 }
 
 func isPureFreshDataValue(settledGlobals settledGlobalMap, v *flowir.Value) bool {
@@ -45,19 +72,16 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 	if v == nil || v.IsTypeExpr || v.Type == nil {
 		return false
 	}
-	if refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
+	if !pol.allowSyncNoCopy && refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
 		return false
 	}
 	if pol.allowNonMutableReach {
-		if !refconfine.TypeHandsOutMutableReach(v.Type) &&
-			!syntaxutil.ContainsUintptr(v.Type) {
+		if !typeHandsOutReachOrAddr(v.Type) {
 			if refconfine.TypeCarriesSignature(v.Type) {
 				return pol.allowSigLeaf != nil && pol.allowSigLeaf(v)
 			}
 			return true
 		}
-	} else if refconfine.TypeCarriesSignature(v.Type) {
-		return false
 	}
 	if v.IsConst || v.IsNil {
 		return true
@@ -79,8 +103,14 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 		return false
 
 	case flowir.ValAllocFresh:
+		if pol.allocTypeOK != nil && !pol.allocTypeOK(v.Type) {
+			return false
+		}
 		switch v.AllocKind {
 		case flowir.AllocMake:
+			if pol.ignoreSizeAndIndexArgs {
+				return true
+			}
 			for _, a := range v.Args {
 				if !checkPureOrFreshValue(a, pol) {
 					return false
@@ -90,20 +120,35 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 		case flowir.AllocBuiltinNewType:
 			return true
 		case flowir.AllocBuiltinNewExpr:
-			return len(v.Args) == 1 && !v.Ellipsis && checkPureOrFreshValue(v.Args[0], pol)
-		case flowir.AllocCompositeLit:
-			if v.ElemType == nil || (!pol.allowNonMutableReach && refconfine.TypeCarriesSignature(v.ElemType)) || refconfine.TypeReachesSyncNoCopyByValue(v.ElemType) {
+			if len(v.Args) != 1 || v.Ellipsis {
 				return false
+			}
+			if pol.elemOK != nil {
+				return pol.elemOK(v.Args[0])
+			}
+			return checkPureOrFreshValue(v.Args[0], pol)
+		case flowir.AllocCompositeLit:
+			if v.ElemType == nil ||
+				(!pol.allowNonMutableReach && !pol.skipContainerElems && refconfine.TypeCarriesSignature(v.ElemType)) ||
+				(!pol.allowSyncNoCopy && refconfine.TypeReachesSyncNoCopyByValue(v.ElemType)) {
+				return false
+			}
+			if pol.skipContainerElems {
+				return true
+			}
+			checkElem := pol.elemOK
+			if checkElem == nil {
+				checkElem = func(el *flowir.Value) bool { return checkPureOrFreshValue(el, pol) }
 			}
 			for i := range v.CompositeElts {
 				elt := &v.CompositeElts[i]
-				if elt.MapKey != nil && !checkPureOrFreshValue(elt.MapKey, pol) {
+				if elt.MapKey != nil && !checkElem(elt.MapKey) {
 					return false
 				}
-				if elt.Index != nil && !checkPureOrFreshValue(elt.Index, pol) {
+				if !pol.ignoreSizeAndIndexArgs && elt.Index != nil && !checkPureOrFreshValue(elt.Index, pol) {
 					return false
 				}
-				if !checkPureOrFreshValue(elt.Value, pol) {
+				if !checkElem(elt.Value) {
 					return false
 				}
 			}
@@ -113,10 +158,17 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 		}
 
 	case flowir.ValConvert:
-		if v.Arg == nil || syntaxutil.IsUnsafePointerType(v.Type) || syntaxutil.IsUnsafePointerType(v.Arg.Type) {
+		if v.Arg == nil {
 			return false
 		}
 		if v.IsTypeAssert && !pol.allowTypeAssert {
+			return false
+		}
+		if pol.convertOK != nil {
+			if !pol.convertOK(v) {
+				return false
+			}
+		} else if syntaxutil.IsUnsafePointerType(v.Type) || syntaxutil.IsUnsafePointerType(v.Arg.Type) {
 			return false
 		}
 		return checkPureOrFreshValue(v.Arg, pol)
@@ -149,16 +201,33 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 			case "Sizeof", "Alignof", "Offsetof":
 				return true
 			case "append":
-				if !pol.allowAppend || len(v.Args) == 0 {
+				if !pol.allowAppend || len(v.Args) == 0 || v.Args[0] == nil {
 					return false
 				}
-				// Appending onto a variable-backed slice could mutate its spare capacity;
+				// Unless preserveAppendBasePlace is set (local fresh-allocation GFPs),
+				// appending onto a variable-backed slice could mutate its spare capacity;
 				// require a variable-free fresh base expression for append.
 				basePol := pol
-				basePol.allowVar = nil
-				basePol.allowPlace = nil
+				if !pol.preserveAppendBasePlace {
+					basePol.allowVar = nil
+					basePol.allowPlace = nil
+				}
 				if !checkPureOrFreshValue(v.Args[0], basePol) {
 					return false
+				}
+				if pol.skipContainerElems {
+					return true
+				}
+				if pol.elemOK != nil {
+					if v.Ellipsis {
+						return len(v.Args) == 2 && pol.elemOK(v.Args[1])
+					}
+					for _, a := range v.Args[1:] {
+						if !pol.elemOK(a) {
+							return false
+						}
+					}
+					return true
 				}
 				for _, a := range v.Args[1:] {
 					if !checkPureOrFreshValue(a, pol) {

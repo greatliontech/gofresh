@@ -781,5 +781,3 @@ func MutateIndirectBareSlice() {
 		}
 	}
 }
-
-

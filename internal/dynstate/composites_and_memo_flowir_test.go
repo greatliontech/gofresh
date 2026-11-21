@@ -7369,38 +7369,76 @@ func Use() (int, error) { return GlobalIndex.Sum() }
 			t.Fatalf("clean OnceMemo failed: types=%+v cands=%+v", fClean.OnceMemoTypes, fClean.OnceMemoCandidates)
 		}
 
+		aliasInputCleanSrc := strings.Replace(
+			strings.Replace(
+				strings.Replace(cleanOnceSrc,
+					"once sync.Once",
+					"prefix string\n\tonce sync.Once", 1),
+				"return &Index{}",
+				"return &Index{prefix: \"p\"}", 1),
+			"d, err := ix.Load()",
+			"alias := ix\n\t_ = alias.prefix\n\td, err := ix.Load()", 1)
+		pAliasClean := mustTypecheckPackage(t, "example.com/oncememo", map[string]string{"once.go": aliasInputCleanSrc})
+		fAliasClean := FactOf(true, pAliasClean)
+		if len(fAliasClean.OnceMemoTypes) != 1 || len(fAliasClean.OnceMemoCandidates) != 1 {
+			t.Fatalf("clean OnceMemo with single-def recv alias IIFE input read failed: types=%+v cands=%+v", fAliasClean.OnceMemoTypes, fAliasClean.OnceMemoCandidates)
+		}
+
 		for _, neg := range []struct {
-			name string
-			src  string
+			name       string
+			src        string
+			wantDetail string
 		}{
 			{
 				name: "map_range_inside_once_do_compute_cone",
 				src: strings.Replace(cleanOnceSrc,
 					"return d, errors.New(\"empty\")",
 					"sum := 0\n\tfor _, v := range d.byID { sum += v }\n\t_ = sum\n\treturn d, errors.New(\"empty\")", 1),
+				wantDetail: "compute_cone_rejected",
 			},
 			{
 				name: "array_wrapped_pointer_compare_in_once_do",
 				src: strings.Replace(cleanOnceSrc,
 					"return d, errors.New(\"empty\")",
 					"type node struct{ x int }\n\tp1, p2 := &node{}, &node{}\n\tif [1]*node{p1} == [1]*node{p2} { return d, nil }\n\treturn d, errors.New(\"empty\")", 1),
+				wantDetail: "compute_cone_rejected",
 			},
 			{
 				name: "switch_pointer_compare_in_sibling_method",
 				src: strings.Replace(cleanOnceSrc,
 					"total := 0",
 					"type node struct{ x int }\n\tp1, p2 := &node{}, &node{}\n\tswitch p1 { case p2: return 0, nil }\n\ttotal := 0", 1),
+				wantDetail: "sibling_method_rejected:Sum",
 			},
 			{
 				name: "unexported_struct_ptr_field_addr_marks_guard_struct",
 				src: strings.Replace(cleanOnceSrc,
 					"byID  map[string]int",
 					"byID  map[string]int\n\tsub   *DocSub", 1) + "\ntype DocSub struct{ N int }\nfunc sinkSub(**DocSub) {}\nfunc ClobberSub(d *DocData) { sinkSub(&d.sub) }\n",
+				wantDetail: "result_closure_rejected",
+			},
+			{
+				name: "sibling_iife_recv_alias_memo_read_bypasses_once_do",
+				src: strings.Replace(cleanOnceSrc,
+					"d, err := ix.Load()",
+					"alias := ix\n\tfunc() { _ = alias.doc }()\n\td, err := ix.Load()", 1),
+				wantDetail: "getter_memo_field_uses",
+			},
+			{
+				name: "sibling_iife_recv_alias_bare_escape",
+				src: strings.Replace(cleanOnceSrc,
+					"d, err := ix.Load()",
+					"alias := ix\n\tfunc() { var x any = alias; _ = x }()\n\td, err := ix.Load()", 1),
+				wantDetail: "recv_confinement_rejected:Sum",
 			},
 		} {
 			t.Run(neg.name, func(t *testing.T) {
 				p := mustTypecheckPackage(t, "example.com/oncememo", map[string]string{"once.go": neg.src})
-				f := FactOf(true, p)
+				rec := trace.NewRecorder()
+				baseCtx, cancel := context.WithCancel(context.Background())
+				ctx := trace.WithFilteredSink(baseCtx, "dynstate", rec)
+				defer cancel()
+				f := FactOfCtx(ctx, true, p)
 				if neg.name == "unexported_struct_ptr_field_addr_marks_guard_struct" {
 					if !slices.Contains(f.MutatedStructTypes, syntaxutil.TypeRef{Pkg: "example.com/oncememo", Name: "DocData"}) {
 						t.Fatalf("expected DocData in MutatedStructTypes on &d.sub, got %+v", f.MutatedStructTypes)
@@ -7409,8 +7447,73 @@ func Use() (int, error) { return GlobalIndex.Sum() }
 				if len(f.OnceMemoTypes) != 0 {
 					t.Fatalf("%s unexpectedly admitted OnceMemoTypes: %+v", neg.name, f.OnceMemoTypes)
 				}
+				matchedDetail := false
+				for _, ev := range rec.ByName("dynstate.discharge.reject") {
+					var kind, sym, detail string
+					for _, fld := range ev.Fields {
+						switch fld.Key {
+						case "kind":
+							kind = fld.Str
+						case "symbol":
+							sym = fld.Str
+						case "detail":
+							detail = fld.Str
+						}
+					}
+					if kind == "once_memo_type" && sym == "example.com/oncememo.Index" && detail == neg.wantDetail {
+						matchedDetail = true
+						break
+					}
+				}
+				if !matchedDetail {
+					t.Fatalf("%s: missing once_memo_type reject detail %q in trace events %+v", neg.name, neg.wantDetail, rec.ByName("dynstate.discharge.reject"))
+				}
 			})
 		}
+
+		t.Run("ctor_arg_make_func_slice_rejected_from_once_memo_candidates", func(t *testing.T) {
+			candSrc := `package oncememo
+import "sync"
+type CarrierMemo struct {
+	once sync.Once
+	err  error
+}
+func NewCarrierMemo(fns []func() int) *CarrierMemo { _ = fns; return &CarrierMemo{} }
+func (m *CarrierMemo) Get() error { return m.err }
+var BadCand = NewCarrierMemo(make([]func() int, 1))
+func ReadCand() error { return BadCand.Get() }
+`
+			p := mustTypecheckPackage(t, "example.com/oncememo", map[string]string{"cand.go": candSrc})
+			rec := trace.NewRecorder()
+			baseCtx, cancel := context.WithCancel(context.Background())
+			ctx := trace.WithFilteredSink(baseCtx, "dynstate", rec)
+			defer cancel()
+			f := FactOfCtx(ctx, true, p)
+			if len(f.OnceMemoCandidates) != 0 {
+				t.Fatalf("OnceMemoCandidates unexpectedly admitted signature-carrying make([]func() int, 1) ctor arg: %+v", f.OnceMemoCandidates)
+			}
+			sawCtorArgReject := false
+			for _, ev := range rec.ByName("dynstate.discharge.reject") {
+				var kind, sym, reason string
+				for _, fld := range ev.Fields {
+					switch fld.Key {
+					case "kind":
+						kind = fld.Str
+					case "symbol":
+						sym = fld.Str
+					case "reason":
+						reason = fld.Str
+					}
+				}
+				if kind == "once_memo_var" && sym == "example.com/oncememo.BadCand" && reason == "ctor_arg_rejected" {
+					sawCtorArgReject = true
+					break
+				}
+			}
+			if !sawCtorArgReject {
+				t.Fatalf("missing once_memo_var ctor_arg_rejected trace event; got %+v", rec.ByName("dynstate.discharge.reject"))
+			}
+		})
 	})
 
 	t.Run("mapping_discharges_lock_regions_and_syscall_leaf_coupling", func(t *testing.T) {
@@ -9878,15 +9981,15 @@ func ReadSchemaName() string {
 	})
 
 	type negConeCase struct {
-		name           string
-		mutatePkg      string
-		oldSnippet     string
-		newSnippet     string
-		extraSnippet   string
-		wantEvent      string
-		wantKind       string
-		wantSymbol     string
-		wantReason     string
+		name         string
+		mutatePkg    string
+		oldSnippet   string
+		newSnippet   string
+		extraSnippet string
+		wantEvent    string
+		wantKind     string
+		wantSymbol   string
+		wantReason   string
 	}
 
 	negCases := []negConeCase{

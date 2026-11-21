@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 

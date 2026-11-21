@@ -45,11 +45,6 @@ func deriveMemoDischarges(ctx context.Context, audited bool, p *packages.Package
 	return out
 }
 
-func verifyMemoVar(audited bool, p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, mapVar *types.Var) bool {
-	ok, _ := verifyMemoVarWithReason(audited, p, fc, idx, mapVar)
-	return ok
-}
-
 func verifyMemoVarWithReason(audited bool, p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, mapVar *types.Var) (bool, string) {
 	if mapVar == nil {
 		return false, "not map[reflect.Type]..."
@@ -102,7 +97,7 @@ func verifyMemoVarWithReason(audited bool, p *packages.Package, fc *pkgFlowCache
 	needsErrorProof := false
 	for ri := 0; ri < memoSig.Results().Len(); ri++ {
 		rt := memoSig.Results().At(ri).Type()
-		if isUniverseErrorType(rt) {
+		if syntaxutil.IsErrorType(rt) {
 			needsErrorProof = true
 			continue
 		}
@@ -251,7 +246,7 @@ func verifyHelperReturnsFreshNonNilInfo(
 		return false
 	}
 	hasErr := sig.Results().Len() == 2
-	if hasErr && !isUniverseErrorType(sig.Results().At(1).Type()) {
+	if hasErr && !syntaxutil.IsErrorType(sig.Results().At(1).Type()) {
 		return false
 	}
 	b := fc.funcBody(p, fd)
@@ -869,7 +864,7 @@ func isPureReflectTypeDerivationFlowIR(p *packages.Package, val *flowir.Value) b
 		case flowir.ValCall:
 			if cur.CallKind == flowir.CallIIFE || cur.CallKind == flowir.CallIndirect || cur.IsMethodExprCall ||
 				cur.CalleeFunc == nil || cur.CalleeFunc.Pkg() == nil || cur.CalleeFunc.Pkg().Path() != "reflect" ||
-				!isTrueStdlibInPkg(p, "reflect") {
+				!syntaxutil.IsTrueStdlibInPkg(p, "reflect") {
 				valid = false
 				return false
 			}

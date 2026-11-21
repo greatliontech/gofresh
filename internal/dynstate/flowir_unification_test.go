@@ -502,9 +502,16 @@ func TestUnifiedValueClassifierStoresAndReturnsEdgeCases(t *testing.T) {
 	pkg := mustTypecheckPackage(t, "example.com/valclass", map[string]string{
 		"val.go": `package valclass
 
-import "unsafe"
+import (
+	"sync"
+	"unsafe"
+)
 
 func pureTopFn() int { return 42 }
+
+type fnHolder struct {
+	fn func() int
+}
 
 func makeDirty() func() int {
 	c := 0
@@ -515,12 +522,18 @@ var (
 	singleCleanFn      = func() int { return 7 }
 	DerivedSingleClean = func() int { return singleCleanFn() }
 
-	ShadowedNilHook   func() int
-	UnsafeFuncPtrHook *func() int
-	IIFEDirtyHook     func() int
-	IIFEParamHook     func() int
-	IIFECleanHook     func() int
+	ShadowedNilHook          func() int
+	UnsafeFuncPtrHook        *func() int
+	IIFEDirtyHook            func() int
+	IIFEParamHook            func() int
+	IIFECleanHook            func() int
+	SmuggledLocalClosureHook func() int
+	AliasedSliceMutatedHook  func() int
+	AliasedCleanSliceHook    func() int
+	UnconfinedParamHook      func() int
 )
+
+func mutateSliceElem(s []int) { s[0] = 99 }
 
 func init() {
 	nil := makeDirty()
@@ -529,6 +542,27 @@ func init() {
 	dirtyLocal := makeDirty()
 	raw := unsafe.Pointer(&dirtyLocal)
 	UnsafeFuncPtrHook = (*func() int)(raw)
+
+	smuggledCount := 0
+	var localDirtyBox interface{} = fnHolder{fn: func() int { smuggledCount++; return smuggledCount }}
+	SmuggledLocalClosureHook = func() int {
+		_ = localDirtyBox
+		return 1
+	}
+
+	aliasedBuf := []int{1}
+	bufAlias := aliasedBuf
+	AliasedSliceMutatedHook = func() int { return aliasedBuf[0] }
+	bufAlias[0] = 2
+
+	cleanBuf := []int{7}
+	cleanAlias := cleanBuf
+	_ = cleanAlias
+	AliasedCleanSliceHook = func() int { return cleanBuf[0] }
+
+	unconfinedBuf := []int{1}
+	mutateSliceElem(unconfinedBuf)
+	UnconfinedParamHook = func() int { return unconfinedBuf[0] }
 
 	(func() {
 		IIFEDirtyHook = makeDirty()
@@ -551,8 +585,29 @@ func SmuggleFromUnsafePointerParam(p unsafe.Pointer) func() int {
 	return makePtrReader((*int)(p))
 }
 
+func wrapSliceReader(s []int) func() int {
+	return func() int { return s[0] }
+}
+
+func SmuggleAppendSpareCap(paramSlice []int) func() int {
+	return wrapSliceReader(append(paramSlice, 99))
+}
+
 func AppendNilFuncBaseClean() []func() int {
 	return append([]func() int(nil), pureTopFn)
+}
+
+func BuildSizedFuncSlice(n int) []func() int {
+	s := make([]func() int, n)
+	if n > 0 {
+		s[0] = pureTopFn
+	}
+	return s
+}
+
+func InsertReboundFnParam(dst []func() int, fn func() int) {
+	fn = makeDirty()
+	dst[0] = fn
 }
 
 func AppendBackingSliceVarDirty(backing []func() int) []func() int {
@@ -590,6 +645,43 @@ func MakeBoxIgnoringUncalledClosure() regBox {
 	}
 	return out
 }
+
+type onceLayoutMemo struct {
+	once sync.Once
+	buf  []uintptr
+}
+
+func (m *onceLayoutMemo) Get() uintptr {
+	m.once.Do(func() {
+		var sample fnHolder
+		buf := []uintptr{unsafe.Sizeof(sample), unsafe.Alignof(sample), unsafe.Offsetof(sample.fn)}
+		buf[0] = 1
+		m.buf = buf
+	})
+	return m.buf[0]
+}
+
+func BuildLayoutFuncSlice() []func() int {
+	var sample fnHolder
+	u := unsafe.Sizeof(sample) + unsafe.Alignof(sample) + unsafe.Offsetof(sample.fn)
+	s := make([]func() int, 1)
+	if u > 0 {
+		s[0] = pureTopFn
+	}
+	return s
+}
+
+func BuildCompositeFuncSlice() []func() int {
+	s := []func() int{pureTopFn}
+	s = append(s, pureTopFn)
+	return s
+}
+
+func BuildFreshPtrHolder() *fnHolder {
+	h := &fnHolder{}
+	h.fn = pureTopFn
+	return h
+}
 `,
 	})
 
@@ -616,6 +708,9 @@ func MakeBoxIgnoringUncalledClosure() regBox {
 		"example.com/valclass.ShadowedNilHook",
 		"example.com/valclass.UnsafeFuncPtrHook",
 		"example.com/valclass.IIFEParamHook",
+		"example.com/valclass.SmuggledLocalClosureHook",
+		"example.com/valclass.AliasedSliceMutatedHook",
+		"example.com/valclass.UnconfinedParamHook",
 	} {
 		if !slices.Contains(fact.EnvCarrying, bad) {
 			t.Fatalf("EnvCarrying missed %s: %+v", bad, fact.EnvCarrying)
@@ -638,12 +733,27 @@ func MakeBoxIgnoringUncalledClosure() regBox {
 	if slices.Contains(fact.EnvCarrying, "example.com/valclass.DerivedSingleClean") || hasCulprit("DerivedSingleClean") {
 		t.Fatalf("falsely marked DerivedSingleClean: EnvCarrying=%+v RootCulprits=%+v", fact.EnvCarrying, state.RootCulprits)
 	}
+	if slices.Contains(fact.EnvCarrying, "example.com/valclass.AliasedCleanSliceHook") || hasCulprit("AliasedCleanSliceHook") {
+		t.Fatalf("falsely marked AliasedCleanSliceHook: EnvCarrying=%+v RootCulprits=%+v", fact.EnvCarrying, state.RootCulprits)
+	}
 
 	if slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "SmuggleFromUnsafePointerParam"}) {
 		t.Fatalf("ReturnEnvFree admitted (*int)(unsafe.Pointer) conversion: %+v", fact.ReturnEnvFree)
 	}
+	if slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "SmuggleAppendSpareCap"}) {
+		t.Fatalf("ReturnEnvFree admitted append(paramSlice, 99) spare-capacity alias: %+v", fact.ReturnEnvFree)
+	}
 	if !slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "AppendNilFuncBaseClean"}) {
 		t.Fatalf("ReturnEnvFree rejected append([]func() int(nil), pureTopFn): %+v", fact.ReturnEnvFree)
+	}
+	if !slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "BuildSizedFuncSlice"}) {
+		t.Fatalf("ReturnEnvFree rejected make([]func() int, n) with clean element store: %+v", fact.ReturnEnvFree)
+	}
+	if slices.Contains(fact.ParamInsertionFree, syntaxutil.ParamKey{
+		Func:  syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "InsertReboundFnParam"},
+		Index: 0,
+	}) {
+		t.Fatalf("ParamInsertionFree admitted rebound function parameter stored into slice param: %+v", fact.ParamInsertionFree)
 	}
 	envRes := ResolveEnvAudit(map[string][]Fact{"example.com/valclass": {fact}}, nil)
 	if envRes.InsResolved[syntaxutil.ParamKey{
@@ -685,6 +795,36 @@ func MakeBoxIgnoringUncalledClosure() regBox {
 	for _, rfp := range fact.ReturnFieldParamPoison {
 		if rfp.Func.Name == "MakeBoxIgnoringUncalledClosure" {
 			t.Fatalf("uncalled closure body leaked into ReturnFieldParamPoison: %+v", rfp)
+		}
+	}
+
+	if !slices.Contains(fact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "onceLayoutMemo.Get"}) {
+		t.Fatalf("ReceiverReadOnly rejected direct unsafe.Sizeof/Alignof/Offsetof inside sync.Once fresh-slice fill: %+v", fact.ReceiverReadOnly)
+	}
+	if !slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: "BuildLayoutFuncSlice"}) {
+		t.Fatalf("ReturnEnvFree rejected direct unsafe.Sizeof/Alignof/Offsetof in outflow fresh-local check: %+v", fact.ReturnEnvFree)
+	}
+	for _, fnName := range []string{"BuildCompositeFuncSlice", "BuildFreshPtrHolder"} {
+		if !slices.Contains(fact.ReturnEnvFree, syntaxutil.FuncKey{Pkg: "example.com/valclass", Name: fnName}) {
+			t.Fatalf("ReturnEnvFree rejected fresh signature-carrying composite literal %s: %+v", fnName, fact.ReturnEnvFree)
+		}
+	}
+
+	recvVar := types.NewVar(token.NoPos, pkg.Types, "r", types.NewPointer(pkg.Types.Scope().Lookup("onceLayoutMemo").Type()))
+	onceEng := &confinementEngine{
+		audited:  true,
+		p:        pkg,
+		fc:       fc,
+		mode:     confinementModeOnceMemoRecv,
+		onceMemo: &onceMemoRecvState{recvVar: recvVar, recvAliases: map[*types.Var]bool{recvVar: true}},
+	}
+	for name, badVal := range map[string]*flowir.Value{
+		"ValInvalid":     {Kind: flowir.ValInvalid},
+		"NilClosureBody": {Kind: flowir.ValMakeClosure, Lit: &ast.FuncLit{}},
+		"NilIIFEBody":    {Kind: flowir.ValCall, CallKind: flowir.CallIIFE},
+	} {
+		if onceEng.checkOnceMemoValueTree(badVal, false) || onceEng.checkOnceMemoValueTree(badVal, true) {
+			t.Fatalf("checkOnceMemoValueTree(%s) failed open; want false", name)
 		}
 	}
 }

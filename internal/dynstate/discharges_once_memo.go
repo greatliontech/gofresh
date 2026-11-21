@@ -97,7 +97,7 @@ func deriveOnceMemoTypes(
 		if !ok || st.NumFields() < 2 {
 			continue
 		}
-		fact, memoAssigns, ok := verifyOnceMemoStructType(
+		fact, memoAssigns, rejectDetail, ok := verifyOnceMemoStructType(
 			audited,
 			p,
 			fc,
@@ -121,7 +121,7 @@ func deriveOnceMemoTypes(
 					}
 				}
 				if hasOnceField {
-					emitDischargeRejectAt(ctx, p, target, "once_memo_type", p.Types.Path()+"."+tn.Name(), "struct_verification_failed", "", tn.Pos())
+					emitDischargeRejectAt(ctx, p, target, "once_memo_type", p.Types.Path()+"."+tn.Name(), "struct_verification_failed", rejectDetail, tn.Pos())
 				}
 			}
 			continue
@@ -430,55 +430,55 @@ func verifyOnceMemoStructType(
 	isSettledConeGlobal func(*types.Var) bool,
 	named *types.Named,
 	st *types.Struct,
-) (syntaxutil.OnceMemoTypeFact, []*ast.AssignStmt, bool) {
+) (syntaxutil.OnceMemoTypeFact, []*ast.AssignStmt, string, bool) {
 	var zero syntaxutil.OnceMemoTypeFact
 	tRef := syntaxutil.TypeRef{Pkg: p.Types.Path(), Name: named.Obj().Name()}
 	if !tRef.Valid() {
-		return zero, nil, false
+		return zero, nil, "invalid_type_ref", false
 	}
 	// Forbid value-receiver methods so method calls on T or *T never value-copy T.once.
 	if types.NewMethodSet(named).Len() != 0 {
-		return zero, nil, false
+		return zero, nil, "value_receiver_method", false
 	}
 
 	var onceField *types.Var
 	for i := 0; i < st.NumFields(); i++ {
 		f := st.Field(i)
 		if f.Exported() || f.Embedded() {
-			return zero, nil, false
+			return zero, nil, "exported_or_embedded_field", false
 		}
 		if syntaxutil.IsNamedInPkg(f.Type(), "sync", "Once") {
 			if onceField != nil {
-				return zero, nil, false
+				return zero, nil, "multiple_once_fields", false
 			}
 			onceField = f
 			continue
 		}
 		if typeReachesNamedOrSyncOnce(f.Type(), named) {
-			return zero, nil, false
+			return zero, nil, "field_reaches_self_or_once", false
 		}
 	}
 	if onceField == nil {
-		return zero, nil, false
+		return zero, nil, "no_once_field", false
 	}
 
 	// Verify onceField is referenced solely by one recv.once.Do(func() { ... }) in getterFD.
 	onceUses := idx.UsesOf[onceField]
 	if len(onceUses) != 1 {
-		return zero, nil, false
+		return zero, nil, "once_field_use_count", false
 	}
 	getterFD, getterRecv, doStmt, doLit, ok := matchOnceMemoGetterDoCall(p, idx, named, onceUses[0])
 	if !ok {
-		return zero, nil, false
+		return zero, nil, "getter_do_call_mismatch", false
 	}
 
 	// Extract memoFields written at top level of doLit.Body.
 	memoFields, memoAssigns, memoRHSByField, ok := extractOnceMemoFields(p, fc, getterRecv, onceField, doLit)
 	if !ok || len(memoFields) == 0 {
-		return zero, nil, false
+		return zero, nil, "memo_fields_invalid", false
 	}
 	if !verifyOnceMemoFieldUsesInGetter(p, idx, getterFD, getterRecv, doStmt, doLit, memoFields, memoAssigns) {
-		return zero, nil, false
+		return zero, nil, "getter_memo_field_uses", false
 	}
 
 	inputFields := map[*types.Var]bool{}
@@ -488,7 +488,7 @@ func verifyOnceMemoStructType(
 			continue
 		}
 		if refconfine.TypeMayCarryUnknownDynamic(audited, f.Type()) || refconfine.TypeCarriesSignature(f.Type()) {
-			return zero, nil, false
+			return zero, nil, "input_field_carries_dynamic_or_sig", false
 		}
 		inputFields[f] = true
 	}
@@ -498,15 +498,15 @@ func verifyOnceMemoStructType(
 		for _, elt := range cl.Elts {
 			kv, isKV := elt.(*ast.KeyValueExpr)
 			if !isKV {
-				return zero, nil, false
+				return zero, nil, "unkeyed_struct_lit", false
 			}
 			kid, isID := ast.Unparen(kv.Key).(*ast.Ident)
 			if !isID {
-				return zero, nil, false
+				return zero, nil, "invalid_struct_lit_key", false
 			}
 			fld, _ := p.TypesInfo.Uses[kid].(*types.Var)
 			if fld == nil || !inputFields[fld] {
-				return zero, nil, false
+				return zero, nil, "struct_lit_sets_non_input_field", false
 			}
 		}
 	}
@@ -517,7 +517,7 @@ func verifyOnceMemoStructType(
 			}
 			sel, isSel := idx.ParentUnparen(uid).(*ast.SelectorExpr)
 			if !isSel || sel.Sel != uid || refconfine.ExprPrefixIsWrittenOrAddrTaken(p, idx, sel) {
-				return zero, nil, false
+				return zero, nil, "input_field_mutated_or_addressed", false
 			}
 		}
 	}
@@ -543,16 +543,16 @@ func verifyOnceMemoStructType(
 		}
 	}
 	if len(constructors) == 0 {
-		return zero, nil, false
+		return zero, nil, "no_verified_constructor", false
 	}
 	slices.SortFunc(constructors, syntaxutil.FuncKey.Compare)
 
 	// Verify reachable type closure of memoFields & getter results, GuardTypes, and unexported ref fields.
 	getterFn, _ := p.TypesInfo.Defs[getterFD.Name].(*types.Func)
 	if getterFn == nil {
-		return zero, nil, false
+		return zero, nil, "missing_getter_func", false
 	}
-	guardTypes, guardSet, unexpRefStructs, needsErrorProof, ok := verifyOnceMemoResultClosure(
+	guardTypes, guardSet, unexpRefStructs, ok := verifyOnceMemoResultClosure(
 		p,
 		idx,
 		freshCache,
@@ -565,7 +565,7 @@ func verifyOnceMemoStructType(
 		memoRHSByField,
 	)
 	if !ok {
-		return zero, nil, false
+		return zero, nil, "result_closure_rejected", false
 	}
 
 	// Verify doLit's pure deterministic compute cone and error origins.
@@ -584,31 +584,30 @@ func verifyOnceMemoStructType(
 		memoFields,
 		memoAssigns,
 		doLit,
-		needsErrorProof,
 		inputParamDeps,
 	) {
-		return zero, nil, false
+		return zero, nil, "compute_cone_rejected", false
 	}
 
 	// Verify receiver confinement across all methods on *T, and pure deterministic
 	// cone + guarded/fresh result closure across all sibling methods on *T.
 	ptrMSet := types.NewMethodSet(types.NewPointer(named))
 	if ptrMSet.Len() == 0 {
-		return zero, nil, false
+		return zero, nil, "no_ptr_methods", false
 	}
 	ptrMethodSet := make(map[*types.Func]*ast.FuncDecl, ptrMSet.Len())
 	for i := 0; i < ptrMSet.Len(); i++ {
 		msel := ptrMSet.At(i)
 		if len(msel.Index()) != 1 {
-			return zero, nil, false
+			return zero, nil, "embedded_ptr_method", false
 		}
 		mfn, okFn := msel.Obj().(*types.Func)
 		if !okFn || mfn == nil || mfn.Origin() != mfn || mfn.Pkg() != p.Types {
-			return zero, nil, false
+			return zero, nil, "foreign_or_generic_ptr_method", false
 		}
 		mfd := funcDecls[mfn]
 		if mfd == nil || mfd.Body == nil {
-			return zero, nil, false
+			return zero, nil, "bodyless_ptr_method:" + mfn.Name(), false
 		}
 		ptrMethodSet[mfn] = mfd
 	}
@@ -631,7 +630,7 @@ func verifyOnceMemoStructType(
 			inputFields,
 			inputParamDeps,
 		) {
-			return zero, nil, false
+			return zero, nil, "recv_confinement_rejected:" + mfn.Name(), false
 		}
 		if mfd != getterFD {
 			if !verifyOnceMemoSiblingMethod(
@@ -650,7 +649,7 @@ func verifyOnceMemoStructType(
 				mfn,
 				mfd,
 			) {
-				return zero, nil, false
+				return zero, nil, "sibling_method_rejected:" + mfn.Name(), false
 			}
 		}
 	}
@@ -668,7 +667,7 @@ func verifyOnceMemoStructType(
 		Constructors:   constructors,
 		GuardTypes:     guardTypes,
 		InputParamDeps: depSlice,
-	}, memoAssigns, true
+	}, memoAssigns, "", true
 }
 
 func matchOnceMemoGetterDoCall(

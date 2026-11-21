@@ -534,11 +534,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		}},
 		{"invalid InitBuilders malformed SubBuilder", func(f *Fact) {
 			f.InitBuilders = []syntaxutil.InitBuilderFact{{
-				Type:          syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				BuildMethod:   "Build",
-				OutIfaceField: "File",
+				Type:            syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				BuildMethod:     "Build",
+				OutIfaceField:   "File",
 				SubBuilderField: "File",
-				SubBuilder:    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
+				SubBuilder:      syntaxutil.TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
 				CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
 					Field:    "MessageInfos",
 					ElemType: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},

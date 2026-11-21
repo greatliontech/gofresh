@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/flowir"
 	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func verifyMapperInitValueFlowIR(
@@ -226,7 +227,7 @@ func verifyMapperSyscallTargetFlowIR(p *packages.Package, fc *pkgFlowCache, idx 
 }
 
 func isAllowedSyscallBracket(p *packages.Package, fn *types.Func) bool {
-	if fn == nil || fn.Pkg() == nil || !isTrueStdlibInPkg(p, fn.Pkg().Path()) {
+	if fn == nil || fn.Pkg() == nil || !syntaxutil.IsTrueStdlibInPkg(p, fn.Pkg().Path()) {
 		return false
 	}
 	switch fn.Pkg().Path() {
@@ -248,7 +249,7 @@ func isMapperAllowedHelperGlobalFlowIR(p *packages.Package, fc *pkgFlowCache, id
 	if v == nil || v.IsField() || v.Pkg() != p.Types || v.Parent() != p.Types.Scope() || v.Exported() {
 		return false
 	}
-	isErr := isUniverseErrorType(v.Type())
+	isErr := syntaxutil.IsErrorType(v.Type())
 	isUintptr := false
 	if b, ok := types.Unalias(v.Type()).Underlying().(*types.Basic); ok && b.Kind() == types.Uintptr {
 		isUintptr = true
@@ -304,7 +305,7 @@ func hasKernelLinkageDirective(p *packages.Package, fd *ast.FuncDecl) bool {
 }
 
 func isStdSyscallPrimitive(p *packages.Package, fn *types.Func) bool {
-	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != "syscall" || !isTrueStdlibInPkg(p, "syscall") {
+	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != "syscall" || !syntaxutil.IsTrueStdlibInPkg(p, "syscall") {
 		return false
 	}
 	switch fn.Name() {

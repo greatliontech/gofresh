@@ -103,86 +103,6 @@ func isSelfAppendBind(obj types.Object, src *flowir.Value) bool {
 		src.Args[0].Place.IsBareVar() && src.Args[0].Place.Obj == obj
 }
 
-type freshAllocEvalPolicy struct {
-	allowScalarLitOrConst bool
-	typeOK                func(types.Type) bool
-	convertOK             func(*flowir.Value) bool
-	elemOK                func(*flowir.Value) bool
-	placeOK               func(*flowir.Value) bool
-	allowNilAppendBase    bool
-	checkAppendElems      bool
-}
-
-func evalFreshAllocValue(v *flowir.Value, pol freshAllocEvalPolicy) bool {
-	if v == nil {
-		return false
-	}
-	switch v.Kind {
-	case flowir.ValScalarLitOrConst:
-		return pol.allowScalarLitOrConst
-	case flowir.ValAllocFresh:
-		if pol.typeOK != nil && !pol.typeOK(v.Type) {
-			return false
-		}
-		switch v.AllocKind {
-		case flowir.AllocMake, flowir.AllocBuiltinNewType:
-			return true
-		case flowir.AllocBuiltinNewExpr:
-			if len(v.Args) != 1 || v.Ellipsis {
-				return false
-			}
-			if pol.elemOK != nil {
-				return pol.elemOK(v.Args[0])
-			}
-			return evalFreshAllocValue(v.Args[0], pol)
-		case flowir.AllocCompositeLit:
-			if pol.elemOK != nil {
-				for _, ce := range v.CompositeElts {
-					if ce.MapKey != nil && !pol.elemOK(ce.MapKey) {
-						return false
-					}
-					if !pol.elemOK(ce.Value) {
-						return false
-					}
-				}
-			}
-			return true
-		}
-		return false
-	case flowir.ValPlace:
-		return pol.placeOK != nil && pol.placeOK(v)
-	case flowir.ValConvert:
-		if v.IsTypeAssert || v.Arg == nil {
-			return false
-		}
-		if pol.convertOK != nil && !pol.convertOK(v) {
-			return false
-		}
-		return evalFreshAllocValue(v.Arg, pol)
-	case flowir.ValCall:
-		if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 1 && v.Args[0] != nil {
-			baseOK := (pol.allowNilAppendBase && v.Args[0].Kind == flowir.ValPlace && v.Args[0].Place.Root == flowir.RootConstOrNil) ||
-				evalFreshAllocValue(v.Args[0], pol)
-			if !baseOK {
-				return false
-			}
-			if !pol.checkAppendElems {
-				return true
-			}
-			if v.Ellipsis {
-				return len(v.Args) == 2 && pol.elemOK != nil && pol.elemOK(v.Args[1])
-			}
-			for _, elem := range v.Args[1:] {
-				if pol.elemOK != nil && !pol.elemOK(elem) {
-					return false
-				}
-			}
-			return true
-		}
-	}
-	return false
-}
-
 func isFreshLocalOnceValue(audited bool, v *flowir.Value, freshLocals map[types.Object]bool) bool {
 	shares := sharesMemOrSigOrDynamic(audited)
 	typeOK := func(t types.Type) bool {
@@ -201,18 +121,19 @@ func isFreshLocalOnceValue(audited bool, v *flowir.Value, freshLocals map[types.
 		}
 		return isFreshLocalOnceValue(audited, el, freshLocals)
 	}
-	return evalFreshAllocValue(v, freshAllocEvalPolicy{
-		allowScalarLitOrConst: true,
-		typeOK:                typeOK,
+	return checkPureOrFreshValue(v, valuePurityPolicy{
+		allowAppend:             true,
+		allowSyncNoCopy:         true,
+		ignoreSizeAndIndexArgs:  true,
+		preserveAppendBasePlace: true,
+		allocTypeOK:             typeOK,
 		convertOK: func(cv *flowir.Value) bool {
 			return typeOK(cv.Type)
 		},
 		elemOK: isSafeElem,
-		placeOK: func(pv *flowir.Value) bool {
+		allowPlace: func(pv *flowir.Value) bool {
 			return pv.Place.IsBareVar() && pv.Place.Obj != nil && freshLocals[pv.Place.Obj]
 		},
-		allowNilAppendBase: true,
-		checkAppendElems:   true,
 	})
 }
 
@@ -469,11 +390,16 @@ func computeOutflowFreshOwnedLocals(in outflowFreshInput) (map[types.Object]bool
 
 	var srcFresh func(v *flowir.Value) bool
 	srcFresh = func(v *flowir.Value) bool {
-		return evalFreshAllocValue(v, freshAllocEvalPolicy{
+		return checkPureOrFreshValue(v, valuePurityPolicy{
+			allowAppend:             true,
+			allowSyncNoCopy:         true,
+			ignoreSizeAndIndexArgs:  true,
+			preserveAppendBasePlace: true,
+			skipContainerElems:      true,
 			convertOK: func(cv *flowir.Value) bool {
 				return !syntaxutil.IsUnsafePointerType(cv.Type) && !syntaxutil.IsUnsafePointerType(cv.Arg.Type)
 			},
-			placeOK: func(pv *flowir.Value) bool {
+			allowPlace: func(pv *flowir.Value) bool {
 				obj := pv.Place.Obj
 				if obj == nil || in.params[obj] || !freshObj[obj] || in.localBroken[obj] || in.rangeBound[obj] {
 					return false

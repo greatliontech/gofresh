@@ -105,7 +105,34 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	fact.SeqFuncEdges = seamAnalysis.SeqFuncEdges
 	fact.ParallelFuncs = seamAnalysis.ParallelFuncs
 	fact.ParallelEdges = seamAnalysis.ParallelEdges
-	recordDynamicGlobalUses(audited, p, fc, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, &attributedParamUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, hooks)
+	(&globalUseScanner{
+		audited:          audited,
+		p:                p,
+		fc:               fc,
+		idx:              idx,
+		callIdx:          callIdx,
+		exemptSeamNodes:  seamAnalysis.Exempt,
+		initOnly:         initOnly,
+		initParamUses:    initParamUses,
+		initMethodUses:   initMethodUses,
+		fieldUses:        fieldUses,
+		elemUses:         elemUses,
+		carrierLinks:     carrierLinks,
+		attributed:       &attributedUses,
+		attributedParams: &attributedParamUses,
+		singleSubject:    singleSubject,
+		poolDischarged:   poolDischarged,
+		poolAttributed:   &poolAttributedUses,
+		hooks:            hooks,
+		sink: useSinkScope{
+			mutated:     mutated,
+			escaped:     escaped,
+			methodUses:  methodUses,
+			paramUses:   paramUses,
+			poolMutated: poolMutated,
+			poolEscaped: poolEscaped,
+		},
+	}).scanPackage()
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -255,7 +282,30 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	regCarrierLinks := map[syntaxutil.CarrierLink]bool{}
 	fieldDefer := map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool{}
 	fieldPoison := map[string]map[syntaxutil.FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, p, fc, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, &pkgConf, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, envParamCalls, envMethodCalls, regCarrierLinks, fieldDefer, fieldPoison, hooks)
+	(&envRegScanner{
+		audited:           audited,
+		p:                 p,
+		fc:                fc,
+		idx:               idx,
+		callIdx:           callIdx,
+		initOnly:          initOnly,
+		unattestedBroken:  unattestedBroken,
+		singleSubjectVars: singleSubjectSet,
+		settledGlobals:    settledGlobals,
+		pkgConf:           &pkgConf,
+		exemptSeamNodes:   seamAnalysis.Exempt,
+		hooks:             hooks,
+		envCarrying:       envCarrying,
+		envCarryingFns:    envCarryingFns,
+		envCarryingUnattr: envCarryingUnattr,
+		envCallableVars:   envCallableVars,
+		envCalls:          envCalls,
+		envParamCalls:     envParamCalls,
+		envMethodCalls:    envMethodCalls,
+		carrierLinks:      regCarrierLinks,
+		fieldDefer:        fieldDefer,
+		fieldPoison:       fieldPoison,
+	}).scanPackage()
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{Pos: pos, Param: param})

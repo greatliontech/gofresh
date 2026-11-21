@@ -5,437 +5,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/gofresh/internal/flowir"
-	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
-
-// localCarrierAliases separates carriers aliased directly at a local's own
-// single-hop reference header (root) from all carriers reachable anywhere in
-// the local's interior (all). Writes or non-carrier-capable address captures
-// staying within the local's own root header (or bare-addressed pointer
-// dereference) consult root, whereas escapes, carrier-capable address captures,
-// or multi-hop interior accesses consult all.
-type localCarrierAliases struct {
-	root []*types.Var
-	all  []*types.Var
-}
-
-func appendUniqueVars(dst *[]*types.Var, srcs []*types.Var) bool {
-	changed := false
-	for _, v := range srcs {
-		if v == nil {
-			continue
-		}
-		found := false
-		for _, cur := range *dst {
-			if cur == v {
-				found = true
-				break
-			}
-		}
-		if !found {
-			*dst = append(*dst, v)
-			changed = true
-		}
-	}
-	return changed
-}
-
-func isTypeParamType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	_, ok := types.Unalias(t).(*types.TypeParam)
-	return ok
-}
-
-func canAliasCarrierType(audited bool, t types.Type) bool {
-	return refconfine.TypeHandsOutDynamicAlias(audited, t) ||
-		refconfine.TypeHandsOutMutableReach(t) ||
-		refconfine.TypeReachesSyncNoCopyByValue(t) ||
-		syntaxutil.ContainsUintptr(t)
-}
-
-func addrOfSubplaceCanAliasCarrier(audited bool, v *flowir.Value) bool {
-	if v == nil || v.Kind != flowir.ValAddrOf {
-		return true
-	}
-	if v.IsArraySlice {
-		if v.Type == nil {
-			return true
-		}
-		sl, ok := types.Unalias(v.Type).Underlying().(*types.Slice)
-		if !ok {
-			return true
-		}
-		return canAliasCarrierType(audited, sl.Elem())
-	}
-	return v.AddrPlace.Type == nil || canAliasCarrierType(audited, v.AddrPlace.Type)
-}
-
-func walkTransientTargetValues(root *flowir.Value, fn func(*flowir.Value)) {
-	if root == nil || fn == nil {
-		return
-	}
-	var walk func(cur *flowir.Value)
-	walk = func(cur *flowir.Value) {
-		if cur == nil || cur.Kind == flowir.ValMakeClosure {
-			return
-		}
-		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-			flowir.ForEachIIFEReturnValue(cur, walk)
-			return
-		}
-		fn(cur)
-		cur.ForEachChildValue(func(ch *flowir.Value) bool {
-			walk(ch)
-			return true
-		})
-	}
-	walk(root)
-}
-
-func forEachOpTopValues(op *flowir.Op, fn func(*flowir.Value)) {
-	if op == nil || fn == nil {
-		return
-	}
-	op.ForEachValue(func(v *flowir.Value) bool {
-		fn(v)
-		return true
-	})
-}
-
-func transientValueHasUnresolvedTarget(v *flowir.Value) bool {
-	if v == nil {
-		return false
-	}
-	unresolved := false
-	walkTransientTargetValues(v, func(cur *flowir.Value) {
-		switch cur.Kind {
-		case flowir.ValCall:
-			if cur.CallKind != flowir.CallIIFE {
-				unresolved = true
-			}
-		case flowir.ValChanRecv:
-			unresolved = true
-		}
-	})
-	return unresolved
-}
-
-// forEachNestedLiteralAndGo invokes onLit for each immediate nested
-// ValMakeClosure or CallIIFE body and invokes onGo for each synchronous OpGo.
-func forEachNestedLiteralAndGo(b *flowir.Body, onLit func(*flowir.Body), onGo func(*flowir.Op)) {
-	if b == nil {
-		return
-	}
-	var scanVal func(v *flowir.Value)
-	scanVal = func(v *flowir.Value) {
-		if v == nil {
-			return
-		}
-		if v.Kind == flowir.ValMakeClosure {
-			if onLit != nil && v.Closure != nil {
-				onLit(v.Closure)
-			}
-			return
-		}
-		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE {
-			for _, a := range v.Args {
-				scanVal(a)
-			}
-			if onLit != nil && v.IIFE != nil {
-				onLit(v.IIFE)
-			}
-			return
-		}
-		v.ForEachChildValue(func(ch *flowir.Value) bool {
-			scanVal(ch)
-			return true
-		})
-	}
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind == flowir.OpGo {
-			if onGo != nil {
-				onGo(op)
-			}
-			return true
-		}
-		forEachOpTopValues(op, scanVal)
-		return true
-	})
-}
-
-func collectValueCarrierVars(
-	audited bool,
-	v *flowir.Value,
-	carrierVar func(types.Object) (*types.Var, bool),
-	aliases map[types.Object]localCarrierAliases,
-	skipMethodRecv func(*flowir.Value) bool,
-) []*types.Var {
-	return collectValueCarrierVarsWithOpts(audited, v, carrierVar, aliases, skipMethodRecv, false)
-}
-
-func collectValueCarrierVarsWithOpts(
-	audited bool,
-	v *flowir.Value,
-	carrierVar func(types.Object) (*types.Var, bool),
-	aliases map[types.Object]localCarrierAliases,
-	skipMethodRecv func(*flowir.Value) bool,
-	skipNonBuiltinCalls bool,
-) []*types.Var {
-	if v == nil {
-		return nil
-	}
-	var vars []*types.Var
-	addObj := func(u *types.Var) {
-		if u == nil {
-			return
-		}
-		if cv, isC := carrierVar(u); isC {
-			appendUniqueVars(&vars, []*types.Var{cv})
-		} else {
-			appendUniqueVars(&vars, aliases[u].all)
-		}
-	}
-	var walk func(cur *flowir.Value)
-	walk = func(cur *flowir.Value) {
-		if cur == nil || cur.Kind == flowir.ValMakeClosure {
-			return
-		}
-		isStrBuiltin := cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallBuiltin &&
-			(cur.BuiltinName == "String" || cur.BuiltinName == "StringData")
-		if !isStrBuiltin && cur.Type != nil && !canAliasCarrierType(audited, cur.Type) && !isTypeParamType(cur.Type) {
-			return
-		}
-		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-			flowir.ForEachIIFEReturnValue(cur, walk)
-			return
-		}
-		switch cur.Kind {
-		case flowir.ValAllocFresh:
-			if cur.AllocKind == flowir.AllocMake || cur.AllocKind == flowir.AllocBuiltinNewType {
-				return
-			}
-		case flowir.ValConvert:
-			if !cur.IsTypeAssert && cur.Arg != nil && syntaxutil.IsFreshStringSliceCopy(cur.Arg.Type, cur.Type) {
-				return
-			}
-		case flowir.ValPlace:
-			addObj(cur.Place.Obj)
-		case flowir.ValAddrOf:
-			addObj(cur.AddrPlace.Obj)
-		case flowir.ValCall:
-			if cur.CallKind == flowir.CallBuiltin {
-				switch cur.BuiltinName {
-				case "len", "cap", "Sizeof", "Alignof", "Offsetof", "StringData":
-					return
-				case "Slice", "SliceData", "String":
-					if len(cur.Args) > 0 {
-						walk(cur.Args[0])
-					}
-					return
-				}
-			}
-			if skipNonBuiltinCalls && cur.CallKind != flowir.CallBuiltin {
-				return
-			}
-			if skipMethodRecv != nil && skipMethodRecv(cur) {
-				for _, a := range cur.Args {
-					walk(a)
-				}
-				return
-			}
-			if cur.AutoAddrRecv && cur.HasRecvPlace {
-				addObj(cur.RecvPlace.Obj)
-			}
-		}
-		cur.ForEachChildValue(func(ch *flowir.Value) bool {
-			walk(ch)
-			return true
-		})
-	}
-	walk(v)
-	return vars
-}
-
-func valueCarrierSources(
-	audited bool,
-	v *flowir.Value,
-	carrierVar func(types.Object) (*types.Var, bool),
-	aliases map[types.Object]localCarrierAliases,
-	skipMethodRecv func(*flowir.Value) bool,
-	skipNonBuiltinCalls bool,
-) (rootSrcs, allSrcs []*types.Var) {
-	if v == nil {
-		return nil, nil
-	}
-	allSrcs = collectValueCarrierVarsWithOpts(audited, v, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
-	if len(allSrcs) == 0 {
-		return nil, nil
-	}
-	switch v.Kind {
-	case flowir.ValAllocFresh:
-		return nil, allSrcs
-	case flowir.ValPlace:
-		if v.Place.IsBareVar() {
-			if cv, isC := carrierVar(v.Place.Obj); isC {
-				if syntaxutil.IsRefHeaderType(cv.Type()) || isTypeParamType(cv.Type()) {
-					return []*types.Var{cv}, allSrcs
-				}
-				return nil, allSrcs
-			}
-			return aliases[v.Place.Obj].root, allSrcs
-		}
-		if v.Place.Obj != nil && len(v.Place.Projs) == 1 && v.Place.Projs[0].Kind == flowir.ProjSlice {
-			if cv, isC := carrierVar(v.Place.Obj); isC {
-				return []*types.Var{cv}, allSrcs
-			}
-			return aliases[v.Place.Obj].root, allSrcs
-		}
-		return allSrcs, allSrcs
-	case flowir.ValAddrOf:
-		if v.AddrPlace.Obj != nil {
-			if _, isC := carrierVar(v.AddrPlace.Obj); isC {
-				return allSrcs, allSrcs
-			}
-			if v.IsArraySlice {
-				if flowir.PlaceEntersInterior(v.AddrPlace, false) {
-					return allSrcs, allSrcs
-				}
-				return aliases[v.AddrPlace.Obj].root, allSrcs
-			}
-			if v.AddrPlace.IsBareVar() {
-				return nil, allSrcs
-			}
-			if !flowir.PlaceEntersInterior(v.AddrPlace, false) {
-				return aliases[v.AddrPlace.Obj].root, allSrcs
-			}
-		}
-		return allSrcs, allSrcs
-	case flowir.ValCall:
-		if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
-			var rSrcs []*types.Var
-			flowir.ForEachIIFEReturnValue(v, func(retVal *flowir.Value) {
-				rs, _ := valueCarrierSources(audited, retVal, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
-				appendUniqueVars(&rSrcs, rs)
-			})
-			return rSrcs, allSrcs
-		}
-		return allSrcs, allSrcs
-	default:
-		return allSrcs, allSrcs
-	}
-}
-
-// collectValueLinkVars collects init-flow carrier storage links without crossing
-// general plain/method/indirect function calls, while traversing places,
-// &place, array [:], composite literals, Go 1.26+ new(expr), CallResultHandsOut
-// conversions/type assertions, and pointer/value-forwarding builtins.
-func collectValueLinkVars(
-	v *flowir.Value,
-	carrierVar func(types.Object) (*types.Var, bool),
-	linkAliases map[types.Object][]*types.Var,
-) []*types.Var {
-	if v == nil {
-		return nil
-	}
-	var vars []*types.Var
-	addObj := func(u *types.Var) {
-		if u == nil {
-			return
-		}
-		if cv, isC := carrierVar(u); isC {
-			appendUniqueVars(&vars, []*types.Var{cv})
-		} else {
-			appendUniqueVars(&vars, linkAliases[u])
-		}
-	}
-	inStringData := false
-	var walkPlaceBase func(pl flowir.Place, addressed bool)
-	var walk func(cur *flowir.Value)
-	walkPlaceBase = func(pl flowir.Place, addressed bool) {
-		if !addressed && !inStringData && pl.Type != nil && !refconfine.CallResultHandsOut(pl.Type) && !isTypeParamType(pl.Type) {
-			return
-		}
-		if pl.Obj != nil {
-			addObj(pl.Obj)
-			return
-		}
-		if pl.Root == flowir.RootTransient && pl.Base != nil {
-			walk(pl.Base)
-		}
-	}
-	walk = func(cur *flowir.Value) {
-		if cur == nil {
-			return
-		}
-		isStrBuiltin := cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallBuiltin &&
-			(cur.BuiltinName == "String" || cur.BuiltinName == "StringData")
-		if !isStrBuiltin && !inStringData && cur.Type != nil && !refconfine.CallResultHandsOut(cur.Type) {
-			return
-		}
-		switch cur.Kind {
-		case flowir.ValPlace:
-			walkPlaceBase(cur.Place, false)
-		case flowir.ValAddrOf:
-			walkPlaceBase(cur.AddrPlace, true)
-		case flowir.ValMethodVal:
-			if cur.HasRecvPlace {
-				walkPlaceBase(cur.RecvPlace, cur.AutoAddr)
-			} else {
-				walk(cur.Recv)
-			}
-		case flowir.ValConvert:
-			walk(cur.Arg)
-		case flowir.ValCompositeExpr:
-			for _, a := range cur.Args {
-				walk(a)
-			}
-		case flowir.ValAllocFresh:
-			switch cur.AllocKind {
-			case flowir.AllocBuiltinNewExpr:
-				if len(cur.Args) == 1 && !cur.Ellipsis {
-					walk(cur.Args[0])
-				}
-			case flowir.AllocCompositeLit:
-				for i := range cur.CompositeElts {
-					elt := &cur.CompositeElts[i]
-					if elt.MapKey != nil {
-						walk(elt.MapKey)
-					}
-					if elt.Value != nil {
-						walk(elt.Value)
-					}
-				}
-			}
-		case flowir.ValCall:
-			if cur.CallKind == flowir.CallIIFE {
-				flowir.ForEachIIFEReturnValue(cur, walk)
-			} else if cur.CallKind == flowir.CallBuiltin {
-				switch cur.BuiltinName {
-				case "append", "Add", "min", "max":
-					for _, a := range cur.Args {
-						walk(a)
-					}
-				case "Slice", "SliceData", "String":
-					if len(cur.Args) > 0 {
-						walk(cur.Args[0])
-					}
-				case "StringData":
-					if len(cur.Args) > 0 {
-						prev := inStringData
-						inStringData = true
-						walk(cur.Args[0])
-						inStringData = prev
-					}
-				}
-			}
-		}
-	}
-	walk(v)
-	return vars
-}
 
 type carrierAliasConfig struct {
 	parentAliases        map[types.Object]localCarrierAliases
@@ -454,6 +25,17 @@ type carrierAliasConfig struct {
 		valSources func(*flowir.Value) (rootSrcs, allSrcs []*types.Var),
 		valLinks func(*flowir.Value) []*types.Var,
 	)
+}
+
+type carrierAliasSolver struct {
+	audited       bool
+	b             *flowir.Body
+	cfg           carrierAliasConfig
+	aliased       map[types.Object]localCarrierAliases
+	linkAliased   map[types.Object][]*types.Var
+	memAliases    map[types.Object]map[types.Object]bool
+	addrTakenBare map[*types.Var]bool
+	isTopParam    map[*types.Var]bool
 }
 
 func computeBodyCarrierAliases(
@@ -479,396 +61,429 @@ func computeBodyCarrierAliases(
 	if b == nil || cfg.carrierVar == nil {
 		return aliased, linkAliased
 	}
-
-	visitOps := func(fn func(*flowir.Op)) {
-		if cfg.descendNested {
-			flowir.VisitAllOps(b, fn)
-		} else {
-			flowir.VisitSyncAndIIFEOps(b, fn)
-		}
+	s := &carrierAliasSolver{
+		audited:       audited,
+		b:             b,
+		cfg:           cfg,
+		aliased:       aliased,
+		linkAliased:   linkAliased,
+		memAliases:    fc.scopedLocalCarrierAliases(audited, b, nil),
+		addrTakenBare: map[*types.Var]bool{},
+		isTopParam:    make(map[*types.Var]bool, len(b.Params)),
 	}
-
-	memAliases := fc.scopedLocalCarrierAliases(audited, b, nil)
-	addrTakenBare := map[*types.Var]bool{}
-	visitOps(func(op *flowir.Op) {
-		var checkAddr func(v *flowir.Value)
-		checkAddr = func(v *flowir.Value) {
-			if v == nil {
-				return
-			}
-			if !cfg.descendNested {
-				if v.Kind == flowir.ValMakeClosure {
-					return
-				}
-				if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE {
-					for _, a := range v.Args {
-						checkAddr(a)
-					}
-					return
-				}
-			}
-			if v.Kind == flowir.ValAddrOf && !v.IsArraySlice && v.AddrPlace.IsBareVar() {
-				addrTakenBare[v.AddrPlace.Obj] = true
-			}
-			if v.Kind == flowir.ValMethodVal && v.AutoAddr && v.HasRecvPlace && v.RecvPlace.IsBareVar() {
-				addrTakenBare[v.RecvPlace.Obj] = true
-			}
-			if v.Kind == flowir.ValCall && v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.IsBareVar() {
-				addrTakenBare[v.RecvPlace.Obj] = true
-			}
-			v.ForEachChildValue(func(ch *flowir.Value) bool {
-				checkAddr(ch)
-				return true
-			})
-		}
-		forEachOpTopValues(op, checkAddr)
-	})
-
-	addAliases := func(dst types.Object, rootSrcs, allSrcs []*types.Var) bool {
-		if dst == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0) {
-			return false
-		}
-		if _, isC := cfg.carrierVar(dst); isC {
-			return false
-		}
-		entry := aliased[dst]
-		changed := false
-		if len(rootSrcs) > 0 && (syntaxutil.IsRefHeaderType(dst.Type()) || isTypeParamType(dst.Type())) {
-			if appendUniqueVars(&entry.root, rootSrcs) {
-				changed = true
-			}
-			if appendUniqueVars(&entry.all, rootSrcs) {
-				changed = true
-			}
-		}
-		if appendUniqueVars(&entry.all, allSrcs) {
-			changed = true
-		}
-		if changed {
-			aliased[dst] = entry
-		}
-		return changed
-	}
-
-	addLinkAliases := func(dst types.Object, lvars []*types.Var) bool {
-		if !cfg.trackLinks || dst == nil || len(lvars) == 0 {
-			return false
-		}
-		if _, isC := cfg.carrierVar(dst); isC {
-			return false
-		}
-		cur := linkAliased[dst]
-		if appendUniqueVars(&cur, lvars) {
-			linkAliased[dst] = cur
-			return true
-		}
-		return false
-	}
-
-	valSources := func(v *flowir.Value) (rootSrcs, allSrcs []*types.Var) {
-		return valueCarrierSources(audited, v, cfg.carrierVar, aliased, cfg.skipMethodRecv, cfg.skipNonBuiltinCalls)
-	}
-	valLinks := func(v *flowir.Value) []*types.Var {
-		if !cfg.trackLinks {
-			return nil
-		}
-		return collectValueLinkVars(v, cfg.carrierVar, linkAliased)
-	}
-
-	isTopParam := make(map[*types.Var]bool, len(b.Params))
 	for _, pv := range b.Params {
 		if pv != nil {
-			isTopParam[pv] = true
+			s.isTopParam[pv] = true
 		}
 	}
+	s.solve()
+	return s.aliased, s.linkAliased
+}
 
-	propagateMem := func(obj *types.Var, pos token.Pos, derefStore bool, rootSrcs, allSrcs, lvars []*types.Var) bool {
-		if len(memAliases[obj]) == 0 {
-			return false
-		}
-		changed := false
-		for next := range memAliases[obj] {
-			var nextRoot []*types.Var
-			if nv, ok := next.(*types.Var); ok {
-				if derefStore && addrTakenBare[nv] {
-					nextRoot = rootSrcs
-				}
-				if cfg.onParamCompositeBind != nil && isTopParam[nv] {
-					cfg.onParamCompositeBind(pos, allSrcs, lvars)
-				}
-			}
-			if addAliases(next, nextRoot, allSrcs) {
-				changed = true
-			}
-			if addLinkAliases(next, lvars) {
-				changed = true
-			}
-		}
-		return changed
+func (s *carrierAliasSolver) visitOps(fn func(*flowir.Op)) {
+	if s.cfg.descendNested {
+		flowir.VisitAllOps(s.b, fn)
+	} else {
+		flowir.VisitSyncAndIIFEOps(s.b, fn)
 	}
+}
 
-	bindObj := func(obj *types.Var, pos token.Pos, composite, inPlace, derefStore bool, rootSrcs, allSrcs, lvars []*types.Var) bool {
-		if obj == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0 && len(lvars) == 0) {
-			return false
+func (s *carrierAliasSolver) checkAddr(v *flowir.Value) {
+	if v == nil {
+		return
+	}
+	if !s.cfg.descendNested {
+		if v.Kind == flowir.ValMakeClosure {
+			return
 		}
-		if cv, isC := cfg.carrierVar(obj); isC {
-			if cfg.onCarrierLink != nil {
-				for _, lv := range lvars {
-					if lv != cv {
-						cfg.onCarrierLink(cv, lv)
-					}
-				}
+		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE {
+			for _, a := range v.Args {
+				s.checkAddr(a)
 			}
-			return false
+			return
 		}
-		if obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
-			if cfg.onNonCarrierPkgBind != nil {
-				cfg.onNonCarrierPkgBind(obj, pos, composite || inPlace, allSrcs, lvars)
-			}
-			return false
-		}
-		if !syntaxutil.IsLocalVar(obj) {
-			return false
-		}
-		if composite || inPlace {
-			if cfg.onParamCompositeBind != nil && isTopParam[obj] {
-				cfg.onParamCompositeBind(pos, allSrcs, lvars)
-			}
-			if cfg.onCarrierLink != nil && len(lvars) > 0 {
-				for _, own := range aliased[obj].all {
-					for _, lv := range lvars {
-						if lv != own {
-							cfg.onCarrierLink(own, lv)
-						}
-					}
-				}
-			}
-		}
-		changed := false
-		if len(rootSrcs) > 0 || len(allSrcs) > 0 {
-			if composite || inPlace || canAliasCarrierType(audited, obj.Type()) || isTypeParamType(obj.Type()) {
-				var ownRoot []*types.Var
-				if (!composite && !inPlace) || (derefStore && addrTakenBare[obj]) {
-					ownRoot = rootSrcs
-				}
-				if addAliases(obj, ownRoot, allSrcs) {
-					changed = true
-				}
-			}
-		}
-		if addLinkAliases(obj, lvars) {
+	}
+	if v.Kind == flowir.ValAddrOf && !v.IsArraySlice && v.AddrPlace.IsBareVar() {
+		s.addrTakenBare[v.AddrPlace.Obj] = true
+	}
+	if v.Kind == flowir.ValMethodVal && v.AutoAddr && v.HasRecvPlace && v.RecvPlace.IsBareVar() {
+		s.addrTakenBare[v.RecvPlace.Obj] = true
+	}
+	if v.Kind == flowir.ValCall && v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.IsBareVar() {
+		s.addrTakenBare[v.RecvPlace.Obj] = true
+	}
+	v.ForEachChildValue(func(ch *flowir.Value) bool {
+		s.checkAddr(ch)
+		return true
+	})
+}
+
+func (s *carrierAliasSolver) addAliases(dst types.Object, rootSrcs, allSrcs []*types.Var) bool {
+	if dst == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0) {
+		return false
+	}
+	if _, isC := s.cfg.carrierVar(dst); isC {
+		return false
+	}
+	entry := s.aliased[dst]
+	changed := false
+	if len(rootSrcs) > 0 && (syntaxutil.IsRefHeaderType(dst.Type()) || isTypeParamType(dst.Type())) {
+		if appendUniqueVars(&entry.root, rootSrcs) {
 			changed = true
 		}
-		if (composite || inPlace) && propagateMem(obj, pos, derefStore, rootSrcs, allSrcs, lvars) {
+		if appendUniqueVars(&entry.all, rootSrcs) {
 			changed = true
 		}
-		return changed
 	}
+	if appendUniqueVars(&entry.all, allSrcs) {
+		changed = true
+	}
+	if changed {
+		s.aliased[dst] = entry
+	}
+	return changed
+}
 
-	bindPlace := func(dst flowir.Place, rootSrcs, allSrcs, lvars []*types.Var, inPlace bool) bool {
-		if len(rootSrcs) == 0 && len(allSrcs) == 0 && len(lvars) == 0 {
-			return false
+func (s *carrierAliasSolver) addLinkAliases(dst types.Object, lvars []*types.Var) bool {
+	if !s.cfg.trackLinks || dst == nil || len(lvars) == 0 {
+		return false
+	}
+	if _, isC := s.cfg.carrierVar(dst); isC {
+		return false
+	}
+	cur := s.linkAliased[dst]
+	if appendUniqueVars(&cur, lvars) {
+		s.linkAliased[dst] = cur
+		return true
+	}
+	return false
+}
+
+func (s *carrierAliasSolver) valSources(v *flowir.Value) (rootSrcs, allSrcs []*types.Var) {
+	return valueCarrierSources(s.audited, v, s.cfg.carrierVar, s.aliased, s.cfg.skipMethodRecv, s.cfg.skipNonBuiltinCalls)
+}
+
+func (s *carrierAliasSolver) valLinks(v *flowir.Value) []*types.Var {
+	if !s.cfg.trackLinks {
+		return nil
+	}
+	return collectValueLinkVars(v, s.cfg.carrierVar, s.linkAliased)
+}
+
+func (s *carrierAliasSolver) propagateMem(obj *types.Var, pos token.Pos, derefStore bool, rootSrcs, allSrcs, lvars []*types.Var) bool {
+	if len(s.memAliases[obj]) == 0 {
+		return false
+	}
+	changed := false
+	for next := range s.memAliases[obj] {
+		var nextRoot []*types.Var
+		if nv, ok := next.(*types.Var); ok {
+			if derefStore && s.addrTakenBare[nv] {
+				nextRoot = rootSrcs
+			}
+			if s.cfg.onParamCompositeBind != nil && s.isTopParam[nv] {
+				s.cfg.onParamCompositeBind(pos, allSrcs, lvars)
+			}
 		}
-		derefStore := !inPlace && len(dst.Projs) >= 1 && dst.Projs[len(dst.Projs)-1].Kind == flowir.ProjDeref
-		if dst.Obj != nil {
-			return bindObj(dst.Obj, dst.RootPos, !dst.IsBareVar(), inPlace, derefStore, rootSrcs, allSrcs, lvars)
+		if s.addAliases(next, nextRoot, allSrcs) {
+			changed = true
 		}
-		if dst.Root == flowir.RootTransient && dst.Base != nil {
-			changed := false
-			walkTransientTargetValues(dst.Base, func(cur *flowir.Value) {
-				if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
-					if bindObj(cur.Place.Obj, cur.Place.RootPos, true, !derefStore, derefStore, rootSrcs, allSrcs, lvars) {
-						changed = true
-					}
-				} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
-					if bindObj(cur.AddrPlace.Obj, cur.AddrPlace.RootPos, true, !derefStore, derefStore, rootSrcs, allSrcs, lvars) {
-						changed = true
-					}
+		if s.addLinkAliases(next, lvars) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+func (s *carrierAliasSolver) bindObj(obj *types.Var, pos token.Pos, composite, inPlace, derefStore bool, rootSrcs, allSrcs, lvars []*types.Var) bool {
+	if obj == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0 && len(lvars) == 0) {
+		return false
+	}
+	if cv, isC := s.cfg.carrierVar(obj); isC {
+		if s.cfg.onCarrierLink != nil {
+			for _, lv := range lvars {
+				if lv != cv {
+					s.cfg.onCarrierLink(cv, lv)
 				}
-			})
-			return changed
+			}
 		}
 		return false
 	}
+	if obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
+		if s.cfg.onNonCarrierPkgBind != nil {
+			s.cfg.onNonCarrierPkgBind(obj, pos, composite || inPlace, allSrcs, lvars)
+		}
+		return false
+	}
+	if !syntaxutil.IsLocalVar(obj) {
+		return false
+	}
+	if composite || inPlace {
+		if s.cfg.onParamCompositeBind != nil && s.isTopParam[obj] {
+			s.cfg.onParamCompositeBind(pos, allSrcs, lvars)
+		}
+		if s.cfg.onCarrierLink != nil && len(lvars) > 0 {
+			for _, own := range s.aliased[obj].all {
+				for _, lv := range lvars {
+					if lv != own {
+						s.cfg.onCarrierLink(own, lv)
+					}
+				}
+			}
+		}
+	}
+	changed := false
+	if len(rootSrcs) > 0 || len(allSrcs) > 0 {
+		if composite || inPlace || canAliasCarrierType(s.audited, obj.Type()) || isTypeParamType(obj.Type()) {
+			var ownRoot []*types.Var
+			if (!composite && !inPlace) || (derefStore && s.addrTakenBare[obj]) {
+				ownRoot = rootSrcs
+			}
+			if s.addAliases(obj, ownRoot, allSrcs) {
+				changed = true
+			}
+		}
+	}
+	if s.addLinkAliases(obj, lvars) {
+		changed = true
+	}
+	if (composite || inPlace) && s.propagateMem(obj, pos, derefStore, rootSrcs, allSrcs, lvars) {
+		changed = true
+	}
+	return changed
+}
 
-	bindValTarget := func(target *flowir.Value, allSrcs, lvars []*types.Var) bool {
-		if target == nil || (len(allSrcs) == 0 && len(lvars) == 0) {
-			return false
-		}
-		if target.Kind == flowir.ValPlace {
-			return bindPlace(target.Place, nil, allSrcs, lvars, true)
-		}
+func (s *carrierAliasSolver) bindPlace(dst flowir.Place, rootSrcs, allSrcs, lvars []*types.Var, inPlace bool) bool {
+	if len(rootSrcs) == 0 && len(allSrcs) == 0 && len(lvars) == 0 {
+		return false
+	}
+	derefStore := !inPlace && len(dst.Projs) >= 1 && dst.Projs[len(dst.Projs)-1].Kind == flowir.ProjDeref
+	if dst.Obj != nil {
+		return s.bindObj(dst.Obj, dst.RootPos, !dst.IsBareVar(), inPlace, derefStore, rootSrcs, allSrcs, lvars)
+	}
+	if dst.Root == flowir.RootTransient && dst.Base != nil {
 		changed := false
-		walkTransientTargetValues(target, func(cur *flowir.Value) {
+		walkTransientTargetValues(dst.Base, func(cur *flowir.Value) {
 			if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
-				if bindObj(cur.Place.Obj, cur.Place.RootPos, true, true, false, nil, allSrcs, lvars) {
+				if s.bindObj(cur.Place.Obj, cur.Place.RootPos, true, !derefStore, derefStore, rootSrcs, allSrcs, lvars) {
 					changed = true
 				}
 			} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
-				if bindObj(cur.AddrPlace.Obj, cur.AddrPlace.RootPos, true, true, false, nil, allSrcs, lvars) {
+				if s.bindObj(cur.AddrPlace.Obj, cur.AddrPlace.RootPos, true, !derefStore, derefStore, rootSrcs, allSrcs, lvars) {
 					changed = true
 				}
 			}
 		})
 		return changed
 	}
+	return false
+}
 
-	scanMethodValues := func(v *flowir.Value) {
-		if cfg.onRHSMethodValue == nil || v == nil {
+func (s *carrierAliasSolver) bindValTarget(target *flowir.Value, allSrcs, lvars []*types.Var) bool {
+	if target == nil || (len(allSrcs) == 0 && len(lvars) == 0) {
+		return false
+	}
+	if target.Kind == flowir.ValPlace {
+		return s.bindPlace(target.Place, nil, allSrcs, lvars, true)
+	}
+	changed := false
+	walkTransientTargetValues(target, func(cur *flowir.Value) {
+		if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
+			if s.bindObj(cur.Place.Obj, cur.Place.RootPos, true, true, false, nil, allSrcs, lvars) {
+				changed = true
+			}
+		} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
+			if s.bindObj(cur.AddrPlace.Obj, cur.AddrPlace.RootPos, true, true, false, nil, allSrcs, lvars) {
+				changed = true
+			}
+		}
+	})
+	return changed
+}
+
+func (s *carrierAliasSolver) scanMethodValues(v *flowir.Value) {
+	if s.cfg.onRHSMethodValue == nil || v == nil {
+		return
+	}
+	var walk func(cur *flowir.Value)
+	walk = func(cur *flowir.Value) {
+		if cur == nil || cur.Kind == flowir.ValMakeClosure {
 			return
 		}
-		var walk func(cur *flowir.Value)
-		walk = func(cur *flowir.Value) {
-			if cur == nil || cur.Kind == flowir.ValMakeClosure {
-				return
+		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
+			for _, a := range cur.Args {
+				walk(a)
 			}
-			if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-				for _, a := range cur.Args {
-					walk(a)
-				}
-				flowir.ForEachIIFEReturnValue(cur, walk)
-				return
-			}
-			if cur.Kind == flowir.ValMethodVal {
-				cfg.onRHSMethodValue(cur, aliased)
-			}
-			cur.ForEachChildValue(func(ch *flowir.Value) bool {
-				walk(ch)
-				return true
-			})
+			flowir.ForEachIIFEReturnValue(cur, walk)
+			return
 		}
-		walk(v)
+		if cur.Kind == flowir.ValMethodVal {
+			s.cfg.onRHSMethodValue(cur, s.aliased)
+		}
+		cur.ForEachChildValue(func(ch *flowir.Value) bool {
+			walk(ch)
+			return true
+		})
 	}
+	walk(v)
+}
 
+func (s *carrierAliasSolver) scanCallBinds(v *flowir.Value) bool {
+	if v == nil || v.Kind == flowir.ValMakeClosure {
+		return false
+	}
+	changed := false
+	if v.Kind == flowir.ValCall {
+		switch v.CallKind {
+		case flowir.CallBuiltin:
+			switch {
+			case v.BuiltinName == "copy" && len(v.Args) == 2:
+				_, allSrcs := s.valSources(v.Args[1])
+				lvars := s.valLinks(v.Args[1])
+				if s.bindValTarget(v.Args[0], allSrcs, lvars) {
+					changed = true
+				}
+			case v.BuiltinName == "append" && len(v.Args) >= 2:
+				for _, elem := range v.Args[1:] {
+					_, allSrcs := s.valSources(elem)
+					lvars := s.valLinks(elem)
+					if s.bindValTarget(v.Args[0], allSrcs, lvars) {
+						changed = true
+					}
+				}
+			}
+		case flowir.CallPlain:
+			if s.cfg.onPlainCall != nil && !v.IsMethodExprCall {
+				s.cfg.onPlainCall(v, s.valSources, s.valLinks)
+			}
+		case flowir.CallIIFE:
+			for _, a := range v.Args {
+				if s.scanCallBinds(a) {
+					changed = true
+				}
+			}
+			if v.IIFE != nil {
+				v.ForEachArgParam(func(arg *flowir.Value, _ types.Type, _ int, paramIdx int, ok bool, packedVariadic bool) bool {
+					if !ok || paramIdx < 0 || paramIdx >= len(v.IIFE.Params) || arg == nil {
+						return true
+					}
+					pv := v.IIFE.Params[paramIdx]
+					if pv == nil {
+						return true
+					}
+					rootSrcs, allSrcs := s.valSources(arg)
+					if packedVariadic {
+						rootSrcs = nil
+					}
+					lvars := s.valLinks(arg)
+					if s.bindObj(pv, pv.Pos(), packedVariadic, false, false, rootSrcs, allSrcs, lvars) {
+						changed = true
+					}
+					return true
+				})
+			}
+			return changed
+		}
+	}
+	v.ForEachChildValue(func(ch *flowir.Value) bool {
+		if s.scanCallBinds(ch) {
+			changed = true
+		}
+		return true
+	})
+	return changed
+}
+
+func (s *carrierAliasSolver) solve() {
+	s.visitOps(func(op *flowir.Op) {
+		forEachOpTopValues(op, s.checkAddr)
+	})
 	for changed := true; changed; {
 		changed = false
-		var scanCallBinds func(v *flowir.Value)
-		scanCallBinds = func(v *flowir.Value) {
-			if v == nil || v.Kind == flowir.ValMakeClosure {
-				return
-			}
-			if v.Kind == flowir.ValCall {
-				switch v.CallKind {
-				case flowir.CallBuiltin:
-					switch {
-					case v.BuiltinName == "copy" && len(v.Args) == 2:
-						_, allSrcs := valSources(v.Args[1])
-						lvars := valLinks(v.Args[1])
-						if bindValTarget(v.Args[0], allSrcs, lvars) {
-							changed = true
-						}
-					case v.BuiltinName == "append" && len(v.Args) >= 2:
-						for _, elem := range v.Args[1:] {
-							_, allSrcs := valSources(elem)
-							lvars := valLinks(elem)
-							if bindValTarget(v.Args[0], allSrcs, lvars) {
-								changed = true
-							}
-						}
-					}
-				case flowir.CallPlain:
-					if cfg.onPlainCall != nil && !v.IsMethodExprCall {
-						cfg.onPlainCall(v, valSources, valLinks)
-					}
-				case flowir.CallIIFE:
-					for _, a := range v.Args {
-						scanCallBinds(a)
-					}
-					if v.IIFE != nil {
-						v.ForEachArgParam(func(arg *flowir.Value, _ types.Type, _ int, paramIdx int, ok bool, packedVariadic bool) bool {
-							if !ok || paramIdx < 0 || paramIdx >= len(v.IIFE.Params) || arg == nil {
-								return true
-							}
-							pv := v.IIFE.Params[paramIdx]
-							if pv == nil {
-								return true
-							}
-							rootSrcs, allSrcs := valSources(arg)
-							if packedVariadic {
-								rootSrcs = nil
-							}
-							lvars := valLinks(arg)
-							if bindObj(pv, pv.Pos(), packedVariadic, false, false, rootSrcs, allSrcs, lvars) {
-								changed = true
-							}
-							return true
-						})
-					}
-					return
-				}
-			}
-			v.ForEachChildValue(func(ch *flowir.Value) bool {
-				scanCallBinds(ch)
-				return true
-			})
-		}
-		visitOps(func(op *flowir.Op) {
-			forEachOpTopValues(op, scanMethodValues)
+		s.visitOps(func(op *flowir.Op) {
+			forEachOpTopValues(op, s.scanMethodValues)
 			switch op.Kind {
 			case flowir.OpAssign:
 				op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-					rootSrcs, allSrcs := valSources(src)
-					lvars := valLinks(src)
+					rootSrcs, allSrcs := s.valSources(src)
+					lvars := s.valLinks(src)
 					if op.AssignKind == flowir.AssignRange {
 						rootSrcs = allSrcs
 					}
 					if mapPlace, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil {
-						_, keyAll := valSources(keyVal)
-						keyLinks := valLinks(keyVal)
+						_, keyAll := s.valSources(keyVal)
+						keyLinks := s.valLinks(keyVal)
 						mergedAll := append([]*types.Var(nil), allSrcs...)
 						appendUniqueVars(&mergedAll, keyAll)
 						mergedLinks := append([]*types.Var(nil), lvars...)
 						appendUniqueVars(&mergedLinks, keyLinks)
-						if bindPlace(mapPlace, nil, mergedAll, mergedLinks, true) {
+						if s.bindPlace(mapPlace, nil, mergedAll, mergedLinks, true) {
 							changed = true
 						}
-					} else if bindPlace(dst, rootSrcs, allSrcs, lvars, false) {
+					} else if s.bindPlace(dst, rootSrcs, allSrcs, lvars, false) {
 						changed = true
 					}
 					dst.ForEachChildValue(func(cv *flowir.Value) bool {
-						scanCallBinds(cv)
+						if s.scanCallBinds(cv) {
+							changed = true
+						}
 						return true
 					})
 					return true
 				})
 				for _, src := range op.Srcs {
-					scanCallBinds(src)
+					if s.scanCallBinds(src) {
+						changed = true
+					}
 				}
 			case flowir.OpTypeSwitchBind:
 				if op.SwitchDst != nil && syntaxutil.IsLocalVar(op.SwitchDst) {
-					rootSrcs, allSrcs := valSources(op.SwitchSrc)
-					lvars := valLinks(op.SwitchSrc)
+					rootSrcs, allSrcs := s.valSources(op.SwitchSrc)
+					lvars := s.valLinks(op.SwitchSrc)
 					var swPos token.Pos
 					if op.SwitchAST != nil {
 						swPos = op.SwitchAST.Pos()
 					}
-					if bindObj(op.SwitchDst, swPos, false, false, false, rootSrcs, allSrcs, lvars) {
+					if s.bindObj(op.SwitchDst, swPos, false, false, false, rootSrcs, allSrcs, lvars) {
 						changed = true
 					}
 				}
-				scanCallBinds(op.SwitchSrc)
+				if s.scanCallBinds(op.SwitchSrc) {
+					changed = true
+				}
 			case flowir.OpChanSend:
-				_, sendAll := valSources(op.SendVal)
-				sendLinks := valLinks(op.SendVal)
-				if bindPlace(op.ChanPlace, nil, sendAll, sendLinks, true) {
+				_, sendAll := s.valSources(op.SendVal)
+				sendLinks := s.valLinks(op.SendVal)
+				if s.bindPlace(op.ChanPlace, nil, sendAll, sendLinks, true) {
 					changed = true
 				}
 				op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool {
-					scanCallBinds(cv)
+					if s.scanCallBinds(cv) {
+						changed = true
+					}
 					return true
 				})
-				scanCallBinds(op.ChanVal)
-				scanCallBinds(op.SendVal)
+				if s.scanCallBinds(op.ChanVal) {
+					changed = true
+				}
+				if s.scanCallBinds(op.SendVal) {
+					changed = true
+				}
 			case flowir.OpReturn:
 				for _, r := range op.Results {
-					scanCallBinds(r)
+					if s.scanCallBinds(r) {
+						changed = true
+					}
 				}
 			case flowir.OpDefer, flowir.OpGo:
-				scanCallBinds(op.Call)
+				if s.scanCallBinds(op.Call) {
+					changed = true
+				}
 			case flowir.OpExpr:
-				scanCallBinds(op.Expr)
+				if s.scanCallBinds(op.Expr) {
+					changed = true
+				}
 			}
 		})
 	}
-	return aliased, linkAliased
 }

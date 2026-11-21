@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // PackageClass is the mutability class of one graph package's source.
