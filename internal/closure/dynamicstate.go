@@ -161,7 +161,7 @@ func (h *Hasher) SnapshotScanInputs(pkgPaths ...string) TreeDigestSnapshot {
 				return TreeDigestSnapshot{}
 			}
 			srcFiles := p.SourceFiles()
-			if hasCgoCallbackBlindspot(&p) || len(p.SFiles) > 0 {
+			if p.HasCgoCallbackBlindspot() || len(p.SFiles) > 0 {
 				var err error
 				srcFiles, err = allPackageFiles(h.contextErr, p.Dir)
 				if err != nil {

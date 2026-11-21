@@ -160,7 +160,7 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
-		if p.Module == nil || closure.IsGeneratedTestMainPackage(p) {
+		if p.Module == nil || gotool.IsGeneratedTestMainPackage(p) {
 			return true
 		}
 		variants[p.PkgPath] = append(variants[p.PkgPath], p)
@@ -231,7 +231,7 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 	seenMetaID := map[string]bool{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooksCtx(ctx, audited, p, singleSubject, hooks))
-		nodeID := closure.LoadedListingID(p)
+		nodeID := gotool.LoadedListingID(p)
 		if !seenMetaID[nodeID] {
 			seenMetaID[nodeID] = true
 			class, pin := closure.ClassifyLoadedPackage(p, modCache)
@@ -240,7 +240,7 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 				impPaths = make([]string, 0, len(p.Imports))
 				for impPath, impPkg := range p.Imports {
 					if impPkg != nil {
-						impPaths = append(impPaths, closure.LoadedListingID(impPkg))
+						impPaths = append(impPaths, gotool.LoadedListingID(impPkg))
 					} else {
 						impPaths = append(impPaths, impPath)
 					}

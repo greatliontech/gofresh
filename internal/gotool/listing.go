@@ -5,7 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // PackageClass is the mutability class of one graph package's source, the
@@ -142,6 +147,109 @@ func (p ListedPackage) SourceFiles() []string {
 		f = append(f, set...)
 	}
 	return f
+}
+
+// SortedSourceFiles returns p.SourceFiles() sorted by name and deduplicated.
+func (p ListedPackage) SortedSourceFiles() []string {
+	files := p.SourceFiles()
+	sort.Strings(files)
+	return slices.Compact(files)
+}
+
+// HasNonHeaderNativeSource reports whether p selects any cgo, C/C++/ObjC/Fortran,
+// SWIG, or system-object input file.
+func (p ListedPackage) HasNonHeaderNativeSource() bool {
+	for _, files := range [][]string{
+		p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.FFiles,
+		p.SwigFiles, p.SwigCXXFiles, p.SysoFiles,
+	} {
+		if len(files) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// HasCgoCallbackBlindspot reports whether p selects any native source or header file.
+func (p ListedPackage) HasCgoCallbackBlindspot() bool {
+	return p.HasNonHeaderNativeSource() || len(p.HFiles) > 0
+}
+
+// HasNativeOrEmbed reports whether p selects any non-Go source, assembly,
+// header, system-object, or embedded data file.
+func (p ListedPackage) HasNativeOrEmbed() bool {
+	return p.HasCgoCallbackBlindspot() || len(p.SFiles) > 0 || len(p.EmbedFiles) > 0
+}
+
+// LoadedListingID returns the canonical listing graph identity for p, matching
+// go list's ImportPath (including test-variant suffixes when ForTest is set).
+func LoadedListingID(p *packages.Package) string {
+	if p == nil {
+		return ""
+	}
+	if p.ID != "" {
+		return p.ID
+	}
+	if p.ForTest != "" {
+		return p.PkgPath + " [" + p.ForTest + ".test]"
+	}
+	return p.PkgPath
+}
+
+// IsGeneratedTestMainPackage reports whether p is a toolchain-generated test
+// main package rather than a user-authored package main in a .test module.
+func IsGeneratedTestMainPackage(p *packages.Package) bool {
+	if p == nil || p.Name != "main" {
+		return false
+	}
+	target, ok := strings.CutSuffix(LoadedListingID(p), ".test")
+	if !ok || target == "" {
+		return false
+	}
+	for _, imp := range p.Imports {
+		if imp != nil && imp.ForTest == target {
+			return true
+		}
+	}
+	if len(p.GoFiles) == 1 && filepath.Base(p.GoFiles[0]) == "_testmain.go" {
+		return true
+	}
+	if len(p.CompiledGoFiles) == 1 && filepath.Base(p.CompiledGoFiles[0]) == "_testmain.go" {
+		return true
+	}
+	return p.Dir == "" && len(p.GoFiles) == 0 && len(p.CompiledGoFiles) == 0 && len(p.Syntax) == 0
+}
+
+// IsGeneratedTestMainPackageFor reports whether p is the toolchain-generated
+// test main specifically for pkgPath's test binary.
+func IsGeneratedTestMainPackageFor(p *packages.Package, pkgPath string) bool {
+	return pkgPath != "" && LoadedListingID(p) == pkgPath+".test" && IsGeneratedTestMainPackage(p)
+}
+
+// EmbedRoots resolves the directory or file each //go:embed pattern is anchored
+// at — the pattern's longest metacharacter-free prefix relative to dir — so
+// directory trees whose membership go list resolves are recorded whole.
+func EmbedRoots(dir string, patternSets ...[]string) []string {
+	seen := map[string]bool{}
+	var roots []string
+	for _, patterns := range patternSets {
+		for _, pattern := range patterns {
+			pattern = strings.TrimPrefix(pattern, "all:")
+			root := ""
+			for _, segment := range strings.Split(pattern, "/") {
+				if strings.ContainsAny(segment, `*?[\`) {
+					break
+				}
+				root = filepath.Join(root, segment)
+			}
+			full := filepath.Join(dir, root)
+			if !seen[full] {
+				seen[full] = true
+				roots = append(roots, full)
+			}
+		}
+	}
+	return roots
 }
 
 // ParseListing decodes a `go list -json` stream until io.EOF, refusing

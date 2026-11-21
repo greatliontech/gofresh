@@ -13,6 +13,7 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // MaximalIdentity is the comparable source and derivation dependency identity of a
@@ -31,19 +32,19 @@ type BlockerKind uint8
 
 // These kinds project the existing maximal scan's classifications.
 const (
-	BlockerOpaque             BlockerKind = BlockerKind(externalEffectOpaque)
-	BlockerStandardInput      BlockerKind = BlockerKind(externalEffectStandardInput)
-	BlockerFormattedOutput    BlockerKind = BlockerKind(externalEffectFormattedOutput)
-	BlockerEnvironment        BlockerKind = BlockerKind(externalEffectEnvironment)
-	BlockerFileIO             BlockerKind = BlockerKind(externalEffectFileIO)
-	BlockerFilesystemMutation BlockerKind = BlockerKind(externalEffectFilesystemMutation)
-	BlockerPathMutation       BlockerKind = BlockerKind(externalEffectPathMutation)
-	BlockerTestRuntime        BlockerKind = BlockerKind(externalEffectTestRuntime)
-	BlockerNetwork            BlockerKind = BlockerKind(externalEffectNetwork)
-	BlockerPlugin             BlockerKind = BlockerKind(externalEffectPlugin)
-	BlockerNative             BlockerKind = BlockerKind(externalEffectNative)
-	BlockerLinkage            BlockerKind = BlockerKind(externalEffectLinkage)
-	BlockerUnauditedStandard  BlockerKind = BlockerKind(externalEffectUnauditedStandard)
+	BlockerOpaque             BlockerKind = BlockerKind(ExternalEffectOpaque)
+	BlockerStandardInput      BlockerKind = BlockerKind(ExternalEffectStandardInput)
+	BlockerFormattedOutput    BlockerKind = BlockerKind(ExternalEffectFormattedOutput)
+	BlockerEnvironment        BlockerKind = BlockerKind(ExternalEffectEnvironment)
+	BlockerFileIO             BlockerKind = BlockerKind(ExternalEffectFileIO)
+	BlockerFilesystemMutation BlockerKind = BlockerKind(ExternalEffectFilesystemMutation)
+	BlockerPathMutation       BlockerKind = BlockerKind(ExternalEffectPathMutation)
+	BlockerTestRuntime        BlockerKind = BlockerKind(ExternalEffectTestRuntime)
+	BlockerNetwork            BlockerKind = BlockerKind(ExternalEffectNetwork)
+	BlockerPlugin             BlockerKind = BlockerKind(ExternalEffectPlugin)
+	BlockerNative             BlockerKind = BlockerKind(ExternalEffectNative)
+	BlockerLinkage            BlockerKind = BlockerKind(ExternalEffectLinkage)
+	BlockerUnauditedStandard  BlockerKind = BlockerKind(ExternalEffectUnauditedStandard)
 )
 
 // Blocker is a caller-owned projection of a conservative classification, covering
@@ -85,13 +86,13 @@ type MaximalFacts struct {
 	Diagnostic string
 }
 
-func newMaximalFacts(identity MaximalIdentity, effects []externalEffect, preferred string) MaximalFacts {
+func newMaximalFacts(identity MaximalIdentity, effects []ExternalEffect, preferred string) MaximalFacts {
 	owned := make([]Blocker, len(effects))
 	for i, effect := range effects {
 		owned[i] = Blocker{
-			Kind: BlockerKind(effect.kind), Package: effect.packagePath,
-			Symbol: effect.symbol, Detail: effect.detail, Reason: effect.reason,
-			Observable: effect.observable, Unrefinable: effect.unrefinable,
+			Kind: BlockerKind(effect.Kind), Package: effect.PackagePath,
+			Symbol: effect.Symbol, Detail: effect.Detail, Reason: effect.Reason,
+			Observable: effect.Observable, Unrefinable: effect.Unrefinable,
 		}
 	}
 	// The scan's first-occurrence order is not semantic. Canonicalize all fields
@@ -170,22 +171,22 @@ func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subjec
 			}
 		}
 	}
-	var effects []externalEffect
-	var candidates []externalEffect
+	var effects []ExternalEffect
+	var candidates []ExternalEffect
 	var fallback string
-	record := func(scan maximalEffectScan) {
-		for _, effect := range scan.effects {
-			effects = appendExternalEffect(effects, effect)
-			candidates = appendExternalEffect(candidates, effect)
+	record := func(scan MaximalEffectScan) {
+		for _, effect := range scan.Effects {
+			effects = AppendExternalEffect(effects, effect)
+			candidates = AppendExternalEffect(candidates, effect)
 		}
-		for _, candidate := range scan.importCandidates {
-			candidates = appendExternalEffect(candidates, candidate)
+		for _, candidate := range scan.ImportCandidates {
+			candidates = AppendExternalEffect(candidates, candidate)
 		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fallback == "" || scan.preferred < fallback) {
-			fallback = scan.preferred
+		if len(scan.Effects) == 0 && len(scan.ImportCandidates) == 0 && scan.Preferred != "" && (fallback == "" || scan.Preferred < fallback) {
+			fallback = scan.Preferred
 		}
 	}
-	var testingScan maximalEffectScan
+	var testingScan MaximalEffectScan
 	for _, pkg := range pkgs {
 		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
 			continue
@@ -205,14 +206,14 @@ func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subjec
 				if object == nil || object.Pkg() == nil || object.Pkg().Path() != "testing" {
 					return true
 				}
-				if effect, ok := classBEffect("testing", object.Name()); ok {
-					testingScan.add(effect)
+				if effect, ok := ClassBEffect("testing", object.Name()); ok {
+					testingScan.Add(effect)
 				}
 				return true
 			})
 		}
 	}
-	testingScan.preferred = preferredEffectReason(testingScan.effects)
+	testingScan.Preferred = PreferredEffectReason(testingScan.Effects)
 	record(testingScan)
 
 	inCone := map[*packages.Package]bool{}
@@ -258,7 +259,7 @@ func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subjec
 			record(scan)
 		}
 	}
-	selected := preferredEffectReason(candidates)
+	selected := PreferredEffectReason(candidates)
 	if selected == "" {
 		selected = fallback
 	}
@@ -270,22 +271,13 @@ func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subjec
 	}, effects, selected), nil
 }
 
-// isSourceOnlyStandardPackage reports whether pkgPath is in the verified
-// source-only pure standard-library package set.
-func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
-	if !audited {
-		return false
-	}
-	return auditset.PurePackage(pkgPath)
-}
-
 func packageHasClassifiedExternalAPI(pkgPath string) bool {
 	return auditset.ClassBPackage(pkgPath)
 }
 
-// implicitImportName is the fallback identifier derived from an import path
-// when no package listing supplies the declared package name.
-func implicitImportName(pkgPath string) string {
+// ImplicitImportName returns the fallback identifier derived from an import
+// path when no package listing supplies the declared package name.
+func ImplicitImportName(pkgPath string) string {
 	base := path.Base(pkgPath)
 	if len(base) > 1 && base[0] == 'v' && strings.TrimLeft(base[1:], "0123456789") == "" {
 		if dir := path.Dir(pkgPath); dir != "." && dir != "/" {
@@ -293,6 +285,10 @@ func implicitImportName(pkgPath string) string {
 		}
 	}
 	return base
+}
+
+func implicitImportName(pkgPath string) string {
+	return ImplicitImportName(pkgPath)
 }
 
 func listedDeclaredNames(pkgs []listPkg) map[string]string {
@@ -323,7 +319,7 @@ func listedNonStandardPaths(pkgs []listPkg) map[string]bool {
 		if p.Standard || p.Module == nil {
 			continue
 		}
-		if src := p.SourcePath(); src != "" && isStdImportPath(src) {
+		if src := p.SourcePath(); src != "" && syntaxutil.IsStandardLibraryPkgPath(src) {
 			if out == nil {
 				out = make(map[string]bool)
 			}
@@ -351,7 +347,7 @@ func scanOverridesKey(declaredNames map[string]string, nonStdPaths map[string]bo
 		}
 	}
 	for pkgPath := range nonStdPaths {
-		if isStdImportPath(pkgPath) {
+		if syntaxutil.IsStandardLibraryPkgPath(pkgPath) {
 			overrides = append(overrides, "nonstd:"+pkgPath)
 		}
 	}
@@ -364,17 +360,17 @@ func scanOverridesKey(declaredNames map[string]string, nonStdPaths map[string]bo
 }
 
 func trueReason(pkgPath string) string {
-	return trueExternalEffect(pkgPath).reason
+	return trueExternalEffect(pkgPath).Reason
 }
 
 // trueExternalEffect names an always-external package's effect.
-func trueExternalEffect(pkgPath string) externalEffect {
+func trueExternalEffect(pkgPath string) ExternalEffect {
 	switch {
 	case pkgPath == "plugin":
-		return symbolExternalEffect(externalEffectPlugin, pkgPath, "", "reaches plugin")
+		return SymbolExternalEffect(ExternalEffectPlugin, pkgPath, "", "reaches plugin")
 	case auditset.NetworkPackage(pkgPath):
-		return symbolExternalEffect(externalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
+		return SymbolExternalEffect(ExternalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
 	default:
-		return symbolExternalEffect(externalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")
+		return SymbolExternalEffect(ExternalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")
 	}
 }

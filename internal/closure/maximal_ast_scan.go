@@ -13,7 +13,8 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/cprep"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // importAlias is one import declaration's resolved alias and path, shared
@@ -28,31 +29,31 @@ type importAlias struct {
 // of the file's bytes. One read and one parse serve both the effect
 // collection and the preferred-reason derivation
 // (equivalence-pinned by TestFileEffectScanMatchesTwoPassReference).
-func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error) {
+func maximalFileEffects(audited bool, filename string) (MaximalEffectScan, error) {
 	fb, err := readBytes(filename)
 	if err != nil {
-		return maximalEffectScan{}, err
+		return MaximalEffectScan{}, err
 	}
 	return maximalFileEffectsContent(audited, filename, fb.content)
 }
 
 // maximalFileEffectsContent is the scan over bytes already read.
-func maximalFileEffectsContent(audited bool, filename string, content []byte) (maximalEffectScan, error) {
+func maximalFileEffectsContent(audited bool, filename string, content []byte) (MaximalEffectScan, error) {
 	return maximalFileEffectsContentWithNames(audited, filename, content, nil)
 }
 
 // maximalFileEffectsContentWithNames scans file bytes using declaredNames
 // (when supplied by the package listing) to bind unnamed imports to their
 // actual declared package names before falling back to path derivation.
-func maximalFileEffectsContentWithNames(audited bool, filename string, content []byte, declaredNames map[string]string) (maximalEffectScan, error) {
+func maximalFileEffectsContentWithNames(audited bool, filename string, content []byte, declaredNames map[string]string) (MaximalEffectScan, error) {
 	return maximalFileEffectsContentWithNamesFiltered(audited, filename, content, declaredNames, nil)
 }
 
-func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
+func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, reachedDecls map[FuncDeclKey]bool) (MaximalEffectScan, error) {
 	return maximalFileEffectsContentWithContextFiltered(audited, filename, content, declaredNames, nil, reachedDecls)
 }
 
-func maximalFileEffectsContentWithContextFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
+func maximalFileEffectsContentWithContextFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls map[FuncDeclKey]bool) (MaximalEffectScan, error) {
 	return maximalFileEffectsContentWithZeroGlobals(audited, filename, content, declaredNames, nonStdPaths, reachedDecls, nil, "", nil, nil, nil, nil)
 }
 
@@ -138,7 +139,7 @@ func parseMaximalFile(filename string, content []byte, declaredNames map[string]
 	if len(nonStdPaths) > 0 {
 		stdAliases = make(map[string]string, len(aliases))
 		for alias, pkgPath := range aliases {
-			if !(isStdImportPath(pkgPath) && nonStdPaths[pkgPath]) {
+			if !(syntaxutil.IsStandardLibraryPkgPath(pkgPath) && nonStdPaths[pkgPath]) {
 				stdAliases[alias] = pkgPath
 			}
 		}
@@ -198,83 +199,66 @@ func (h *Hasher) parsedMaximalFile(filename string, content []byte, declaredName
 	return parsed, nil
 }
 
-func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (maximalEffectScan, error) {
+func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[FuncDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[PkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (MaximalEffectScan, error) {
 	parsed, err := parseMaximalFile(filename, content, declaredNames, nonStdPaths)
 	if err != nil {
-		return maximalEffectScan{}, err
+		return MaximalEffectScan{}, err
 	}
 	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, false, false), nil
 }
 
-func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe, trackedChdirSafe bool) maximalEffectScan {
+func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[FuncDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[PkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe, trackedChdirSafe bool) MaximalEffectScan {
 	file := parsed.file
 	text := parsed.text
 	hasWasmImport := parsed.hasWasmImport
-	hasLinkname := hasRawGoLinkname(text) && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
-	var scan maximalEffectScan
-	// The preferred diagnostic derives from the same single walk's
-	// effect set under the shared cause-preference order
-	// (preferredEffectReason); the potential-external import fallback
-	// names a dependence only for an effect-less file
-	// (REQ-closure-observability-cause-order).
+	hasLinkname := cprep.HasRawGoLinkname(text) && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
+	var scan MaximalEffectScan
 	potentialExternal := ""
 	if hasWasmImport {
-		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
-		effect.unrefinable = true
-		scan.add(effect)
+		effect := OpaqueExternalEffect(ExternalEffectLinkage, "reaches go:wasmimport")
+		effect.Unrefinable = true
+		scan.Add(effect)
 	}
 	if hasLinkname {
-		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
+		scan.Add(OpaqueExternalEffect(ExternalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
 	for _, collision := range parsed.collisions {
-		scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, collision))
+		scan.Add(OpaqueExternalEffect(ExternalEffectUnauditedStandard, collision))
 	}
 	for _, imp := range parsed.imports {
-		if isStdImportPath(imp.pkgPath) && nonStdPaths[imp.pkgPath] {
+		if syntaxutil.IsStandardLibraryPkgPath(imp.pkgPath) && nonStdPaths[imp.pkgPath] {
 			continue
 		}
 		if imp.pkgPath == "testing" {
 			if imp.alias == "." {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
+				scan.Add(OpaqueExternalEffect(ExternalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
 				potentialExternal = imp.pkgPath
 			}
 			continue
 		}
 		if auditset.AlwaysExternalPackage(imp.pkgPath) && imp.alias != "." && imp.alias != "_" {
-			// A plain always-external import is a diagnostic candidate
-			// only: the dot and blank spellings record the effect
-			// itself below.
-			scan.importCandidates = appendExternalEffect(scan.importCandidates, trueExternalEffect(imp.pkgPath))
+			scan.ImportCandidates = AppendExternalEffect(scan.ImportCandidates, trueExternalEffect(imp.pkgPath))
 		}
 		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
 			potentialExternal = imp.pkgPath
 		}
-		if potentialExternal == "" && !(imp.alias == "_" && imp.pkgPath == "unsafe") && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
+		if potentialExternal == "" && !(imp.alias == "_" && imp.pkgPath == "unsafe") && syntaxutil.IsStandardLibraryPkgPath(imp.pkgPath) && !IsSourceOnlyStandardPackage(audited, imp.pkgPath) {
 			potentialExternal = imp.pkgPath
 		}
-		// Blank-importing the compiler pseudo-package "unsafe" (required for
-		// //go:linkname directives, which are classified independently above)
-		// executes no package init and introduces no unqualified identifiers;
-		// dot-importing "unsafe" remains blocked.
 		if imp.alias == "." || (imp.alias == "_" && imp.pkgPath != "unsafe") {
 			if auditset.AlwaysExternalPackage(imp.pkgPath) {
-				scan.add(trueExternalEffect(imp.pkgPath))
-			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
+				scan.Add(trueExternalEffect(imp.pkgPath))
+			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || syntaxutil.IsStandardLibraryPkgPath(imp.pkgPath) && !IsSourceOnlyStandardPackage(audited, imp.pkgPath) {
+				scan.Add(OpaqueExternalEffect(ExternalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
 			}
 		}
 	}
 	stdAliases := parsed.stdAliases
-	// The canonical test-main epilogue is harness protocol, not an
-	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
-	// declaration is admitted exactly as the observed test-main walk
-	// admits it - it runs post-bracket and adds no input channel to any
-	// subject's execution (REQ-closure-observability-testmain-exit).
 	testMainDecl := parsed.testMainDecl
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
 	}
-	unreachedDecls := unreachedASTDecls(parsed.dir, parsed.pkgClause, file, testMainDecl, reachedDecls)
+	unreachedDecls := UnreachedASTDecls(parsed.dir, parsed.pkgClause, file, testMainDecl, reachedDecls)
 	inUnreachedDecl := func(node ast.Node) bool {
 		for _, d := range unreachedDecls {
 			if node.Pos() >= d.Pos() && node.End() <= d.End() {
@@ -292,11 +276,11 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 		}
 		return false
 	}
-	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
-		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazardForPkg(audited, effect, pkgConfinedUnsafe, trackedChdirSafe) {
+	addSelEffect := func(sel *ast.SelectorExpr, effect ExternalEffect) {
+		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !PackageWideMaximalHazardForPkg(audited, effect, pkgConfinedUnsafe, trackedChdirSafe) {
 			return
 		}
-		scan.add(effect)
+		scan.Add(effect)
 	}
 	allowedTimeUnixChained := map[*ast.SelectorExpr]bool{}
 	ast.Inspect(file, func(node ast.Node) bool {
@@ -319,27 +303,16 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 				if allowedTimeUnixChained[sel] {
 					return true
 				}
-				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
+				if effect, ok := ClassBEffect(pkgPath, sel.Sel.Name); ok {
 					addSelEffect(sel, effect)
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
 					// admitted test-main epilogue
-				} else if isCompileTimeUnsafeIntrinsic(pkgPath, sel.Sel.Name) {
-					// Go language compile-time layout intrinsics (unsafe.Alignof,
-					// unsafe.Offsetof, unsafe.Sizeof) evaluate strictly to compile-time
-					// uintptr constants determined by (MaximalClosure, Toolchain,
-					// BuildConfig) without executing runtime code or dereferencing
-					// runtime memory; operand syntax continues to be walked below
-					// (REQ-closure-observability-unsafe).
-				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
-					// flag registration is a process-local registry
-					// mutation; the name-based admission is sound
-					// because the registration-facts sink judgment
-					// guards every call site program-wide - traced
-					// storage refuses on reference, an untraceable
-					// sink poisons the package
-					// (REQ-closure-observability-flag-registration).
-				} else if !admittedPureStandardOrDelegateSymbol(audited, nil, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
-					addSelEffect(sel, unauditedStandardEffect(pkgPath, sel.Sel.Name))
+				} else if IsCompileTimeUnsafeIntrinsic(pkgPath, sel.Sel.Name) {
+					// Go language compile-time layout intrinsics
+				} else if FlagRegistrationSymbol(pkgPath, sel.Sel.Name) {
+					// flag registration guarded program-wide
+				} else if !AdmittedPureStandardOrDelegateSymbol(audited, nil, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || syntaxutil.IsStandardLibraryPkgPath(pkgPath) && !IsStandardFallbackExempt(audited, pkgPath)) {
+					addSelEffect(sel, UnauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
 			}
 		}
@@ -356,32 +329,28 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 		}
 	}
 	for _, effect := range testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe, file, stdAliases, parsed.handleTypes, unreachedDecls, testingSkipped) {
-		scan.add(effect)
+		scan.Add(effect)
 	}
-	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
-	if scan.preferred == "" && potentialExternal != "" {
-		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
+	scan.Preferred = PreferredEffectReason(append(append([]ExternalEffect(nil), scan.Effects...), scan.ImportCandidates...))
+	if scan.Preferred == "" && potentialExternal != "" {
+		scan.Preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
 	return scan
 }
 
-func isCompileTimeUnsafeIntrinsic(pkgPath, name string) bool {
-	return pkgPath == "unsafe" && refconfine.IsCompileTimeUnsafeBuiltinName(name)
-}
-
-func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool {
+func hasPkgZeroGlobals(zeroGlobalDecls map[PkgVarKey]bool, pkgPath string) bool {
 	if len(zeroGlobalDecls) == 0 || pkgPath == "" {
 		return false
 	}
 	for k := range zeroGlobalDecls {
-		if k.pkgPath == pkgPath {
+		if k.PkgPath == pkgPath {
 			return true
 		}
 	}
 	return false
 }
 
-func deadZeroGlobalIfBodiesParsed(parsed *parsedMaximalFile, pkgPath string, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
+func deadZeroGlobalIfBodiesParsed(parsed *parsedMaximalFile, pkgPath string, startupOnlyDecls map[FuncDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[PkgVarKey]bool, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
 	hasStartup := hasPkgZeroGlobals(startupZeroGlobalDecls, pkgPath)
 	hasWhole := hasPkgZeroGlobals(wholeZeroGlobalDecls, pkgPath)
 	if parsed == nil || parsed.file == nil || pkgPath == "" || (!hasStartup && !hasWhole) {
@@ -396,7 +365,7 @@ func deadZeroGlobalIfBodiesParsed(parsed *parsedMaximalFile, pkgPath string, sta
 		isStartupOnlyDecl := false
 		if isInitDecl {
 			isStartupOnlyDecl = hasStartup
-		} else if key, ok := funcDeclKeyForAST(parsed.dir, parsed.pkgClause, fn); ok && startupOnlyDecls[key] {
+		} else if key, ok := FuncDeclKeyForAST(parsed.dir, parsed.pkgClause, fn); ok && startupOnlyDecls[key] {
 			isStartupOnlyDecl = true
 		}
 		if !hasWhole && !isStartupOnlyDecl {
@@ -545,7 +514,7 @@ func funcLocalDeclaredNames(fn *ast.FuncDecl) map[string]bool {
 	return names
 }
 
-func ifCondRequiresNonZeroGlobal(expr ast.Expr, pkgPath string, shadowed map[string]bool, zeroGlobalDecls map[pkgVarKey]bool) bool {
+func ifCondRequiresNonZeroGlobal(expr ast.Expr, pkgPath string, shadowed map[string]bool, zeroGlobalDecls map[PkgVarKey]bool) bool {
 	if expr == nil || pkgPath == "" || len(zeroGlobalDecls) == 0 {
 		return false
 	}
@@ -558,12 +527,14 @@ func ifCondRequiresNonZeroGlobal(expr ast.Expr, pkgPath string, shadowed map[str
 			if id == nil || id.Name == "" || shadowed[id.Name] {
 				return false
 			}
-			return zeroGlobalDecls[pkgVarKey{pkgPath: pkgPath, name: id.Name}]
+			return zeroGlobalDecls[PkgVarKey{PkgPath: pkgPath, Name: id.Name}]
 		},
 	)
 }
 
-func ifCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGlobalDecls map[pkgVarKey]bool) bool {
+// IfCondRequiresNonZeroGlobalTyped reports whether expr requires a variable in
+// zeroGlobalDecls to be non-zero using type-checked identifier bindings.
+func IfCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGlobalDecls map[PkgVarKey]bool) bool {
 	if expr == nil || info == nil || len(zeroGlobalDecls) == 0 {
 		return false
 	}
@@ -584,7 +555,7 @@ func ifCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGloba
 			if !ok || v == nil || v.IsField() || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() {
 				return false
 			}
-			return zeroGlobalDecls[pkgVarKey{pkgPath: v.Pkg().Path(), name: v.Name()}]
+			return zeroGlobalDecls[PkgVarKey{PkgPath: v.Pkg().Path(), Name: v.Name()}]
 		},
 	)
 }
@@ -692,22 +663,22 @@ func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string,
 }
 
 // testingMethodEffectsFiltered returns the file's testing-runtime effects.
-func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) []externalEffect {
+func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) []ExternalEffect {
 	return testingMethodEffectsFilteredWithSkipped(file, aliases, unreachedDecls, nil)
 }
 
-func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
+func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []ExternalEffect {
 	if file == nil {
 		return nil
 	}
 	return testingMethodEffectsFilteredWithHandles(false, false, file, aliases, testingHandleTypeNames(file, aliases), unreachedDecls, skippedBody)
 }
 
-func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
+func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []ExternalEffect {
 	if file == nil {
 		return nil
 	}
-	var effects []externalEffect
+	var effects []ExternalEffect
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
 		if !ok || function.Type.Params == nil || function.Body == nil {
@@ -725,11 +696,11 @@ func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, fil
 			continue
 		}
 		unreached := slices.Contains(unreachedDecls, ast.Node(function))
-		addTestingEffect := func(effect externalEffect) {
-			if unreached && !packageWideMaximalHazardForPkg(audited, effect, false, trackedChdirSafe) {
+		addTestingEffect := func(effect ExternalEffect) {
+			if unreached && !PackageWideMaximalHazardForPkg(audited, effect, false, trackedChdirSafe) {
 				return
 			}
-			effects = appendExternalEffect(effects, effect)
+			effects = AppendExternalEffect(effects, effect)
 		}
 		// One body walk collects both the parent map and the name-propagation
 		// edges; the fixed point then iterates the small edge list instead of
@@ -785,7 +756,7 @@ func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, fil
 				}
 			}
 		}
-		escape := opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
+		escape := OpaqueExternalEffect(ExternalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
 				return false
@@ -825,7 +796,7 @@ func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, fil
 			if !ok || !receivers[receiver.Name] {
 				return true
 			}
-			if effect, ok := classBEffect("testing", selector.Sel.Name); ok {
+			if effect, ok := ClassBEffect("testing", selector.Sel.Name); ok {
 				addTestingEffect(effect)
 			}
 			return true

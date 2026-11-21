@@ -23,6 +23,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
@@ -635,7 +636,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 	if singleSubject {
 		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
 			req := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-			rooted, err := closure.InMemoryRootedFunctions(context.Background(), true, pkgs, subject.Package, []closure.Subject{req})
+			rooted, err := observability.InMemoryRootedFunctions(context.Background(), true, pkgs, subject.Package, []closure.Subject{req})
 			if err != nil {
 				return nil, nil, false
 			}
@@ -646,7 +647,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 		}
 	} else if packageProcess {
 		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
-			proof, err := closure.InMemoryBinaryRootedFunctions(context.Background(), true, pkgs, subject.Package)
+			proof, err := observability.InMemoryBinaryRootedFunctions(context.Background(), true, pkgs, subject.Package)
 			if err != nil {
 				return nil, nil, false
 			}

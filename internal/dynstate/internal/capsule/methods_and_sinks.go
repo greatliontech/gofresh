@@ -550,6 +550,9 @@ func DeriveNoPostInitCarrierWrites(
 	directCalleeIdents := map[*ast.Ident]bool{}
 	recordDepCallee := func(orig *types.Func) bool {
 		depPkg := orig.Pkg().Path()
+		if depPkg == "C" {
+			return false
+		}
 		if syntaxutil.IsStandardLibraryPkgPath(depPkg) {
 			return auditset.NonRetainingStdCallee(orig)
 		}

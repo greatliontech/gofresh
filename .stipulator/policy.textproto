@@ -9,10 +9,11 @@ invocations {
   go {
     packages: "."
     packages: "./internal/closure"
+    packages: "./internal/observability"
+    packages: "./internal/toolchain"
     race: true
-    # 20m governs the per-binary cap of the 2-package core witness run (giving
-    # each heavy binary half the host cores), and the 1800s invocation budget
-    # above bounds the core witness suite on a loaded host.
+    # 20m governs the per-binary cap of the core witness run, and the 1800s
+    # invocation budget above bounds the core witness suite on a loaded host.
     args: "-test.timeout=20m"
     bracket_paths: "/bin/sh"
     bracket_paths: "/usr/bin/sh"
@@ -29,9 +30,10 @@ invocations {
     seconds: 300
   }
   go {
+    packages: "./internal/asmverify"
     packages: "./internal/auditset"
     packages: "./internal/cachefile"
-    packages: "./internal/closure/internal/..."
+    packages: "./internal/cprep"
     packages: "./internal/dynstate/..."
     packages: "./internal/flowir"
     packages: "./internal/gotool"
@@ -40,6 +42,7 @@ invocations {
     packages: "./internal/outcome"
     packages: "./internal/propharness"
     packages: "./internal/refconfine"
+    packages: "./internal/rta"
     packages: "./internal/runtimeinput"
     packages: "./internal/syntaxutil"
     packages: "./internal/testenv"

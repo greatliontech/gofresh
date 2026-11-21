@@ -13,6 +13,8 @@ import (
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/observability"
 )
 
 // sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
@@ -410,7 +412,7 @@ func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *clos
 	for i, subject := range downgraded {
 		requests[i] = closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 	}
-	rooted, err := hasher.ComputeRootedFunctions(analysisCtx, requests)
+	rooted, err := observability.NewProver(hasher).ComputeRootedFunctions(analysisCtx, requests)
 	if err != nil {
 		return dischargeCut(ctx, analysisCtx, downgraded, err)
 	}
@@ -461,7 +463,7 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	inventories, err := hasher.ComputeBinaryRootedFunctions(analysisCtx, paths)
+	inventories, err := observability.NewProver(hasher).ComputeBinaryRootedFunctions(analysisCtx, paths)
 	if err != nil {
 		return dischargeCut(ctx, analysisCtx, downgraded, err)
 	}
@@ -516,7 +518,7 @@ func mergeDischargedKeys(existing string, added map[string]bool) string {
 
 // dischargeCulprits walks one package's root culprits against a
 // complete rooted-flow inventory (REQ-closure-shared-dynamic-state).
-func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, culpritSubj Subject, discharged map[string]bool) {
+func dischargeCulprits(proof observability.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, culpritSubj Subject, discharged map[string]bool) {
 	discharged = map[string]bool{}
 	for _, culprit := range state.rootCulprits[pkgPath] {
 		sites := state.culpritSites[pkgPath][culprit.Key]
@@ -688,10 +690,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	var rootLocals []localPkgEntry
 	matched := map[string]bool{}
 	for _, pkg := range load.Packages() {
-		if closure.IsGeneratedTestMainPackage(pkg) {
+		if gotool.IsGeneratedTestMainPackage(pkg) {
 			continue
 		}
-		listing := closure.LoadedListingID(pkg)
+		listing := gotool.LoadedListingID(pkg)
 		node, ok := nodesByListing[listing]
 		if !ok {
 			if pkg.ForTest != "" {
@@ -745,10 +747,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		var interEntries []localPkgEntry
 		packages.Visit(graphLoad.Packages(), nil, func(pkg *packages.Package) {
-			if closure.IsGeneratedTestMainPackage(pkg) {
+			if gotool.IsGeneratedTestMainPackage(pkg) {
 				return
 			}
-			listing := closure.LoadedListingID(pkg)
+			listing := gotool.LoadedListingID(pkg)
 			node, ok := nodesByListing[listing]
 			if !ok {
 				if pkg.ForTest != "" && seenTested[pkg.ForTest] && pkg.Module != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
@@ -235,10 +236,10 @@ func TestRuntimeInputDriftDoesNotOverrideStale(t *testing.T) {
 
 func TestValidationComparesObservationProofsByAvailabilityClass(t *testing.T) {
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	analyzed := closure.Observability{Observable: true}
-	rejected := closure.Observability{Reason: "startup effect: external dependence"}
-	unavailableA := closure.Observability{Reason: "observation analysis unavailable: analysis budget exhausted"}
-	unavailableB := closure.Observability{Reason: "observation analysis unavailable: load failed"}
+	analyzed := observability.Observability{Observable: true}
+	rejected := observability.Observability{Reason: "startup effect: external dependence"}
+	unavailableA := observability.Observability{Reason: "observation analysis unavailable: analysis budget exhausted"}
+	unavailableB := observability.Observability{Reason: "observation analysis unavailable: load failed"}
 	if err := compareObservationProof(subject, unavailableA, analyzed); !errors.Is(err, ErrAnalysisUnavailable) {
 		t.Fatalf("unavailable re-establishment of an analyzed proof = %v, want ErrAnalysisUnavailable", err)
 	}
@@ -1388,7 +1389,7 @@ func FuzzFreshnessVerdictAndObservationInvariants(f *testing.F) {
 				maximal:            map[Subject]subjectFacts{subj: {source: curMaxFacts}},
 				testVariantLedgers: map[string]testvariant.TestVariantLedger{subj.Package: ledger},
 			},
-			observable:           map[Subject]closure.Observability{subj: {Observable: observable, Reason: reason}},
+			observable:           map[Subject]observability.Observability{subj: {Observable: observable, Reason: reason}},
 			capturedObserved:     map[Subject]bool{},
 			attachedObservations: map[Subject]runtimeinput.State{},
 		}
@@ -1900,20 +1901,20 @@ func TestJudgmentBatchEqualsSingleAndSibling(t *testing.T) {
 func TestJudgmentApplicabilityNeedsCurrentProofAndOriginalSupport(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		current  closure.Observability
+		current  observability.Observability
 		original string
 		valid    bool
 	}{
-		{"current derivation", closure.Observability{Observable: true, OutcomeMethod: outcome.Method}, "supported", true},
-		{"no current outcome inventory", closure.Observability{Observable: true}, "supported", false},
-		{"current proof refused", closure.Observability{Reason: "opaque refusal"}, "supported", false},
-		{"current proof cannot supply original support", closure.Observability{Observable: true, OutcomeMethod: outcome.Method}, "identity-only", false},
-		{"current proof cannot supply missing capture", closure.Observability{Observable: true, OutcomeMethod: outcome.Method}, "absent", false},
+		{"current derivation", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "supported", true},
+		{"no current outcome inventory", observability.Observability{Observable: true}, "supported", false},
+		{"current proof refused", observability.Observability{Reason: "opaque refusal"}, "supported", false},
+		{"current proof cannot supply original support", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "identity-only", false},
+		{"current proof cannot supply missing capture", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "absent", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v, subject, fp, _ := judgmentFixture(t)
 			fp.InertTestVariantApplicability = InertTestVariantApplicability{Strategy: InertTestVariantExtension, TestVariantClosure: fp.TestVariantClosure}
-			v.observable = map[Subject]closure.Observability{subject: tc.current}
+			v.observable = map[Subject]observability.Observability{subject: tc.current}
 			if tc.original == "absent" {
 				fp.RuntimeInputs, fp.RuntimeDigest = "", ""
 			} else if tc.original == "identity-only" {
@@ -2067,8 +2068,8 @@ func TestDriftRefusalComponents(t *testing.T) {
 		t.Fatalf("equal guards = %q, want the bare fallback", got)
 	}
 	err := compareObservationProof(Subject{Package: "p", Symbol: "S"},
-		closure.Observability{Observable: false, Reason: "reaches os.Open"},
-		closure.Observability{Observable: true})
+		observability.Observability{Observable: false, Reason: "reaches os.Open"},
+		observability.Observability{Observable: true})
 	if err == nil || !strings.Contains(err.Error(), "captured observable, now not observable: reaches os.Open") {
 		t.Fatalf("proof drift = %v, want both dispositions named", err)
 	}
@@ -2127,6 +2128,8 @@ func f(h H, e E) {
 	h.Unit("p4", "", 0, 1)
 	e.progress(Progress{Phase: "p5"})
 	e.progress(gofresh.Progress{Phase: "p6", Package: "x"})
+	h.EmitProgress("p8", "")
+	h.EmitDiagnostic("p9", "", "")
 	h.other("p7")
 }
 `)
@@ -2136,7 +2139,7 @@ func f(h H, e E) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"p1", "p2", "p3", "p4", "p5", "p6"} {
+	for _, want := range []string{"p1", "p2", "p3", "p4", "p5", "p6", "p8", "p9"} {
 		if !got[want] {
 			t.Errorf("%s not read", want)
 		}
@@ -2177,7 +2180,8 @@ func emittedPhases(root string) (map[string]bool, error) {
 				if !ok || len(n.Args) == 0 {
 					return true
 				}
-				if name := sel.Sel.Name; name == "emitProgress" || name == "emitUnit" || name == "emitDiagnostic" || name == "Unit" {
+				switch sel.Sel.Name {
+				case "emitProgress", "EmitProgress", "emitUnit", "EmitUnit", "emitDiagnostic", "EmitDiagnostic", "Unit":
 					if lit, ok := n.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 						emitted[strings.Trim(lit.Value, "\"")] = true
 					}
@@ -2382,7 +2386,7 @@ func TestBatchRuntimeMoverDeduplicationAndEndpointIsolation(t *testing.T) {
 			moduleDir:            dir,
 			kind:                 CodeResult,
 			facts:                &observationFacts{maximal: maximal, guards: baseGuards, purity: map[Subject]string{}, vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{}},
-			observable:           map[Subject]closure.Observability{},
+			observable:           map[Subject]observability.Observability{},
 			capturedObserved:     map[Subject]bool{},
 			attachedObservations: map[Subject]runtimeinput.State{},
 		}
@@ -2527,7 +2531,7 @@ func TestCheckingUnitCloseFastPathProperty(t *testing.T) {
 				vouchDischarges: map[Subject]string{},
 				discharges:      map[Subject]attestationDischarges{},
 			},
-			observable: map[Subject]closure.Observability{
+			observable: map[Subject]observability.Observability{
 				liveSubj: {Observable: true, EffectFree: true},
 			},
 			runtimeCurrent: func(_ context.Context, manifest, _ string) (runtimeinput.State, error) {

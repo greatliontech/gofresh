@@ -1,13 +1,13 @@
-// Package closure computes the closure hash (REQ-closure-coverage): a sound fingerprint
-// of the source a subject exercises, used to decide whether a stored result is
-// still valid for HEAD.
+// Package closure computes Tier-1 source-closure hashes and syntactic/typed
+// external-effect scans (REQ-closure-coverage): a sound fingerprint of the
+// source a subject exercises, used to decide whether a stored result is still
+// valid for HEAD.
 //
-// ComputeMaximalBatch is the hashing entry point: the package test binary's
-// mutable-local sources are hashed by content, linked cache modules are pinned
-// by module version, and stdlib is cut by the toolchain guard.
-// ComputeObservabilityBatch is the precise-analysis entry point: whole-program
-// SSA reachability proves every subject-reachable external effect representable
-// by the observation stream, or refuses (REQ-closure-observability-analysis).
+// ComputeMaximalBatch and ComputeMaximalFactsBatch are the hashing and
+// package-graph fact entry points: the package test binary's mutable-local
+// sources are hashed by content, linked cache modules are pinned by module
+// version, and stdlib is cut by the toolchain guard. Tier-2 whole-program SSA
+// observability and rooted-flow proofs live in internal/observability.
 // Soundness (REQ-fresh-sound): the hashed set is always a superset of the
 // source able to affect the subject — never false-valid.
 package closure
@@ -20,19 +20,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 
-	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 )
-
-// program aliases the internal loader's type so every analysis site keeps
-// its package-local name.
-type program = prog.Program
 
 // AnalyzingFrontend is the version of the Go frontend this process
 // analyzes with — runtime.Version() of the analyzing binary, never the
@@ -50,7 +46,7 @@ type program = prog.Program
 // reverse direction — a source newer than the frontend — is refused at
 // the provenance boundary by the toolchain-skew check, which reads this
 // same spelling (REQ-closure-identity-strategy, REQ-fresh-toolchain-skew).
-func AnalyzingFrontend() string { return runtime.Version() }
+func AnalyzingFrontend() string { return toolchain.AnalyzingFrontend() }
 
 // Closure is the result of analyzing one benchmark (spec REQ-fresh-sound): the hash of its
 // closure, and whether that closure reaches an unhashable external dependence
@@ -98,12 +94,10 @@ const (
 	AmbiguousSubjectRefusal
 )
 
-// Hasher computes closure hashes. New resolves GOMODCACHE once for the
-// cache-vs-mutable classification; loaded whole-program SSA is cached per package
-// (the dominant cost, REQ-closure-analysis) so repeated per-benchmark Compute calls amortize it.
+// Hasher computes Tier-1 closure hashes and package-graph effect scans. NewAt
+// resolves GOMODCACHE once for the cache-vs-mutable classification.
 // A Hasher is single-goroutine by contract: every unsynchronized map and
-// callback it carries — progs, progErrs, memo state, and each program's
-// PkgScopeProbe — is read and mutated exclusively on the caller's goroutine
+// callback it carries is read and mutated exclusively on the caller's goroutine
 // (bounded I/O helpers such as directory-stamp checks touch no Hasher state
 // from worker goroutines).
 type Hasher struct {
@@ -127,30 +121,19 @@ type Hasher struct {
 	// hasFoldedModMetadata records per requested package whether at least one
 	// mutable-local go.mod was folded into the package's runtime/debug metadata.
 	hasFoldedModMetadata map[string]bool
-	// selectionResolved marks the two-axis toolchain-audit verdict as
-	// computed by the constructor; the zero value refuses, so a Hasher
-	// built without construction can never enable a standard-library
-	// admission by omission — the audit's fail-closed ladder survives
-	// the zero value.
-	selectionResolved bool
-	// selection is the two-axis toolchain-audit verdict this Hasher was
-	// built under, stored once: the audited bool, the diagnostic
-	// notice, and every refusal's attribution are its readings
-	// (REQ-closure-refusal-channels).
-	selection selectionDegradation
-	// source holds the selected standard-library digests, inventory, and
-	// verified pure-delegate set the verdict was judged over.
-	source   sourceDigests
-	progs    map[string]*program  // by package import path
-	progErrs map[string]error     // memoized load failures, by package import path
-	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
+	// selection holds the two-axis toolchain-audit verdict and selected
+	// standard-library digests, inventory, and verified pure-delegate set this
+	// Hasher was built under. Its zero value fails closed (Audited() == false)
+	// so an unconstructed Hasher never enables a standard-library admission.
+	selection toolchain.Selection
+	lists     map[string][]listPkg // parsed `go list -deps -test`, by package import path
 	// snapshot is the pass's env snapshot when the caller supplied one —
 	// the listing memo's scope identity; nil leaves that memo inert.
 	snapshot                 *gotool.EnvSnapshot
-	maximalTesting           map[string]maximalEffectScan            // typed testing-runtime effects by requested package
-	maximalTestingUnfiltered map[string]maximalEffectScan            // per-call unfiltered typed testing-runtime effects by requested package
+	maximalTesting           map[string]MaximalEffectScan            // typed testing-runtime effects by requested package
+	maximalTestingUnfiltered map[string]MaximalEffectScan            // per-call unfiltered typed testing-runtime effects by requested package
 	maximalEffects           map[string]maximalEffectsResult         // package external-effect scans by requested package
-	maximalFiles             map[string]maximalEffectScan            // per-file effect scans by absolute path
+	maximalFiles             map[string]MaximalEffectScan            // per-file effect scans by absolute path
 	maximalParsedFiles       map[string]*parsedMaximalFile           // per-call parsed ASTs and import tables for maximal scans
 	harnessVerdict           map[string]*propharness.VerifiedPackage // mechanical property-harness verification verdicts by package dir
 	// contribs memoizes per-node closure contributions within ONE
@@ -189,15 +172,15 @@ type Hasher struct {
 	// viewLoad, when set, is the observation pass's shared typed load; the
 	// testing-type effect scan reads it instead of performing its own load
 	// (REQ-fresh-coherent-view: one load per pass, no same-pass mixture).
-	viewLoad     *ViewLoad
-	packageMates map[string][]Subject
-	// listOnMiss, loadProgramOnMiss, and testingPackagesOnMiss allow the
-	// in-memory test harness to satisfy this Hasher's listing, SSA program, or
-	// testing-type scan load on demand without spawning `go list` or
-	// `packages.Load` subprocesses.
-	listOnMiss            func(h *Hasher, pkgPath string) ([]listPkg, bool)
-	loadProgramOnMiss     func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error)
-	testingPackagesOnMiss func(h *Hasher, pkgPath string) *program
+	viewLoad *ViewLoad
+	// listOnMiss, loadedPackages, and hasStarted allow callers (such as
+	// Tier-2 Prover or in-memory test harnesses) to supply already-loaded
+	// syntax/typed packages or listing overrides without coupling Tier-1
+	// closure to SSA program loading.
+	listOnMiss       func(h *Hasher, pkgPath string) ([]listPkg, bool)
+	loadedPackages   func(pkgPath string) []*packages.Package
+	hasStarted       func() bool
+	onResetCallScope func()
 }
 
 // NewBracketAt is NewAt for a precise-analysis
@@ -288,7 +271,7 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 	// The toolchain-source verdict is resolved at construction: the
 	// audited surface's digests under the pass's effective selection
 	// (memoized per selection scope), judged against the listing.
-	selection, source, err := resolveSelection(ctx, reader, buildFlags)
+	selection, err := toolchain.ResolveSelection(ctx, reader, buildFlags)
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
@@ -296,39 +279,47 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 	return &Hasher{
 		dir: dir, modCache: filepath.Clean(mc), ctx: ctx, env: normalized, packageEnv: packageEnv, runner: reader.Runner,
 		buildFlags: append([]string(nil), buildFlags...), buildVCS: buildVCS, hasFoldedModMetadata: map[string]bool{}, snapshot: snapshot,
-		selectionResolved: true, selection: selection, source: source,
-		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
-		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
+		selection: selection,
+		lists: map[string][]listPkg{}, maximalTesting: map[string]MaximalEffectScan{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]MaximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),
 	}, nil
 }
 
-// resetCallScope arms the per-batch-call memos: one call observes one
+// ResetCallScope arms the per-batch-call memos: one call observes one
 // tree generation (the Hasher's pinned contract), so each public batch
 // entry starts them empty — an edit between calls can never serve a
 // prior generation's entry or key a persistent memo under one.
+func (h *Hasher) ResetCallScope() {
+	h.resetCallScope()
+}
+
+// DropCallBuffers drops the per-batch-call file byte, parsed AST, and
+// unfiltered testing-scan buffers on return from a batch call.
+func (h *Hasher) DropCallBuffers() {
+	h.contents = nil
+	h.maximalParsedFiles = nil
+	h.maximalTestingUnfiltered = nil
+}
+
 func (h *Hasher) resetCallScope() {
+	if h == nil {
+		return
+	}
 	h.contribs = map[string]depContribution{}
 	h.testBinaryKeys = map[string]string{}
 	h.variantScope = map[string]testvariant.Identity{}
 	h.hasFoldedModMetadata = map[string]bool{}
-	// The bytes a call reads are that call's tree generation: the cache
-	// is armed here and dropped when the call returns (the batch entries
-	// defer it), so no later entry can fold bytes an earlier call saw.
 	h.contents = map[string]fileBytes{}
 	h.maximalParsedFiles = map[string]*parsedMaximalFile{}
-	h.maximalTestingUnfiltered = map[string]maximalEffectScan{}
-	// Clear per-program summaries on any retained SSA programs so subsequent
-	// batch calls re-verify non-Go .s/.h members against this call's contents.
-	for _, p := range h.progs {
-		if p != nil {
-			p.Summaries = nil
-		}
-	}
+	h.maximalTestingUnfiltered = map[string]MaximalEffectScan{}
 	for dir := range h.harnessVerdict {
 		if dir == "" || strings.HasPrefix(dir, "\x00") || !h.underCache(dir) {
 			delete(h.harnessVerdict, dir)
 		}
+	}
+	if h.onResetCallScope != nil {
+		h.onResetCallScope()
 	}
 }
 
@@ -349,11 +340,6 @@ func (h *Hasher) maximalHash(pkgPath string) (string, error) {
 		return "", err
 	}
 	return hashContributions(pkgPath, contribs)
-}
-
-func (h *Hasher) maximalContributions(pkgPath string) ([]string, error) {
-	contribs, _, err := h.maximalContributionsAndFiles(pkgPath)
-	return contribs, err
 }
 
 func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []string, error) {
@@ -652,7 +638,7 @@ func (h *Hasher) pkgHasFoldedModMetadata(pkgPath string) bool {
 }
 
 func (h *Hasher) admitsTier1ReadBuildInfo(pkgPath, basePkgName string) bool {
-	if h == nil || !h.SelectionAudited() || !h.source.pureDelegates["runtime/debug:ReadBuildInfo"] {
+	if h == nil || !h.selection.HasPureDelegate("runtime/debug:ReadBuildInfo") {
 		return false
 	}
 	if h.buildVCS != "false" || basePkgName != "main" {
@@ -661,8 +647,11 @@ func (h *Hasher) admitsTier1ReadBuildInfo(pkgPath, basePkgName string) bool {
 	return h.pkgHasFoldedModMetadata(pkgPath)
 }
 
-func (h *Hasher) admitsTier2ReadBuildInfo(pkgPath string) bool {
-	if h == nil || !h.SelectionAudited() || !h.source.pureDelegates["runtime/debug:ReadBuildInfo"] {
+// AdmitsTier2ReadBuildInfo reports whether runtime/debug.ReadBuildInfo is
+// admitted in Tier-2 observation for pkgPath under h's selection and -buildvcs
+// configuration.
+func (h *Hasher) AdmitsTier2ReadBuildInfo(pkgPath string) bool {
+	if h == nil || !h.selection.HasPureDelegate("runtime/debug:ReadBuildInfo") {
 		return false
 	}
 	if h.buildVCS != "false" && h.buildVCS != "auto" {
@@ -731,19 +720,11 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 	// Mutable-local (main module, local replace, workspace, vendor): hash content
 	// so a silent edit moves the hash (REQ-closure-mutable-local).
 	files := p.SourceFiles()
-	if hasCgoCallbackBlindspot(&p) {
-		if root := cgoIncludeRootOutsideDir(&p, h.modCache); root != "" {
-			return "", nil, fmt.Errorf("closure: cgo include root outside package dir: %s", root)
-		}
+	if p.HasCgoCallbackBlindspot() {
 		var err error
-		files, err = allPackageFiles(h.contextErr, p.Dir)
+		files, err = h.ValidateMutableCgoIncludes(h.contextErr, &p)
 		if err != nil {
 			return "", nil, err
-		}
-		if include, err := cgoEscapingIncludeWith(&p, files, h.readFile); err != nil {
-			return "", nil, err
-		} else if include != "" {
-			return "", nil, fmt.Errorf("closure: cgo include escapes package dir: %s", include)
 		}
 	}
 	if len(p.SFiles) > 0 {

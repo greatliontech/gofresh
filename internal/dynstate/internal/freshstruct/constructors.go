@@ -69,7 +69,7 @@ func (pf *PkgFreshConstructors) IsFieldFreshInCone(fd *ast.FuncDecl, field *type
 }
 
 func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string) {
-	if sum == nil || v == nil || guardPkg == "" || syntaxutil.IsStandardLibraryPkgPath(guardPkg) {
+	if sum == nil || v == nil || !syntaxutil.HasModuleImportPathShape(guardPkg) {
 		return
 	}
 	recordFreshVarCondGuard(sum, v, func(ref syntaxutil.TypeRef) syntaxutil.ConditionalStructMutation {

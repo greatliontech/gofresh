@@ -11,6 +11,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"os"
@@ -31,7 +32,7 @@ func applicabilityFixture(t *testing.T) (*Snapshot, Fingerprint, Subject, TestVa
 	s := Subject{"example.com/p", "BenchmarkEnv"}
 	f := Fingerprint{MaximalClosure: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
 	l := TestVariantLedger{BindingStrategy: testvariant.BindingStrategy}
-	v := &Snapshot{session: &engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
+	v := &Snapshot{session: &engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]observability.Observability{}}
 	return v, f, s, l
 }
 
@@ -273,7 +274,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			}
 		})
 		// A current analysis cut or unsupported inventory cannot reuse the old proof.
-		for name, proof := range map[string]closure.Observability{"cut": {Reason: unavailableReason("test cut")}, "unsupported": {Observable: true}} {
+		for name, proof := range map[string]observability.Observability{"cut": {Reason: unavailableReason("test cut")}, "unsupported": {Observable: true}} {
 			t.Run("current "+name, func(t *testing.T) {
 				t.Parallel()
 				v := newViewIn(t, guardedEnv)

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -329,4 +330,37 @@ func UnauditedTagGOROOTEnv(t testing.TB, baseEnv []string) (string, []string) {
 	return SharedGOROOTOverlayEnv(t, "badstd", baseEnv, map[string]string{
 		"src/strings/gofresh_badstd.go": unauditedBadStdSource,
 	})
+}
+
+// EnvWithGoBinAndTarget builds a clean cross-target test environment rooted at
+// goBin's GOROOT and bin directory with GOOS, GOARCH, and CGO_ENABLED=0 set.
+func EnvWithGoBinAndTarget(baseEnv []string, goBin, goos, goarch string) []string {
+	binDir := filepath.Dir(goBin)
+	gorootOut, err := exec.Command(goBin, "env", "GOROOT").Output()
+	goroot := strings.TrimSpace(string(gorootOut))
+	var out []string
+	var origPath string
+	for _, kv := range baseEnv {
+		switch {
+		case strings.HasPrefix(kv, "GOROOT="),
+			strings.HasPrefix(kv, "GOOS="),
+			strings.HasPrefix(kv, "GOARCH="),
+			strings.HasPrefix(kv, "GOFLAGS="),
+			strings.HasPrefix(kv, "CGO_ENABLED="):
+			continue
+		case strings.HasPrefix(kv, "PATH="):
+			origPath = strings.TrimPrefix(kv, "PATH=")
+		default:
+			out = append(out, kv)
+		}
+	}
+	newPath := binDir
+	if origPath != "" {
+		newPath += string(os.PathListSeparator) + origPath
+	}
+	out = append(out, "PATH="+newPath, "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0")
+	if err == nil && goroot != "" {
+		out = append(out, "GOROOT="+goroot)
+	}
+	return out
 }

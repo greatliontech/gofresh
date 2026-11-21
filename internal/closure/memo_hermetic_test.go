@@ -3,522 +3,20 @@ package closure
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
-	"time"
 )
-
-func memoModule(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	writeFile(t, dir, "go.mod", "module example.com/memo\n\ngo 1.26\n")
-	writeFile(t, dir, "memo.go", "package memo\n\nfunc Pure(x int) int { return x + 1 }\n")
-	writeFile(t, dir, "memo_test.go", `package memo
-
-import "testing"
-
-func TestPure(t *testing.T) {
-	if Pure(1) != 2 {
-		t.Fatal("pure")
-	}
-}
-`)
-	return dir
-}
-
-// A memoized proof serves byte-equivalent results without loading the
-// program (REQ-closure-observability-memo): the second hasher under the
-// same scope and unchanged source emits no load or prove events and
-// returns identical dispositions.
-func TestObservabilityMemoServesEquivalentProofsWithoutLoading(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{
-		{Package: "example.com/memo", Symbol: "Pure"},
-		{Package: "example.com/memo", Symbol: "TestPure"},
-		{Package: "example.com/memo", Symbol: "Missing"},
-	}
-
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	cold, err := first.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	second, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	loads := 0
-	second.OnProgress(func(phase, _ string) {
-		if phase == "load" || phase == "prove" {
-			loads++
-		}
-	})
-	second.OnUnit(func(phase, _ string, _, _ int) {
-		if phase == "prove" {
-			loads++
-		}
-	})
-	warm, err := second.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loads != 0 {
-		t.Fatalf("warm batch emitted %d load/prove events, want the memo to skip the program", loads)
-	}
-	if len(warm) != len(cold) {
-		t.Fatalf("warm results = %d, cold %d", len(warm), len(cold))
-	}
-	for subject, proof := range cold {
-		if warm[subject] != proof {
-			t.Fatalf("memoized proof for %s differs: cold %+v, warm %+v", subject.Symbol, proof, warm[subject])
-		}
-	}
-}
-
-// The memo misses on a different scope and on changed source: the key is
-// the complete input identity (REQ-closure-observability-memo).
-func TestObservabilityMemoMissesOnScopeAndSourceChange(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
-
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	if _, err := first.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-
-	otherScope, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherScope.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-b", BuildConfig: "build"})
-	loads := 0
-	otherScope.OnUnit(func(phase, _ string, _, _ int) {
-		if phase == "prove" {
-			loads++
-		}
-	})
-	if _, err := otherScope.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("a different scope served from the memo")
-	}
-
-	src, err := os.ReadFile(filepath.Join(dir, "memo.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "memo.go"), append(src, []byte("\nfunc Extra() int { return 9 }\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	moved, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	moved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	loads = 0
-	moved.OnUnit(func(phase, _ string, _, _ int) {
-		if phase == "prove" {
-			loads++
-		}
-	})
-	if _, err := moved.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("changed source served from the memo")
-	}
-
-	// Test-only source is part of the analyzed test binary: an edit that
-	// moves only the test-variant compartment must miss exactly as a core
-	// edit does — the analyzed program's bytes moved.
-	testSrc, err := os.ReadFile(filepath.Join(dir, "memo_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "memo_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	testMoved, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	testMoved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	loads = 0
-	testMoved.OnUnit(func(phase, _ string, _, _ int) {
-		if phase == "prove" {
-			loads++
-		}
-	})
-	if _, err := testMoved.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("a test-only source change served from the memo")
-	}
-}
-
-// TestBatchEntriesDiscardStaleTestBinaryKeys pins the key memo's call
-// scope: a batch entry must start from an empty test-binary-key memo, or
-// an edit between calls on one Hasher could key persistent memo entries
-// under a prior generation's identity.
-func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
-
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	if _, err := first.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-
-	// A pre-armed stale key is discarded at the batch entry, so the batch
-	// derives the real key and hits the entry the first pass stored.
-	second, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	second.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	loads := 0
-	second.OnProgress(func(phase, _ string) {
-		if phase == "load" || phase == "prove" {
-			loads++
-		}
-	})
-	second.OnUnit(func(phase, _ string, _, _ int) {
-		if phase == "prove" {
-			loads++
-		}
-	})
-	if _, err := second.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if loads != 0 {
-		t.Fatal("a stale pre-call key defeated the memo hit")
-	}
-	if second.testBinaryKeys["example.com/memo"] == "stale-key" {
-		t.Fatal("the observability batch retained a pre-call key generation")
-	}
-
-	third, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	third.variantScope = map[string]testvariant.Identity{"example.com/memo": {Hash: "stale-compartment"}}
-	batched, _, err := third.ComputeMaximalBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if third.testBinaryKeys["example.com/memo"] == "stale-key" {
-		t.Fatal("the hashing batch retained a pre-call key generation")
-	}
-	if batched[subjects[0]].TestVariants == "stale-compartment" {
-		t.Fatal("the hashing batch served a pre-call compartment identity")
-	}
-}
-
-// cancelWhenDirNonEmpty cancels every context consult once dir holds an
-// entry — deterministic mid-group cancellation landing right after the
-// first attribution slice's memo write.
-type cancelWhenDirNonEmpty struct{ dir string }
-
-func (c cancelWhenDirNonEmpty) Deadline() (time.Time, bool) { return time.Time{}, false }
-
-func (c cancelWhenDirNonEmpty) Done() <-chan struct{} { return nil }
-
-func (c cancelWhenDirNonEmpty) Value(any) any { return nil }
-
-func (c cancelWhenDirNonEmpty) Err() error {
-	entries, err := os.ReadDir(c.dir)
-	if err == nil && len(entries) > 0 {
-		return context.Canceled
-	}
-	return nil
-}
-
-// TestObservabilityMemoKeepsCompletedSlicesOnDeadline pins the write
-// granularity (REQ-closure-observability-memo): a deadline expiring
-// mid-group forfeits only the interrupted slice's proofs — every
-// completed slice persists and a later pass serves it from the memo.
-func TestObservabilityMemoKeepsCompletedSlicesOnDeadline(t *testing.T) {
-	cacheRoot := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheRoot)
-	dir := t.TempDir()
-	writeFile(t, dir, "go.mod", "module example.com/slices\n\ngo 1.26\n")
-	count := maxAttributedSubjects + 2
-	var source strings.Builder
-	source.WriteString("package slices\n\n")
-	subjects := make([]Subject, count)
-	for i := range subjects {
-		symbol := fmt.Sprintf("F%d", i)
-		fmt.Fprintf(&source, "func %s() int { return %d }\n", symbol, i)
-		subjects[i] = Subject{Package: "example.com/slices", Symbol: symbol}
-	}
-	writeFile(t, dir, "slices.go", source.String())
-
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	memoFiles := filepath.Join(cacheRoot, "gofresh", "observability")
-	first.ctx = cancelWhenDirNonEmpty{dir: memoFiles}
-	if _, err := first.ComputeObservabilityBatch(subjects); err == nil {
-		t.Fatal("mid-group cancellation did not surface")
-	}
-
-	entries, err := os.ReadDir(memoFiles)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("memo entries = %v, err %v; want exactly one", entries, err)
-	}
-	data, err := os.ReadFile(filepath.Join(memoFiles, entries[0].Name()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope cachefile.Envelope
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	var proofs map[string]Observability
-	if err := json.Unmarshal(envelope.Payload, &proofs); err != nil {
-		t.Fatal(err)
-	}
-	if len(proofs) != maxAttributedSubjects {
-		t.Fatalf("persisted proofs = %d, want the completed slice's %d", len(proofs), maxAttributedSubjects)
-	}
-	for i := range maxAttributedSubjects {
-		if _, ok := proofs[fmt.Sprintf("F%d", i)]; !ok {
-			t.Fatalf("completed slice's proof F%d missing from the memo", i)
-		}
-	}
-	for i := maxAttributedSubjects; i < count; i++ {
-		if _, ok := proofs[fmt.Sprintf("F%d", i)]; ok {
-			t.Fatalf("interrupted slice's proof F%d persisted", i)
-		}
-	}
-
-	second, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	results, err := second.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != count {
-		t.Fatalf("resumed batch results = %d, want %d", len(results), count)
-	}
-}
-
-// The pass counts what it persisted: a cold batch under a memo scope stores
-// its proof slice and the pass reports it, so the kept-on-cancel report's
-// numbers are the store's, never a constant.
-func TestObservabilityBatchCountsPersistedProofs(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}, {Package: "example.com/memo", Symbol: "TestPure"}}
-	cold, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cold.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	if _, err := cold.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if proofs, _ := cold.Persisted(); proofs != 1 {
-		t.Fatalf("cold batch persisted %d proof slices, want the one slice it stored", proofs)
-	}
-	warm, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	warm.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	if _, err := warm.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-	if proofs, _ := warm.Persisted(); proofs != 0 {
-		t.Fatalf("warm batch persisted %d proof slices, want none", proofs)
-	}
-	if served := warm.ServedSummary()["observability proof"]; !served["example.com/memo"] {
-		t.Fatalf("warm batch served = %v, want the package recorded under the observability class", warm.ServedSummary())
-	}
-}
-
-// A memo entry holding only other subjects of the package serves nothing:
-// the requested subject proves and stores, and the pass records no
-// observability-proof serve for the package.
-func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	cold, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cold.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	if _, err := cold.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "Pure"}}); err != nil {
-		t.Fatal(err)
-	}
-	sibling, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sibling.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"})
-	if _, err := sibling.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "TestPure"}}); err != nil {
-		t.Fatal(err)
-	}
-	if served := sibling.ServedSummary()["observability proof"]; served["example.com/memo"] {
-		t.Fatalf("an entry holding only Pure was reported as serving TestPure: %v", sibling.ServedSummary())
-	}
-	if proofs, _ := sibling.Persisted(); proofs != 1 {
-		t.Fatalf("the unserved subject persisted %d slices, want its own one", proofs)
-	}
-}
-
-func TestRootedFunctionsAndBinaryRootedFunctionsMemoServeAcrossPasses(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}, {Package: "example.com/memo", Symbol: "TestPure"}}
-	scope := AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"}
-
-	cold, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cold.SetAnalysisScope(scope)
-	firstRooted, err := cold.ComputeRootedFunctions(cold.ctx, subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	firstBinary, err := cold.ComputeBinaryRootedFunctions(cold.ctx, []string{"example.com/memo"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	warm, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	warm.SetAnalysisScope(scope)
-	secondRooted, err := warm.ComputeRootedFunctions(warm.ctx, subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(firstRooted, secondRooted) {
-		t.Fatalf("warm rooted functions = %+v, want %+v", secondRooted, firstRooted)
-	}
-	if !warm.ServedSummary()["rooted functions"]["example.com/memo"] {
-		t.Fatalf("expected warm ComputeRootedFunctions to record serve: %v", warm.ServedSummary())
-	}
-	secondBinary, err := warm.ComputeBinaryRootedFunctions(warm.ctx, []string{"example.com/memo"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(firstBinary, secondBinary) {
-		t.Fatalf("warm binary rooted functions = %+v, want %+v", secondBinary, firstBinary)
-	}
-	if !warm.ServedSummary()["binary rooted functions"]["example.com/memo"] {
-		t.Fatalf("expected warm ComputeBinaryRootedFunctions to record serve: %v", warm.ServedSummary())
-	}
-}
-
-func TestRootedFunctionsBatchEntriesDiscardStaleTestBinaryKeysAndHonorContext(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := memoModule(t)
-	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
-	scope := AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"}
-
-	// Cold observability pass also warms the rooted-functions memo.
-	obsHasher, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	obsHasher.SetAnalysisScope(scope)
-	if _, err := obsHasher.ComputeObservabilityBatch(subjects); err != nil {
-		t.Fatal(err)
-	}
-
-	// Stale pre-call keys and contributions on ComputeRootedFunctions are discarded
-	// via resetCallScope, so the entry warmed by ComputeObservabilityBatch hits.
-	rootedHasher, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rootedHasher.SetAnalysisScope(scope)
-	rootedHasher.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	rootedHasher.contribs = map[string]depContribution{"example.com/memo": {contribution: "src:example.com/memo=stale"}}
-	if _, err := rootedHasher.ComputeRootedFunctions(rootedHasher.ctx, subjects); err != nil {
-		t.Fatal(err)
-	}
-	if !rootedHasher.ServedSummary()["rooted functions"]["example.com/memo"] {
-		t.Fatalf("stale pre-call key defeated rooted-functions memo hit: %v", rootedHasher.ServedSummary())
-	}
-	if rootedHasher.testBinaryKeys["example.com/memo"] == "stale-key" {
-		t.Fatal("ComputeRootedFunctions retained stale testBinaryKeys")
-	}
-
-	// Populate binary rooted memo, then verify ComputeBinaryRootedFunctions also
-	// discards stale testBinaryKeys and restores h.ctx after a cancelled call.
-	if _, err := obsHasher.ComputeBinaryRootedFunctions(obsHasher.ctx, []string{"example.com/memo"}); err != nil {
-		t.Fatal(err)
-	}
-	binHasher, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binHasher.SetAnalysisScope(scope)
-	binHasher.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	if _, err := binHasher.ComputeBinaryRootedFunctions(binHasher.ctx, []string{"example.com/memo"}); err != nil {
-		t.Fatal(err)
-	}
-	if !binHasher.ServedSummary()["binary rooted functions"]["example.com/memo"] {
-		t.Fatalf("stale pre-call key defeated binary-rooted-functions memo hit: %v", binHasher.ServedSummary())
-	}
-	if binHasher.testBinaryKeys["example.com/memo"] == "stale-key" {
-		t.Fatal("ComputeBinaryRootedFunctions retained stale testBinaryKeys")
-	}
-
-	cancelled, cancel := context.WithCancel(binHasher.ctx)
-	cancel()
-	if _, err := binHasher.ComputeRootedFunctions(cancelled, subjects); err == nil {
-		t.Fatal("expected cancelled context to fail ComputeRootedFunctions")
-	}
-	if binHasher.ctx.Err() != nil {
-		t.Fatal("ComputeRootedFunctions did not restore h.ctx after cancelled call")
-	}
-	if _, err := binHasher.ComputeBinaryRootedFunctions(cancelled, []string{"example.com/memo"}); err == nil {
-		t.Fatal("expected cancelled context to fail ComputeBinaryRootedFunctions")
-	}
-	if binHasher.ctx.Err() != nil {
-		t.Fatal("ComputeBinaryRootedFunctions did not restore h.ctx after cancelled call")
-	}
-}
 
 // fileMemoModule writes a package whose plain files carry an effect, and
 // whose test file declares a subject beside a helper type.
@@ -683,7 +181,7 @@ func TestFileScanPayloadRoundTripsTheCorpus(t *testing.T) {
 			continue
 		}
 		parsed++
-		raw, err := json.Marshal(effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
+		raw, err := json.Marshal(effectScanPayload{Effects: encodeEffects(scan.Effects), ImportCandidates: encodeEffects(scan.ImportCandidates), Selected: scan.Preferred})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -691,7 +189,7 @@ func TestFileScanPayloadRoundTripsTheCorpus(t *testing.T) {
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatal(err)
 		}
-		back := maximalEffectScan{effects: decodeEffects(payload.Effects), importCandidates: decodeEffects(payload.ImportCandidates), preferred: payload.Selected}
+		back := maximalEffectScan{Effects: decodeEffects(payload.Effects), ImportCandidates: decodeEffects(payload.ImportCandidates), Preferred: payload.Selected}
 		if !reflect.DeepEqual(back, scan) {
 			t.Fatalf("%s: round trip changed the scan:\n got %+v\nwant %+v", name, back, scan)
 		}
@@ -833,7 +331,7 @@ func TestFileScanGatesModuleCacheFilesAndPendingSiblings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	h := &Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}, modCache: cacheRoot, maximalFiles: map[string]maximalEffectScan{}, fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
+	h := &Hasher{selection: toolchain.SelectionForTest(true, "", "", "content", "policy", nil, nil), modCache: cacheRoot, maximalFiles: map[string]maximalEffectScan{}, fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
 	var parsed []string
 	withClosureTestHooks(analysisTestHookSet{
 		fileParse: func(path string) { parsed = append(parsed, filepath.Base(path)) },
@@ -957,44 +455,6 @@ func TestModulePinIsCacheRelativeAndSlashCanonical(t *testing.T) {
 	}
 }
 
-// TestBatchEntriesDiscardStaleContributionEntries pins the call scope: a
-// batch entry must start from an empty memo, or an edit between calls
-// could serve a prior generation's contribution.
-func TestBatchEntriesDiscardStaleContributionEntries(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/memo\n\ngo 1.26\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "m.go"), []byte("package memo\n\nfunc M() int { return 1 }\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	h, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	subject := Subject{Package: "example.com/memo", Symbol: "M"}
-	h.contribs = map[string]depContribution{"example.com/memo": {contribution: "src:example.com/memo=stale"}}
-	batched, _, err := h.ComputeMaximalBatch([]Subject{subject})
-	if err != nil {
-		t.Fatal(err)
-	}
-	independent := computeAt(t, dir, subject)
-	if batched[subject] != independent[subject] {
-		t.Fatalf("batch served a pre-call memo generation: %+v vs %+v", batched[subject], independent[subject])
-	}
-	h2, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	h2.contribs = map[string]depContribution{"example.com/memo": {contribution: "src:example.com/memo=stale"}}
-	if _, err := h2.ComputeObservabilityBatch([]Subject{{Package: "example.com/memo", Symbol: "M"}}); err != nil {
-		t.Fatal(err)
-	}
-	if c, ok := h2.contribs["example.com/memo"]; ok && c.contribution == "src:example.com/memo=stale" {
-		t.Fatal("observability batch served or retained a pre-call memo generation")
-	}
-}
-
 func pinnedFixture(t *testing.T, h *Hasher) (listPkg, string) {
 	t.Helper()
 	moduleDir := filepath.Join(h.modCache, "example.com", "pinned@v1.2.3")
@@ -1039,7 +499,7 @@ func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("derivation = handled %v, err %v", handled, err)
 	}
-	if derived.preferred == "" || len(derived.effects) == 0 {
+	if derived.Preferred == "" || len(derived.Effects) == 0 {
 		t.Fatalf("derived scan carries no facts: %+v", derived)
 	}
 	// Every guard leg runs while the fixture's files are still readable,
@@ -1110,11 +570,11 @@ func TestEffectScanMemoServesPinnedPackagesWithoutReads(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("assembly-carrying serve = handled %v, err %v", handled, err)
 	}
-	assembly := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly").reason
-	if !hasEffectReason(withAsm.effects, assembly) {
+	assembly := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly").Reason
+	if !hasEffectReason(withAsm.Effects, assembly) {
 		t.Fatalf("assembly fact missing from the served composite: %+v", withAsm)
 	}
-	if hasEffectReason(served.effects, assembly) {
+	if hasEffectReason(served.Effects, assembly) {
 		t.Fatalf("assembly fact leaked into the assembly-free composite: %+v", served)
 	}
 }
@@ -1146,7 +606,7 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 	pkg.SFiles = []string{"impl_asm.s"}
 
 	flat := maximalPackageExternalEffects(&pkg)
-	pkgFactCount := len(flat.effects)
+	pkgFactCount := len(flat.Effects)
 	var rawEffects int
 	var preferreds []string
 	for _, name := range pkg.GoFiles {
@@ -1154,23 +614,23 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rawEffects += len(scan.effects)
-		preferreds = append(preferreds, scan.preferred)
-		for _, effect := range scan.effects {
-			flat.effects = appendExternalEffect(flat.effects, effect)
+		rawEffects += len(scan.Effects)
+		preferreds = append(preferreds, scan.Preferred)
+		for _, effect := range scan.Effects {
+			flat.Effects = appendExternalEffect(flat.Effects, effect)
 		}
-		for _, candidate := range scan.importCandidates {
-			flat.importCandidates = appendExternalEffect(flat.importCandidates, candidate)
+		for _, candidate := range scan.ImportCandidates {
+			flat.ImportCandidates = appendExternalEffect(flat.ImportCandidates, candidate)
 		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (flat.preferred == "" || scan.preferred < flat.preferred) {
-			flat.preferred = scan.preferred
+		if len(scan.Effects) == 0 && len(scan.ImportCandidates) == 0 && scan.Preferred != "" && (flat.Preferred == "" || scan.Preferred < flat.Preferred) {
+			flat.Preferred = scan.Preferred
 		}
 	}
-	if selected := preferredEffectReason(append(append([]externalEffect(nil), flat.effects...), flat.importCandidates...)); selected != "" {
-		flat.preferred = selected
+	if selected := preferredEffectReason(append(append([]externalEffect(nil), flat.Effects...), flat.ImportCandidates...)); selected != "" {
+		flat.Preferred = selected
 	}
-	if rawEffects <= len(flat.effects)-pkgFactCount {
-		t.Fatalf("fixture does not discriminate dedup: %d raw file effects, %d folded", rawEffects, len(flat.effects)-pkgFactCount)
+	if rawEffects <= len(flat.Effects)-pkgFactCount {
+		t.Fatalf("fixture does not discriminate dedup: %d raw file effects, %d folded", rawEffects, len(flat.Effects)-pkgFactCount)
 	}
 	if len(preferreds) != 3 || preferreds[0] == preferreds[1] || preferreds[1] == preferreds[2] || preferreds[0] == preferreds[2] {
 		t.Fatalf("fixture does not discriminate the preferred fold: %v", preferreds)
@@ -1204,18 +664,18 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, effect := range scan.effects {
-			flatNoAsm.effects = appendExternalEffect(flatNoAsm.effects, effect)
+		for _, effect := range scan.Effects {
+			flatNoAsm.Effects = appendExternalEffect(flatNoAsm.Effects, effect)
 		}
-		for _, candidate := range scan.importCandidates {
-			flatNoAsm.importCandidates = appendExternalEffect(flatNoAsm.importCandidates, candidate)
+		for _, candidate := range scan.ImportCandidates {
+			flatNoAsm.ImportCandidates = appendExternalEffect(flatNoAsm.ImportCandidates, candidate)
 		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (flatNoAsm.preferred == "" || scan.preferred < flatNoAsm.preferred) {
-			flatNoAsm.preferred = scan.preferred
+		if len(scan.Effects) == 0 && len(scan.ImportCandidates) == 0 && scan.Preferred != "" && (flatNoAsm.Preferred == "" || scan.Preferred < flatNoAsm.Preferred) {
+			flatNoAsm.Preferred = scan.Preferred
 		}
 	}
-	if selected := preferredEffectReason(append(append([]externalEffect(nil), flatNoAsm.effects...), flatNoAsm.importCandidates...)); selected != "" {
-		flatNoAsm.preferred = selected
+	if selected := preferredEffectReason(append(append([]externalEffect(nil), flatNoAsm.Effects...), flatNoAsm.ImportCandidates...)); selected != "" {
+		flatNoAsm.Preferred = selected
 	}
 	noAsm := pkg
 	noAsm.SFiles = nil
@@ -1235,12 +695,12 @@ func TestEffectScanMemoFoldMatchesInlineFold(t *testing.T) {
 func TestEffectScanMemoMissesOnScopeAndFileSetChange(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	scan := maximalEffectScan{
-		preferred:        "reaches net (network I/O)",
-		effects:          []externalEffect{{kind: externalEffectFileIO, reason: "reaches os.ReadFile (file I/O)"}},
-		importCandidates: []externalEffect{{kind: externalEffectNetwork, packagePath: "net", reason: "reaches net (network I/O)"}},
+		Preferred:        "reaches net (network I/O)",
+		Effects:          []externalEffect{{Kind: externalEffectFileIO, Reason: "reaches os.ReadFile (file I/O)"}},
+		ImportCandidates: []externalEffect{{Kind: externalEffectNetwork, PackagePath: "net", Reason: "reaches net (network I/O)"}},
 	}
 	key := effectScanKey("example.com/pinned@v1.2.3", "example.com/pinned/eff", []string{"eff.go"}, nil)
-	scope := (&Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}}).effectScanScope()
+	scope := (&Hasher{selection: toolchain.SelectionForTest(true, "", "", "content", "policy", nil, nil)}).effectScanScope()
 	storeEffectScan(effectScanDirName, scope, key, scan)
 	if got, ok := loadEffectScan(effectScanDirName, scope, key); !ok || !reflect.DeepEqual(got, scan) {
 		t.Fatalf("round trip = %+v ok=%v", got, ok)
@@ -1304,11 +764,11 @@ func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 	if err != nil || !handled {
 		t.Fatalf("derivation = handled %v, err %v", handled, err)
 	}
-	if len(composite.effects) != 0 || len(composite.importCandidates) != 0 {
+	if len(composite.Effects) != 0 || len(composite.ImportCandidates) != 0 {
 		t.Fatalf("fallback fixture grew effects or candidates: %+v", composite)
 	}
-	if composite.preferred != "reaches fmt (potential external dependence)" {
-		t.Fatalf("fallback selection = %q, want the lexicographic least", composite.preferred)
+	if composite.Preferred != "reaches fmt (potential external dependence)" {
+		t.Fatalf("fallback selection = %q, want the lexicographic least", composite.Preferred)
 	}
 }
 
@@ -1317,55 +777,6 @@ func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 func TestEffectScanStrategyVersion(t *testing.T) {
 	if effectScanStrategy != "gofresh/effect-scan@32" {
 		t.Fatalf("effect-scan strategy = %q, want @32", effectScanStrategy)
-	}
-}
-
-// sync.Map's Load, Store, and LoadOrStore are the audited memo set:
-// process-memory operations a subject may reach observably. Its other
-// operations keep the unaudited-standard refusal — Range walks an order
-// seeded at runtime (REQ-closure-shared-dynamic-state-memo).
-func TestSyncMapMemoOperationsAreAuditedAndRangeIsNot(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, dir, "go.mod", "module example.com/syncmemo\n\ngo 1.26\n")
-	cases := []struct{ pkg, source, refusal string }{
-		{"memo", "package memo\n\nimport \"sync\"\n\nvar m sync.Map\n\nfunc Subject() int {\n\tm.Store(\"k\", 1)\n\tv, _ := m.LoadOrStore(\"k\", 2)\n\tw, _ := m.Load(\"k\")\n\treturn v.(int) + w.(int)\n}\n", ""},
-		{"ranged", "package ranged\n\nimport \"sync\"\n\nvar m sync.Map\n\nfunc Subject() int {\n\tm.Store(\"k\", 1)\n\tn := 0\n\tm.Range(func(k, v any) bool {\n\t\tn++\n\t\treturn true\n\t})\n\treturn n\n}\n", "reaches unaudited standard operation sync.Range"},
-		// A function-local map: the fold records no effect for the
-		// declaration (the type name is the memo set's), and the walk
-		// then refuses the subject's own reach — a sync.Map value holds
-		// unsafe pointers — whatever operation follows. The type-name
-		// admission opens nothing: the walk stands behind it.
-		{"local", "package local\n\nimport \"sync\"\n\nfunc Subject() int {\n\tvar m sync.Map\n\tm.Store(\"k\", 1)\n\tv, _ := m.Load(\"k\")\n\treturn v.(int)\n}\n", "unsafe pointer reachable"},
-		{"localranged", "package localranged\n\nimport \"sync\"\n\nfunc Subject() int {\n\tvar m sync.Map\n\tn := 0\n\tm.Range(func(k, v any) bool { return true })\n\treturn n\n}\n", "unsafe pointer reachable"},
-		{"deleted", "package deleted\n\nimport \"sync\"\n\nvar m sync.Map\n\nfunc Subject() int {\n\tm.Store(\"k\", 1)\n\tm.Delete(\"k\")\n\treturn 1\n}\n", "reaches unaudited standard operation sync.Delete"},
-	}
-	subjects := make([]Subject, 0, len(cases))
-	for _, tc := range cases {
-		if err := os.MkdirAll(filepath.Join(dir, tc.pkg), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, dir, tc.pkg+"/"+tc.pkg+".go", tc.source)
-		subjects = append(subjects, Subject{Package: "example.com/syncmemo/" + tc.pkg, Symbol: "Subject"})
-	}
-	h, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proofs, err := h.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range cases {
-		proof := proofs[Subject{Package: "example.com/syncmemo/" + tc.pkg, Symbol: "Subject"}]
-		if tc.refusal == "" {
-			if !proof.Observable || proof.Reason != "" {
-				t.Errorf("%s = %+v, want observable", tc.pkg, proof)
-			}
-			continue
-		}
-		if proof.Observable || !strings.Contains(proof.Reason, tc.refusal) {
-			t.Errorf("%s = %+v, want refused with %q", tc.pkg, proof, tc.refusal)
-		}
 	}
 }
 
@@ -1424,7 +835,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 		if *loads != 1 {
 			t.Fatalf("derivation loads = %d, want 1", *loads)
 		}
-		if len(derived.effects) == 0 || derived.preferred == "" {
+		if len(derived.Effects) == 0 || derived.Preferred == "" {
 			t.Fatalf("derived scan carries no testing facts: %+v", derived)
 		}
 
@@ -1475,7 +886,7 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 		if *loads != 3 {
 			t.Fatalf("effect-free derivation loads = %d, want 3", *loads)
 		}
-		if len(emptyDerived.effects) != 0 || emptyDerived.preferred != "" {
+		if len(emptyDerived.Effects) != 0 || emptyDerived.Preferred != "" {
 			t.Fatalf("plain package scan carries facts: %+v", emptyDerived)
 		}
 		fourth, err := newAt(dir)
@@ -1593,7 +1004,7 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 		if *loads != 3 {
 			t.Fatal("a test-only source change served from the memo")
 		}
-		if !hasEffectReason(after.effects, "reaches testing.Setenv (process or path mutation)") {
+		if !hasEffectReason(after.Effects, "reaches testing.Setenv (process or path mutation)") {
 			t.Fatalf("post-edit scan misses the new testing effect: %+v", after)
 		}
 		if reflect.DeepEqual(after, before) {
@@ -1626,4 +1037,377 @@ func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 			t.Fatal("a corrupt entry served")
 		}
 	})
+}
+
+func TestNewAtRejectsExternalPackageDriver(t *testing.T) {
+	env := environmentWith("GOPACKAGESDRIVER=custom")
+	if _, err := newAtEnv(context.Background(), t.TempDir(), env); err == nil || !strings.Contains(err.Error(), "GOPACKAGESDRIVER") {
+		t.Fatalf("external package driver accepted: %v", err)
+	}
+}
+
+func TestSyntheticTestPackageCannotReplaceAnImportBinding(t *testing.T) {
+	const pkg = "example.com/bindings"
+	dir := writeTestVariantModule(t, map[string]string{
+		"p.go":        "package p\n",
+		"ext_test.go": "package p_test\nimport \"example.com/bindings_test\"\nfunc Example() { declared.Value() }\n",
+	})
+	module := &listMod{Path: pkg, Main: true, Dir: dir}
+	real := listPkg{ImportPath: pkg + "_test", Name: "declared", Dir: filepath.Join(dir, "dependency")}
+	synthetic := listPkg{ImportPath: pkg + "_test [" + pkg + ".test]", ForTest: pkg, Name: "p_test", Dir: dir, Module: module, GoFiles: []string{"ext_test.go"}}
+	for _, copies := range [][]listPkg{{real, synthetic, real}, {synthetic, real, synthetic}} {
+		h := &Hasher{lists: map[string][]listPkg{pkg: append([]listPkg{
+			{ImportPath: pkg, Name: "p", Dir: dir, Module: module, GoFiles: []string{"p.go"}},
+		}, copies...)}, testVariants: map[string]testvariant.Identity{}}
+		ledger, err := h.TestVariantLedger(pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ledger.FileHeaders) != 1 || len(ledger.FileHeaders[0].Bindings.Imports) != 1 {
+			t.Fatalf("missing external-test binding evidence: %+v", ledger)
+		}
+		if got := ledger.FileHeaders[0].Bindings.Imports[0]; got.Path != pkg+"_test" || got.Name != "" {
+			t.Fatalf("conflicting declaration was resolved by listing order: %+v", got)
+		}
+		if testvariant.DiffTestVariantLedgers(ledger, ledger).Inert() {
+			t.Fatal("conflicting import-name evidence authorized inertness")
+		}
+	}
+}
+
+func TestListingEntriesTrackSymlinkTargetKinds(t *testing.T) {
+	dir, target := t.TempDir(), filepath.Join(t.TempDir(), "target")
+	if err := os.Symlink(target, filepath.Join(dir, "input.go")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	read := func() listingEntry {
+		t.Helper()
+		entries, err := listingEntries(dir)
+		if err != nil || len(entries) != 1 {
+			t.Fatalf("entries: %+v %v", entries, err)
+		}
+		return entries[0]
+	}
+	missing := read()
+	if !missing.Dangling || missing.regular() {
+		t.Fatalf("dangling: %+v", missing)
+	}
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	directory := read()
+	if directory == missing || directory.Dangling || directory.regular() || directory.TargetType != os.ModeDir {
+		t.Fatalf("directory: %+v", directory)
+	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("package p\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	regular := read()
+	if regular == directory || regular == missing || !regular.regular() {
+		t.Fatalf("regular: %+v", regular)
+	}
+	if again := read(); again != regular {
+		t.Fatal("unchanged entry moved")
+	}
+}
+
+// Equal admission Booleans cannot alias different source or policy inputs, and
+// an unaudited selection never shares an effectScanScope or AnalysisScope with
+// an audited selection over identical content and policy.
+func TestEffectScanScopeDiscriminatesContentAndPolicy(t *testing.T) {
+	h := Hasher{selection: toolchain.SelectionForTest(true, "", "", "content-a", "policy-a", nil, nil)}
+	base := h.effectScanScope()
+	if base != effectScanStrategy+" "+runtime.Version()+"|content-a|policy-a" {
+		t.Fatalf("effect scope lost a dependency: %q", base)
+	}
+	unaudited := Hasher{selection: toolchain.SelectionForTest(true, "moved", "", "content-a", "policy-a", nil, nil)}
+	if unaudited.effectScanScope() == base {
+		t.Fatal("unaudited selection shared effectScanScope with audited selection")
+	}
+	caller := AnalysisScope{ProofStrategy: "proof", FactStrategy: "facts", Toolchain: "tc", BuildConfig: "bc"}
+	if auditedScope, unauditedScope := h.SetAnalysisScope(caller), unaudited.SetAnalysisScope(caller); auditedScope.Proofs() == unauditedScope.Proofs() || auditedScope.Facts() == unauditedScope.Facts() {
+		t.Fatal("unaudited selection shared AnalysisScope with audited selection")
+	}
+	for _, sel := range []toolchain.Selection{
+		toolchain.SelectionForTest(true, "", "", "content-b", "policy-a", nil, nil),
+		toolchain.SelectionForTest(true, "", "", "content-a", "policy-b", nil, nil),
+	} {
+		h.selection = sel
+		if h.effectScanScope() == base {
+			t.Fatal("different dependencies share a scope")
+		}
+	}
+	for _, sel := range []toolchain.Selection{
+		toolchain.SelectionForTest(true, "", "", "content-a", "", nil, nil),
+		toolchain.SelectionForTest(true, "", "", "", "policy-a", nil, nil),
+		toolchain.SelectionForTest(true, "", "", "", "", nil, nil),
+	} {
+		h.selection = sel
+		if h.effectScanScope() != "" {
+			t.Fatal("incomplete dependencies armed the memo")
+		}
+	}
+}
+
+// The audit ladder survives the zero value: a Hasher built without
+// construction refuses every admission AND explains itself — the
+// verdict/text biconditional holds in the unresolved world too.
+func TestZeroHasherRefusesSelectionAudit(t *testing.T) {
+	var h Hasher
+	if h.SelectionAudited() {
+		t.Fatal("zero-value Hasher reports an audited selection — fail-open by omission")
+	}
+	if notice := h.SelectionNotice(); notice == "" || !strings.Contains(notice, "unresolved") {
+		t.Fatalf("unresolved verdict has no explaining notice: %q", notice)
+	}
+	// The third reading refuses with the same verdict: a refusal
+	// composed under the zero value names the unresolved axis, never
+	// an empty attribution beside a refused audit
+	// (REQ-closure-refusal-channels).
+	if attribution := h.SelectionAttribution(); attribution == "" || !strings.Contains(attribution, "unresolved") {
+		t.Fatalf("unresolved verdict's attribution %q does not name the unresolved axis", attribution)
+	}
+	requireBareAxis(t, "unresolved", h.SelectionNotice(), h.SelectionAttribution())
+}
+
+// TestPackageFileWalkEndsAtTheNextEntry pins the package-file walk's
+// check point (REQ-closure-observability-toolchain-key: the walk checks
+// the package's cancellation check at every entry): over a planted tree
+// a context cancelled at the walk's second entry ends it at the third —
+// the entries seen are exactly the two before the cancellation's check
+// fired — answering the cancellation with nothing listed; a context
+// cancelled before the walk ends it at the root entry; the live walk
+// lists the three files.
+func TestPackageFileWalkEndsAtTheNextEntry(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.go", "b.go", "c.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package p\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := &Hasher{ctx: ctx}
+	const stopAt = 2
+	seen := 0
+	var files []string
+	var err error
+	withClosureTestHooks(analysisTestHookSet{
+		walkEntry: func(path string) {
+			seen++
+			if seen == stopAt {
+				cancel()
+			}
+		},
+	}, func() {
+		files, err = allPackageFiles(h.contextErr, dir)
+	})
+	if !errors.Is(err, context.Canceled) || len(files) != 0 {
+		t.Fatalf("a walk cancelled at entry %d answered %v with %d files, want the cancellation and nothing listed", stopAt, err, len(files))
+	}
+	if seen != stopAt {
+		t.Fatalf("the walk visited %d entries with the cancellation at entry %d, want exactly that many: the next entry's check ends it", seen, stopAt)
+	}
+	cancelled, cancelNow := context.WithCancel(context.Background())
+	cancelNow()
+	if files, err := allPackageFiles((&Hasher{ctx: cancelled}).contextErr, dir); !errors.Is(err, context.Canceled) || len(files) != 0 {
+		t.Fatalf("a pre-cancelled walk answered %v with %d files, want the cancellation at the root entry", err, len(files))
+	}
+	live, err := allPackageFiles((&Hasher{ctx: context.Background()}).contextErr, dir)
+	if err != nil || len(live) != 3 {
+		t.Fatalf("the live walk answered %v with %d files, want the three", err, len(live))
+	}
+}
+
+func FuzzClosureCoverageAndMutableLocalIdentity(f *testing.F) {
+	f.Add("pkg/a", "v1.2.3", "func F() int { return 1 }", "// normal comment", true, false)
+	f.Add("pkg/b", "v0.1.0", "func G() string { return \"x\" }", "//go:noinline", false, true)
+	f.Add("pkg/c", "v2.0.0", "var X = 42", "// Code generated by tool; DO NOT EDIT.", false, false)
+
+	f.Fuzz(func(t *testing.T, subPkg, ver, decl, comment string, inModCache, isMain bool) {
+		cleanSub := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return 'a'
+		}, subPkg)
+		if cleanSub == "" {
+			cleanSub = "p"
+		}
+		cleanVer := "v1.0.0"
+		if strings.HasPrefix(ver, "v") && len(ver) < 16 && !strings.ContainsAny(ver, "/\\ \t\n") {
+			cleanVer = ver
+		}
+
+		// 1. Canonical member digest & strategy coupling (REQ-closure-identity-strategy).
+		if !strings.Contains(IdentityStrategy, canonicalStrategy) || !strings.Contains(IdentityStrategy, variantParseStrategy) {
+			t.Fatalf("IdentityStrategy %q does not compose %q and %q", IdentityStrategy, canonicalStrategy, variantParseStrategy)
+		}
+		srcBase := "package p\n\n" + decl + "\n"
+		d1, ok1 := canonicalDigest([]byte(srcBase))
+		if ok1 {
+			// Non-retained comment and whitespace changes leave the canonical digest invariant,
+			// whereas directive or generated-marker comments move it when retained.
+			withSpace := "package p\n\n\t\n" + decl + "\n"
+			if d2, ok2 := canonicalDigest([]byte(withSpace)); !ok2 || d1 != d2 {
+				t.Fatalf("whitespace moved canonical digest: %q vs %q", d1, d2)
+			}
+			singleLine := strings.ReplaceAll(strings.ReplaceAll(comment, "\n", " "), "\r", " ")
+			if !strings.HasPrefix(singleLine, "//") {
+				singleLine = "// " + singleLine
+			}
+			withComment := "package p\n" + singleLine + "\n" + decl + "\n"
+			dComment, okC := canonicalDigest([]byte(withComment))
+			if okC {
+				if !retainedComment(singleLine) && dComment != d1 {
+					t.Fatalf("non-retained comment %q moved canonical digest", singleLine)
+				}
+				if retainedComment(singleLine) && dComment == d1 {
+					t.Fatalf("retained directive/generated comment %q did not move canonical digest", singleLine)
+				}
+			}
+			withDirective := "package p\n//go:noinline\n" + decl + "\n"
+			if dDir, okDir := canonicalDigest([]byte(withDirective)); !okDir || dDir == d1 {
+				t.Fatalf("retained //go:noinline directive did not move canonical digest: %q", dDir)
+			}
+		}
+
+		// 2. Blindspot resolved vs downgraded linkname floor (REQ-closure-blindspot).
+		auditedLinkSrc := "package p\n//go:linkname a runtime.getAuxv\n"
+		unauditedLinkSrc := "package p\n//go:linkname a runtime.unapproved\n"
+		if scanAud, err := maximalFileEffectsContent(true, "link.go", []byte(auditedLinkSrc)); err != nil || len(scanAud.Effects) != 0 {
+			t.Fatalf("audited linkname target did not drop opaque-linkage floor: %+v, err=%v", scanAud.Effects, err)
+		}
+		if scanDowngraded, err := maximalFileEffectsContent(false, "link.go", []byte(auditedLinkSrc)); err != nil || !strings.Contains(scanDowngraded.Preferred, "go:linkname") {
+			t.Fatalf("downgraded toolchain did not restore opaque-linkage floor on audited linkname: %+v, err=%v", scanDowngraded, err)
+		}
+		if scanUnaud, err := maximalFileEffectsContent(true, "link.go", []byte(unauditedLinkSrc)); err != nil || !strings.Contains(scanUnaud.Preferred, "go:linkname") {
+			t.Fatalf("unaudited linkname target did not keep opaque-linkage floor: %+v, err=%v", scanUnaud, err)
+		}
+
+		// 3. Coverage, mutable-local vs module-cache classification, test-variant compartment,
+		// and per-subject vs view-wide source files (REQ-closure-coverage, REQ-closure-mutable-local,
+		// REQ-closure-view-maximal).
+		root := t.TempDir()
+		modCache := filepath.Join(root, "modcache")
+		workDir := filepath.Join(root, "work")
+		pkgDir := filepath.Join(workDir, cleanSub)
+		modDir := workDir
+		if inModCache {
+			modDir = filepath.Join(modCache, "example.com", "dep@"+cleanVer)
+			pkgDir = filepath.Join(modDir, cleanSub)
+		}
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		goFile := "member.go"
+		testFile := "member_test.go"
+		embedFile := "data.txt"
+		if err := os.WriteFile(filepath.Join(pkgDir, goFile), []byte("package p\nfunc M() {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, testFile), []byte("package p\nimport \"testing\"\nfunc TestM(t *testing.T) {}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, embedFile), []byte("payload\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		h := &Hasher{
+			ctx:      context.Background(),
+			modCache: modCache,
+			contribs: map[string]depContribution{},
+			contents: map[string]fileBytes{},
+		}
+		lp := listPkg{
+			ImportPath: "example.com/dep/" + cleanSub,
+			Dir:        pkgDir,
+			GoFiles:    []string{goFile},
+			EmbedFiles: []string{embedFile},
+			Module: &listMod{
+				Path:    "example.com/dep",
+				Version: cleanVer,
+				Dir:     modDir,
+				Main:    isMain,
+			},
+		}
+		compiled, embedded, canonical := memberKinds(lp)
+		if !compiled[goFile] || !canonical[goFile] || !embedded[embedFile] || canonical[embedFile] {
+			t.Fatalf("memberKinds misclassified compiled/embedded/canonical: %v %v %v", compiled, embedded, canonical)
+		}
+		emptyComp, err := testvariant.ComputeIdentity(pkgDir, nil, nil, nil, nil, h.readFileSum, nil)
+		if err != nil || emptyComp.Hash == "" {
+			t.Fatalf("empty testvariant.ComputeIdentity = (%+v, %v)", emptyComp, err)
+		}
+		compId, err := testvariant.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h.readFileSum, nil)
+		if err != nil || compId.Hash == "" || compId.Hash == emptyComp.Hash || !slices.Equal(compId.Files, []string{testFile}) {
+			t.Fatalf("testvariant.ComputeIdentity = (%+v, %v), want non-empty test-variant hash over [%s]", compId, err, testFile)
+		}
+
+		isPinned := h.pinnedPackage(&lp)
+		wantPinned := inModCache && !isMain
+		if isPinned != wantPinned {
+			t.Fatalf("pinnedPackage = %v, want %v (inModCache=%v, isMain=%v)", isPinned, wantPinned, inModCache, isMain)
+		}
+
+		contrib1, files1, err := h.contributionAndFilesFor("example.com/subj", lp)
+		if err != nil {
+			t.Fatalf("contributionAndFilesFor: %v", err)
+		}
+		if isPinned {
+			if !strings.HasPrefix(contrib1, "cache:") || len(files1) != 0 {
+				t.Fatalf("pinned package contribution = %q (files=%v), want cache: prefix and no source files", contrib1, files1)
+			}
+		} else {
+			if !strings.HasPrefix(contrib1, "src:") || len(files1) != 2 {
+				t.Fatalf("mutable-local package contribution = %q (files=%v), want src: prefix and 2 source files", contrib1, files1)
+			}
+			// Editing the test-only compartment file leaves the core contribution hash unchanged,
+			// while moving the test-variant compartment hash.
+			if err := os.WriteFile(filepath.Join(pkgDir, testFile), []byte("package p\nimport \"testing\"\nfunc TestM(t *testing.T) { t.Log(1) }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h.resetCallScope()
+			contribAfterTestEdit, _, err := h.contributionAndFilesFor("example.com/subj", lp)
+			if err != nil || contribAfterTestEdit != contrib1 {
+				t.Fatalf("test-variant edit moved core contribution: %q vs %q (err=%v)", contribAfterTestEdit, contrib1, err)
+			}
+			compId2, err := testvariant.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h.readFileSum, nil)
+			if err != nil || compId2.Hash == compId.Hash {
+				t.Fatalf("test-variant edit did not move compartment hash: %q", compId.Hash)
+			}
+
+			// Silent edit in mutable-local core source file moves its contribution hash.
+			h.resetCallScope()
+			if err := os.WriteFile(filepath.Join(pkgDir, goFile), []byte("package p\nfunc M() { println(1) }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			contrib2, _, err := h.contributionAndFilesFor("example.com/subj", lp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if contrib2 == contrib1 {
+				t.Fatalf("editing mutable-local source file did not move contribution: %q", contrib1)
+			}
+		}
+
+		// Standard library and generated testmain packages are excluded from non-stdlib fold.
+		stdPkg := lp
+		stdPkg.Standard = true
+		if c, _, err := h.contributionAndFilesFor("example.com/subj", stdPkg); err != nil || c != "" {
+			t.Fatalf("stdlib package was not excluded: %q, %v", c, err)
+		}
+	})
+}
+
+// The typed testing scan's memo serves the classification table, so
+// the strategy moves with it (REQ-closure-testing-scan-memo).
+func TestTestingScanStrategyVersion(t *testing.T) {
+	t.Parallel()
+	if testingScanStrategy != "gofresh/testing-scan@6" {
+		t.Fatalf("testing-scan strategy = %q, want @6 — the harness lifecycle Context read rejoined the table", testingScanStrategy)
+	}
 }

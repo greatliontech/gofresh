@@ -144,7 +144,7 @@ func matchLocalBuilderOnlyAdapter(
 						return false
 					}
 					bNamed, isBN := types.Unalias(p.TypesInfo.TypeOf(bLit)).(*types.Named)
-					if !isBN || bNamed.Obj() == nil || bNamed.Obj().Pkg() == nil || bNamed.Obj().Pkg() == p.Types || syntaxutil.IsStandardLibraryPkgPath(bNamed.Obj().Pkg().Path()) {
+					if !isBN || bNamed.Obj() == nil || bNamed.Obj().Pkg() == nil || bNamed.Obj().Pkg() == p.Types || !syntaxutil.HasModuleImportPathShape(bNamed.Obj().Pkg().Path()) {
 						validUses = false
 						return false
 					}
@@ -177,7 +177,7 @@ func matchLocalBuilderOnlyAdapter(
 			return syntaxutil.TypeRef{}, nil, nil, false
 		}
 		elemN, isEN := types.Unalias(ptr.Elem()).(*types.Named)
-		if !isEN || elemN.Obj() == nil || elemN.Obj().Pkg() == nil || elemN.Obj().Pkg() == p.Types || syntaxutil.IsStandardLibraryPkgPath(elemN.Obj().Pkg().Path()) {
+		if !isEN || elemN.Obj() == nil || elemN.Obj().Pkg() == nil || elemN.Obj().Pkg() == p.Types || !syntaxutil.HasModuleImportPathShape(elemN.Obj().Pkg().Path()) {
 			return syntaxutil.TypeRef{}, nil, nil, false
 		}
 		if _, isElemSt := elemN.Underlying().(*types.Struct); !isElemSt {
@@ -253,7 +253,7 @@ func verifyOnceInitConeImmutability(
 		if stN == nil || family[stN] || childProtected[stN] || verifiedCapsuleRoots[stN] {
 			return
 		}
-		if stN.Obj() != nil && stN.Obj().Pkg() != nil && stN.Obj().Pkg() != p.Types && !syntaxutil.IsStandardLibraryPkgPath(stN.Obj().Pkg().Path()) {
+		if stN.Obj() != nil && stN.Obj().Pkg() != nil && stN.Obj().Pkg() != p.Types && syntaxutil.HasModuleImportPathShape(stN.Obj().Pkg().Path()) {
 			coneCrossStructs[stN] = true
 			return
 		}

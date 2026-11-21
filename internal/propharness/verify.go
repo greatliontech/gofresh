@@ -178,10 +178,7 @@ func StructHasNoExportedFields(st *types.Struct) bool {
 // MayBeHarnessPkgPath reports whether pkgPath has a non-stdlib module-hosted
 // import path shape eligible for property-harness screening.
 func MayBeHarnessPkgPath(pkgPath string) bool {
-	if pkgPath == "" || pkgPath == "main" || pkgPath == "testing" {
-		return false
-	}
-	return !syntaxutil.IsStandardLibraryPkgPath(pkgPath)
+	return syntaxutil.HasModuleImportPathShape(pkgPath)
 }
 
 // MayBeHarnessImports performs a fast zero-allocation Stage-0 screen over a

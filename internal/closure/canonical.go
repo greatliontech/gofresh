@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
+	"github.com/greatliontech/gofresh/internal/cprep"
 )
 
 // A compiled Go member contributes its CANONICAL FORM to the closure

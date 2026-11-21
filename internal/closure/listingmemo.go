@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // The listing memo serves a package's `go list -json -deps -test` output
@@ -272,7 +273,7 @@ func recordPackageDirInputs(dir string, p *listPkg, dirs map[string][]listingEnt
 			return false
 		}
 	}
-	for _, root := range embedRoots(dir, p.EmbedPatterns, p.TestEmbedPatterns, p.XTestEmbedPatterns) {
+	for _, root := range gotool.EmbedRoots(dir, p.EmbedPatterns, p.TestEmbedPatterns, p.XTestEmbedPatterns) {
 		info, err := os.Stat(root)
 		switch {
 		case err != nil:
@@ -293,33 +294,6 @@ func recordPackageDirInputs(dir string, p *listPkg, dirs map[string][]listingEnt
 		}
 	}
 	return true
-}
-
-// embedRoots resolves the directory or file each embed pattern is
-// anchored at — the pattern's longest metacharacter-free prefix,
-// relative to the package directory — so the trees whose membership the
-// listing resolves are recorded whole.
-func embedRoots(dir string, patternSets ...[]string) []string {
-	seen := map[string]bool{}
-	var roots []string
-	for _, patterns := range patternSets {
-		for _, pattern := range patterns {
-			pattern = strings.TrimPrefix(pattern, "all:")
-			root := ""
-			for _, segment := range strings.Split(pattern, "/") {
-				if strings.ContainsAny(segment, `*?[\`) {
-					break
-				}
-				root = filepath.Join(root, segment)
-			}
-			full := filepath.Join(dir, root)
-			if !seen[full] {
-				seen[full] = true
-				roots = append(roots, full)
-			}
-		}
-	}
-	return roots
 }
 
 // listingEntries returns the names and effective classifications the listing

@@ -3,41 +3,20 @@ package closure
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
-	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
-	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
-	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 )
-
-// SetPackageMates supplies same-package sibling subjects that may opportunistically
-// share unused bitmask slots (< 64) when an observability batch already loads and
-// analyzes their package's test-binary SSA program.
-func (h *Hasher) SetPackageMates(subjects []Subject) {
-	if len(subjects) == 0 {
-		h.packageMates = nil
-		return
-	}
-	byPkg := make(map[string][]Subject)
-	for _, s := range subjects {
-		byPkg[s.Package] = append(byPkg[s.Package], s)
-	}
-	h.packageMates = byPkg
-}
 
 // UseViewLoad supplies the observation pass's shared typed load. The caller
 // guarantees it was produced in the same pass, under the same tree root,
@@ -49,6 +28,124 @@ func (h *Hasher) UseViewLoad(load *ViewLoad) {
 	h.viewLoad = load
 }
 
+// SetLoadedPackagesLookup supplies an optional lookup of already-loaded typed
+// packages (such as from an owning Tier-2 Prover or in-memory test harness)
+// so typed testing-effect and property-harness scans reuse loaded syntax/types
+// without spawning redundant go/packages loads.
+func (h *Hasher) SetLoadedPackagesLookup(fn func(pkgPath string) []*packages.Package) {
+	if h != nil {
+		h.loadedPackages = fn
+	}
+}
+
+// SetHasStartedHook registers an optional predicate reporting whether a
+// higher-tier consumer (such as Prover) has begun analysis on this Hasher.
+func (h *Hasher) SetHasStartedHook(fn func() bool) {
+	if h != nil {
+		h.hasStarted = fn
+	}
+}
+
+// SetResetCallScopeHook registers an optional callback invoked whenever h
+// resets its per-batch-call scope so higher-tier wrappers (such as Prover)
+// clear retained per-program summaries in lockstep.
+func (h *Hasher) SetResetCallScopeHook(fn func()) {
+	if h != nil {
+		h.onResetCallScope = fn
+	}
+}
+
+// SetListOnMissForTest installs an in-memory listing fallback for tests.
+func (h *Hasher) SetListOnMissForTest(fn func(h *Hasher, pkgPath string) ([]gotool.ListedPackage, bool)) {
+	if h != nil {
+		h.listOnMiss = fn
+	}
+}
+
+// SetListedPackagesForTest seeds pkgPath's parsed go-list slice on h for
+// in-memory test harnesses.
+func (h *Hasher) SetListedPackagesForTest(pkgPath string, metas []gotool.ListedPackage) {
+	if h != nil {
+		if h.lists == nil {
+			h.lists = map[string][]listPkg{}
+		}
+		h.lists[pkgPath] = metas
+	}
+}
+
+// LookupListedPackagesForTest returns any already-cached go-list slice on h.
+func (h *Hasher) LookupListedPackagesForTest(pkgPath string) ([]gotool.ListedPackage, bool) {
+	if h == nil {
+		return nil, false
+	}
+	metas, ok := h.lists[pkgPath]
+	return metas, ok
+}
+
+// DeleteListedPackagesForTest removes pkgPath's cached go-list slice from h.
+func (h *Hasher) DeleteListedPackagesForTest(pkgPath string) {
+	if h != nil {
+		delete(h.lists, pkgPath)
+	}
+}
+
+// HasCustomRunner reports whether h was constructed with a custom gotool.Runner
+// Prepare hook.
+func (h *Hasher) HasCustomRunner() bool {
+	return h != nil && h.runner.Prepare != nil
+}
+
+// SetSelectionForTest overrides h's toolchain Selection for hermetic tests.
+func (h *Hasher) SetSelectionForTest(sel toolchain.Selection) {
+	if h != nil {
+		h.selection = sel
+	}
+}
+
+// SeedCallScopeForTest seeds pre-call stale test-binary keys, compartment
+// identities, and node contributions so batch-entry reset tests can verify
+// ResetCallScope clears every pre-call generation.
+func (h *Hasher) SeedCallScopeForTest(pkgPath, testBinaryKey, variantHash, contribution string) {
+	if h == nil {
+		return
+	}
+	if testBinaryKey != "" {
+		if h.testBinaryKeys == nil {
+			h.testBinaryKeys = map[string]string{}
+		}
+		h.testBinaryKeys[pkgPath] = testBinaryKey
+	}
+	if variantHash != "" {
+		if h.variantScope == nil {
+			h.variantScope = map[string]testvariant.Identity{}
+		}
+		h.variantScope[pkgPath] = testvariant.Identity{Hash: variantHash}
+	}
+	if contribution != "" {
+		if h.contribs == nil {
+			h.contribs = map[string]depContribution{}
+		}
+		h.contribs[pkgPath] = depContribution{contribution: contribution}
+	}
+}
+
+// HasStaleCallScopeForTest reports whether pkgPath still retains testBinaryKey
+// or contribution in h's per-call memo maps.
+func (h *Hasher) HasStaleCallScopeForTest(pkgPath, testBinaryKey, contribution string) bool {
+	if h == nil {
+		return false
+	}
+	if testBinaryKey != "" && h.testBinaryKeys[pkgPath] == testBinaryKey {
+		return true
+	}
+	if contribution != "" {
+		if c, ok := h.contribs[pkgPath]; ok && c.contribution == contribution {
+			return true
+		}
+	}
+	return false
+}
+
 // OnDiagnostic supplies a callback for phases carrying a payload the
 // progress line cannot: the per-subject analysis-unavailable
 // provenance rides it, never a memoized surface. Unlike progress
@@ -58,8 +155,13 @@ func (h *Hasher) OnDiagnostic(f func(phase, pkgPath, detail string)) {
 	h.diagnostic = f
 }
 
+// EmitDiagnostic delivers a diagnostic event when OnDiagnostic is armed.
+func (h *Hasher) EmitDiagnostic(phase, pkgPath, detail string) {
+	h.emitDiagnostic(phase, pkgPath, detail)
+}
+
 func (h *Hasher) emitDiagnostic(phase, pkgPath, detail string) {
-	if h.diagnostic != nil {
+	if h != nil && h.diagnostic != nil {
 		h.diagnostic(phase, pkgPath, detail)
 	}
 }
@@ -72,8 +174,13 @@ func (h *Hasher) OnProgress(f func(phase, pkgPath string)) {
 	h.progress = f
 }
 
+// EmitProgress delivers a start-of-step progress event when OnProgress is armed.
+func (h *Hasher) EmitProgress(phase, pkgPath string) {
+	h.emitProgress(phase, pkgPath)
+}
+
 func (h *Hasher) emitProgress(phase, pkgPath string) {
-	if h.progress != nil {
+	if h != nil && h.progress != nil {
 		h.progress(phase, pkgPath)
 	}
 }
@@ -94,7 +201,7 @@ func (h *Hasher) Unit(phase, pkgPath string, index, total int) {
 }
 
 func (h *Hasher) emitUnit(phase, pkgPath string, index, total int) {
-	if h.unit != nil {
+	if h != nil && h.unit != nil {
 		h.unit(phase, pkgPath, index, total)
 	}
 }
@@ -135,12 +242,92 @@ func (h *Hasher) Persisted() (proofs, scans int) {
 	return h.persisted.proofs, h.persisted.scans
 }
 
+// RecordPersistedProof increments the count of persisted observability proof slices.
+func (h *Hasher) RecordPersistedProof() {
+	if h != nil {
+		h.persisted.proofs++
+	}
+}
+
 // PassReader is the reader a later step of this hasher's pass loads
 // under: the hasher's runner, directory, and environment, primed with
 // the snapshot the hasher holds — the construction's, or a bracket's
 // live one — so the step probes nothing the pass already read.
 func (h *Hasher) PassReader() *gotool.EnvReader {
 	return gotool.PrimedEnvReader(h.runner, h.dir, h.env, h.snapshot)
+}
+
+// Context returns this Hasher's current analysis context.
+func (h *Hasher) Context() context.Context {
+	if h == nil {
+		return nil
+	}
+	return h.ctx
+}
+
+// WithContext temporarily runs fn with h's analysis context set to ctx,
+// restoring the prior context on return.
+func (h *Hasher) WithContext(ctx context.Context, fn func() error) error {
+	if h == nil {
+		return fn()
+	}
+	prev := h.ctx
+	h.ctx = ctx
+	defer func() { h.ctx = prev }()
+	return fn()
+}
+
+// Dir returns the tree root directory under which h resolves loads and go commands.
+func (h *Hasher) Dir() string {
+	if h == nil {
+		return ""
+	}
+	return h.dir
+}
+
+// ModCache returns h's cleaned GOMODCACHE path.
+func (h *Hasher) ModCache() string {
+	if h == nil {
+		return ""
+	}
+	return h.modCache
+}
+
+// PackageEnv returns h's normalized environment for go/packages loads.
+func (h *Hasher) PackageEnv() []string {
+	if h == nil {
+		return nil
+	}
+	return h.packageEnv
+}
+
+// BuildFlags returns h's executable build flags.
+func (h *Hasher) BuildFlags() []string {
+	if h == nil {
+		return nil
+	}
+	return h.buildFlags
+}
+
+// Scope returns h's configured AnalysisScope.
+func (h *Hasher) Scope() AnalysisScope {
+	if h == nil {
+		return AnalysisScope{}
+	}
+	return h.scope
+}
+
+// SnapshotGOOS returns the GOOS value recorded in h's environment snapshot, or "".
+func (h *Hasher) SnapshotGOOS() string {
+	if h == nil || h.snapshot == nil {
+		return ""
+	}
+	return h.snapshot.Value("GOOS")
+}
+
+// EffectiveGOARCH returns the effective target GOARCH for h's build configuration.
+func (h *Hasher) EffectiveGOARCH() string {
+	return h.effectiveGOARCH()
 }
 
 func (h *Hasher) effectiveGOARCH() string {
@@ -168,6 +355,20 @@ func (h *Hasher) FileDigest(path string) (string, bool) {
 	return digest, ok
 }
 
+// ReadSourceFile reads fullPath from h's per-call content snapshot for
+// mutable-local packages, or directly from disk for version-pinned cache
+// dependencies.
+func (h *Hasher) ReadSourceFile(dir, fullPath string) ([]byte, error) {
+	if h == nil || h.underCache(dir) {
+		return os.ReadFile(fullPath)
+	}
+	fb, err := h.readFile(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	return fb.content, nil
+}
+
 // BoundAnalysis narrows the context governing this Hasher's subsequent
 // analysis work, typically to carry a caller-supplied analysis budget whose
 // deadline should bound computation but not the surrounding operation. The
@@ -178,38 +379,21 @@ func (h *Hasher) BoundAnalysis(bound context.Context) error {
 	if bound == nil {
 		return errors.New("closure: nil analysis bound")
 	}
-	if len(h.progs) != 0 || len(h.progErrs) != 0 || len(h.lists) != 0 || len(h.maximalEffects) != 0 || len(h.testVariants) != 0 {
+	if (h.hasStarted != nil && h.hasStarted()) || len(h.lists) != 0 || len(h.maximalEffects) != 0 || len(h.testVariants) != 0 {
 		return errors.New("closure: analysis already begun; bound the Hasher before its first compute")
 	}
 	h.ctx = bound
 	return nil
 }
 
-// analysisTestHookSet is the package's one test-observation surface: each
-// field observes a load the tests prove skipped or taken, or overrides a
-// standard-library verification verdict for negative-control tests; nil disables.
+// analysisTestHookSet is the package's test-observation surface for Tier-1
+// loads, file parses, and directory walks; nil disables.
 type analysisTestHookSet struct {
-	// testingTypeOwnLoad observes the typed testing-effect scan's private
-	// fallback load, so tests pin that a shared view load or a memo hit is
-	// actually consumed instead.
 	testingTypeOwnLoad func(pkgPath string)
-	// fileParse observes a per-file effect scan actually parsing, and
-	// variantParse a compartment member's ledger derivation, so tests
-	// pin that the persistent per-file memos served instead.
-	fileParse func(path string)
-	// canonicalParse observes a compiled member's canonical form
-	// actually being derived (a byte-digest miss), the memo's one
-	// observable.
-	canonicalParse func(dir string)
-	variantParse   func(name string)
-	// packageVerdictOverride lets hermetic tests override or seed a
-	// verified-package verdict for a specific memo key without mutating
-	// verifiedPackageMemo directly.
-	packageVerdictOverride func(memoKey string) (verifiedPackageVerdict, bool)
-	walkEntry              func(path string)
-	digestRead             func(name string)
-	analyzeBatch           func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error)
-	probePkgScope          func(ctx context.Context, prog *program, subjects []Subject) error
+	fileParse          func(path string)
+	canonicalParse     func(dir string)
+	variantParse       func(name string)
+	walkEntry          func(path string)
 }
 
 var (
@@ -249,47 +433,10 @@ func emitVariantParseHook(name string) {
 	}
 }
 
-func hasPackageVerdictOverrideHook() bool {
-	h := closureTestHooks.Load()
-	return h != nil && h.packageVerdictOverride != nil
-}
-
-func lookupPackageVerdictOverrideHook(memoKey string) (verifiedPackageVerdict, bool) {
-	if h := closureTestHooks.Load(); h != nil && h.packageVerdictOverride != nil {
-		return h.packageVerdictOverride(memoKey)
-	}
-	return verifiedPackageVerdict{}, false
-}
-
 func emitWalkEntryHook(path string) {
 	if h := closureTestHooks.Load(); h != nil && h.walkEntry != nil {
 		h.walkEntry(path)
 	}
-}
-
-func hasDigestReadTestHook() bool {
-	h := closureTestHooks.Load()
-	return h != nil && h.digestRead != nil
-}
-
-func emitDigestReadHook(name string) {
-	if h := closureTestHooks.Load(); h != nil && h.digestRead != nil {
-		h.digestRead(name)
-	}
-}
-
-func runAnalyzeAttributedBatch(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
-	if h := closureTestHooks.Load(); h != nil && h.analyzeBatch != nil {
-		return h.analyzeBatch(ctx, audited, pureDelegates, prog, subjects)
-	}
-	return attributedReachableSetsOnce(ctx, audited, pureDelegates, prog, subjects)
-}
-
-func runProbePackageScope(ctx context.Context, prog *program, subjects []Subject) error {
-	if h := closureTestHooks.Load(); h != nil && h.probePkgScope != nil {
-		return h.probePkgScope(ctx, prog, subjects)
-	}
-	return defaultProbePackageScope(ctx, prog, subjects)
 }
 
 // modulePin is the version-pin identity every persistent memo and
@@ -325,11 +472,21 @@ func IsPinnedPackageDir(main bool, pkgDir, modCache string) bool {
 	return pkgDir == modCache || strings.HasPrefix(pkgDir, modCache+string(filepath.Separator))
 }
 
+// PinnedPackage reports whether p's resolved source is immutable under h's module cache.
+func (h *Hasher) PinnedPackage(p *listPkg) bool {
+	return h.pinnedPackage(p)
+}
+
 // pinnedPackage reports the pinned-dependency classification: resolved
 // source immutable under the module cache. REQ-closure-mutable-local
 // names the package Dir, so classification uses it.
 func (h *Hasher) pinnedPackage(p *listPkg) bool {
-	return p.Module != nil && IsPinnedPackageDir(p.Module.Main, p.Dir, h.modCache)
+	return h != nil && p != nil && p.Module != nil && IsPinnedPackageDir(p.Module.Main, p.Dir, h.modCache)
+}
+
+// ContextErr checks h's analysis context for cancellation or deadline expiry.
+func (h *Hasher) ContextErr() error {
+	return h.contextErr()
 }
 
 func (h *Hasher) contextErr() error {
@@ -348,11 +505,10 @@ func allPackageFiles(check func() error, dir string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		// The check point: the package's own cancellation check
-		// (Hasher.contextErr) before every entry, so a cancelled walk
-		// ends at the next entry answering the cancellation.
-		if err := check(); err != nil {
-			return err
+		if check != nil {
+			if err := check(); err != nil {
+				return err
+			}
 		}
 		emitWalkEntryHook(path)
 		if d.IsDir() {
@@ -383,19 +539,21 @@ func allPackageFiles(check func() error, dir string) ([]string, error) {
 	return files, nil
 }
 
-// underCache reports whether dir is inside the module cache (a path segment
-// boundary, so "/mod" does not match "/modificator").
+// UnderCache reports whether dir is inside h's module cache on a path-segment boundary.
+func (h *Hasher) UnderCache(dir string) bool {
+	return h != nil && h.underCache(dir)
+}
+
 func (h *Hasher) underCache(dir string) bool {
 	return IsPinnedPackageDir(false, dir, h.modCache)
 }
 
-// list runs `go list -json -deps -test` for pkgPath and returns the parsed
-// dependency graph. The result is memoized per package path for the life of the
-// Hasher: every per-benchmark Compute call in a package (and the maximalHash
-// widen path) needs the identical listing, and its inputs are immutable within a
-// single process run, so one subprocess+decode is amortized across them (same
-// lifetime and rationale as the SSA program cache). Callers treat the slice as
-// read-only, so sharing one backing array across them is safe.
+// List runs `go list -json -deps -test` for pkgPath (or serves from the listing
+// memo) and validates standard-library inventory coverage.
+func (h *Hasher) List(pkgPath string) ([]listPkg, error) {
+	return h.list(pkgPath)
+}
+
 func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	pkgs, err := h.listUnvalidated(pkgPath)
 	if err != nil {
@@ -407,8 +565,6 @@ func (h *Hasher) list(pkgPath string) ([]listPkg, error) {
 	return pkgs, nil
 }
 
-// listUnvalidated is the go command's declaration listing and its cache.
-// Analyses use list, which additionally admits the listing's source coverage.
 func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 	if pkgs, ok := h.lists[pkgPath]; ok {
 		return pkgs, nil
@@ -442,82 +598,61 @@ func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 	return pkgs, nil
 }
 
-// standardInventoryCovers reconciles pattern discovery with the packages
-// actually imported by the subject. An explicitly importable standard package
-// omitted by the wildcard inventory never inherits its content coverage.
 func (h *Hasher) standardInventoryCovers(pkgs []listPkg) error {
-	if h.ToolchainContent() == "" {
+	return h.selection.CoversStandardPackages(pkgs)
+}
+
+// Selection returns h's resolved toolchain-audit Selection.
+func (h *Hasher) Selection() toolchain.Selection {
+	if h == nil {
+		return toolchain.Selection{}
+	}
+	return h.selection
+}
+
+// SelectionAudited reports whether the toolchain-source audit succeeded.
+func (h *Hasher) SelectionAudited() bool {
+	return h != nil && h.selection.Audited()
+}
+
+// SelectionNotice renders the unaudited degradation notice, or "" when audited.
+func (h *Hasher) SelectionNotice() string {
+	if h == nil {
+		return (toolchain.Selection{}).Notice()
+	}
+	return h.selection.Notice()
+}
+
+// SelectionAttribution returns the unaudited selection axis, or "" when audited.
+func (h *Hasher) SelectionAttribution() string {
+	if h == nil {
+		return (toolchain.Selection{}).Attribution()
+	}
+	return h.selection.Attribution()
+}
+
+// PureDelegates returns the verified pure-delegate map when audited, or nil.
+func (h *Hasher) PureDelegates() map[string]bool {
+	if h == nil {
 		return nil
 	}
-	for _, p := range pkgs {
-		if !p.Standard {
-			continue
-		}
-		inventory, ok := h.source.inventory[p.SourcePath()]
-		if !ok || filepath.Clean(inventory.Dir) != filepath.Clean(p.Dir) || !slices.Equal(inventory.Files, selectedFiles(p)) {
-			return fmt.Errorf("closure: selected standard package %s is not covered by the toolchain content inventory", p.ImportPath)
-		}
-	}
-	return nil
+	return h.selection.PureDelegates()
 }
 
 // ToolchainContent identifies every standard package's selected source files
-// in this construction. It is independent of the reported version and of the
-// admission policy. Empty means that complete content could not be read.
-func (h *Hasher) ToolchainContent() string { return h.source.Content }
+// in this construction.
+func (h *Hasher) ToolchainContent() string {
+	if h == nil {
+		return ""
+	}
+	return h.selection.Content()
+}
 
 // AdmissionPolicy identifies the data governing the source audit, separately
 // from derivation versions and memo representation.
-func (h *Hasher) AdmissionPolicy() string { return h.source.Policy }
-
-type policyInputs struct {
-	verifier    string
-	asmVerifier string
-	audit       string
-	packages    map[string]bool
-	linknames   map[string]bool
-	seeds       []string
-}
-
-// capturePolicyInputs owns every input before keying or deriving a policy.
-// Production inventories change only through source edits; tests may replace
-// them between calls. The memo holds no aliases into either form.
-func capturePolicyInputs() policyInputs {
-	packages := map[string]bool{}
-	toolchain.AppendPolicyPackages(packages)
-	for k, v := range cprep.AllowedPureAsmStandardHeaders {
-		packages["pure-asm-hdr-allow:"+k] = v
+func (h *Hasher) AdmissionPolicy() string {
+	if h == nil {
+		return ""
 	}
-	linknames := map[string]bool{}
-	for k, v := range cprep.AllowedPureLinknameTargets {
-		linknames["pure-link2:"+k] = v
-	}
-	for k, v := range cprep.AllowedPureSingleArgLinknames {
-		linknames["pure-link1:"+k] = v
-	}
-	for k, v := range cprep.AllowedPureAsmCrossPkgSymbols {
-		linknames["pure-asm-sym:"+k] = v
-	}
-	return policyInputs{
-		verifier:    toolchainVerifierVersion,
-		asmVerifier: asmverify.NonStdAsmVerifierVersion,
-		audit:       auditset.Identity(),
-		packages:    packages,
-		linknames:   linknames,
-		seeds:       surfaceSeeds(),
-	}
-}
-
-func admissionPolicy() string {
-	return capturePolicyInputs().derive()
-}
-
-func (in policyInputs) derive() string {
-	seeds := slices.Clone(in.seeds)
-	sort.Strings(seeds)
-	seeds = slices.Compact(seeds)
-	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@2", in.verifier, in.asmVerifier, in.audit,
-		in.packages, in.linknames, seeds})
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
+	return h.selection.Policy()
 }

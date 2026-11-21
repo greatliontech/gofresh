@@ -13,6 +13,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
@@ -3354,7 +3355,7 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 	if observed != 0 {
 		t.Fatalf("validation observed the tree %d times before refusing on the missing attachment", observed)
 	}
-	_ = closure.Observability{}
+	_ = observability.Observability{}
 }
 
 // The toolchain-selection notice is announced at view construction —

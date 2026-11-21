@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 )
 
 // Tool provenance: a binary embedding this engine drives an ambient
@@ -42,7 +42,7 @@ import (
 // basis and BOTH directions refuse. An unidentifiable version on
 // either side refuses — unidentifiable is not agreement.
 func ToolchainSkew(ambient string) error {
-	return toolchainSkew(closure.AnalyzingFrontend(), ambient)
+	return toolchainSkew(toolchain.AnalyzingFrontend(), ambient)
 }
 
 // toolchainSkew is the two-sided core, testable on both inputs.
@@ -149,7 +149,7 @@ func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, bu
 	if reader == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil environment reader")
 	}
-	content, policy, notice, err := closure.ResolveToolchainSelection(ctx, reader, buildFlags)
+	content, policy, notice, err := toolchain.ResolveToolchainSelection(ctx, reader, buildFlags)
 	if err != nil {
 		return ToolchainSelection{}, err
 	}

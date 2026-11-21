@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -61,8 +62,10 @@ func TestComputeMaximalBatchSharesPackageClosureWithoutSharingIdentity(t *testin
 func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T) {
 	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/opaqueasm"
 	subject := Subject{Package: pkg, Symbol: "BenchmarkOpaqueASM"}
-	h := newInMemoryHasher(t)
-	supplyRegisteredFixtures(t, h, pkg)
+	h, err := newAt(".")
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, sources, err := h.ComputeMaximalBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
@@ -264,8 +267,8 @@ func TestMaximalTestingMethodClassificationUsesHarnessReceiver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "" {
-		t.Fatalf("unrelated Setenv method classified as testing API: %q", scan.preferred)
+	if scan.Preferred != "" {
+		t.Fatalf("unrelated Setenv method classified as testing API: %q", scan.Preferred)
 	}
 }
 
@@ -397,7 +400,7 @@ func TestComputeMaximalBatchConservativelyMarksNonGoEdges(t *testing.T) {
 
 func TestMaximalPackageMarksImplicitCgoExternal(t *testing.T) {
 	pkg := &listPkg{CgoFiles: []string{"cgo.go"}}
-	if reason := maximalPackageExternalEffects(pkg).preferred; !strings.Contains(reason, "cgo") {
+	if reason := maximalPackageExternalEffects(pkg).Preferred; !strings.Contains(reason, "cgo") {
 		t.Fatalf("implicit cgo reason = %q, want cgo external disposition", reason)
 	}
 }
@@ -420,7 +423,7 @@ func TestPreferredReasonOrdersRankThenLexicographic(t *testing.T) {
 		t.Fatal("equal rank did not fall to the lexicographic least")
 	}
 	object := opaqueExternalEffect(externalEffectNative, "reaches non-standard system object")
-	object.unrefinable = true
+	object.Unrefinable = true
 	if !preferEffectReason(assembly, object) || preferEffectReason(object, assembly) {
 		t.Fatal("the unrefinable bit displaced the lexicographic tie-break")
 	}
@@ -446,21 +449,21 @@ func F() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != trueExternalEffect("net").reason {
-		t.Fatalf("preferred diagnostic = %q, want the always-external import to outrank the body walk", scan.preferred)
+	if scan.Preferred != trueExternalEffect("net").Reason {
+		t.Fatalf("preferred diagnostic = %q, want the always-external import to outrank the body walk", scan.Preferred)
 	}
 	for _, want := range [][2]string{{"os", "ReadFile"}, {"net", "Dial"}} {
 		found := false
-		for _, effect := range scan.effects {
-			found = found || effect.packagePath == want[0] && effect.symbol == want[1]
+		for _, effect := range scan.Effects {
+			found = found || effect.PackagePath == want[0] && effect.Symbol == want[1]
 		}
 		if !found {
-			t.Errorf("missing typed effect %s.%s in %+v", want[0], want[1], scan.effects)
+			t.Errorf("missing typed effect %s.%s in %+v", want[0], want[1], scan.Effects)
 		}
 	}
-	for _, effect := range scan.effects {
-		if effect.packagePath == "" && effect.kind == externalEffectUnauditedStandard {
-			t.Fatalf("classified selectors retained a spurious package blocker: %+v", scan.effects)
+	for _, effect := range scan.Effects {
+		if effect.PackagePath == "" && effect.Kind == externalEffectUnauditedStandard {
+			t.Fatalf("classified selectors retained a spurious package blocker: %+v", scan.Effects)
 		}
 	}
 }
@@ -489,8 +492,8 @@ func F(w wrap) string { return fmt.Sprintf("%v", w.s) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation reflect.Value" {
-		t.Fatalf("preferred diagnostic = %q, want the unaudited operation named - the name-free fallback hides the sink", scan.preferred)
+	if scan.Preferred != "reaches unaudited standard operation reflect.Value" {
+		t.Fatalf("preferred diagnostic = %q, want the unaudited operation named - the name-free fallback hides the sink", scan.Preferred)
 	}
 	first := write("unaudited_two.go", `package effects
 import "reflect"
@@ -503,8 +506,8 @@ type pair struct {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation reflect.Method" {
-		t.Fatalf("preferred diagnostic = %q, want the lexicographic least within the rank", scan.preferred)
+	if scan.Preferred != "reaches unaudited standard operation reflect.Method" {
+		t.Fatalf("preferred diagnostic = %q, want the lexicographic least within the rank", scan.Preferred)
 	}
 	fallback := write("pure_only.go", `package effects
 import "fmt"
@@ -514,8 +517,8 @@ func G(v int) string { return fmt.Sprintf("%d", v) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.effects) != 0 || scan.preferred != "reaches fmt (potential external dependence)" {
-		t.Fatalf("audited-pure-only file = effects %+v preferred %q, want no effects and the import fallback preserved", scan.effects, scan.preferred)
+	if len(scan.Effects) != 0 || scan.Preferred != "reaches fmt (potential external dependence)" {
+		t.Fatalf("audited-pure-only file = effects %+v preferred %q, want no effects and the import fallback preserved", scan.Effects, scan.Preferred)
 	}
 	stringerOnly := write("stringer_only.go", `package effects
 import "fmt"
@@ -526,8 +529,8 @@ func H(l labeled) string { return fmt.Sprint(l.s) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.effects) != 0 || scan.preferred != "reaches fmt (potential external dependence)" {
-		t.Fatalf("Stringer-reference file = effects %+v preferred %q, want the interface-type reference admitted as executing nothing", scan.effects, scan.preferred)
+	if len(scan.Effects) != 0 || scan.Preferred != "reaches fmt (potential external dependence)" {
+		t.Fatalf("Stringer-reference file = effects %+v preferred %q, want the interface-type reference admitted as executing nothing", scan.Effects, scan.Preferred)
 	}
 }
 
@@ -545,9 +548,9 @@ func TestMaximalPackageSelectionRanksTheEffectUnion(t *testing.T) {
 		t.Fatalf("single-effect union selected %q", selected)
 	}
 	library := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
-	library.unrefinable = true
+	library.Unrefinable = true
 	union = append(union, library)
-	if selected := preferredEffectReason(union); selected != library.reason {
+	if selected := preferredEffectReason(union); selected != library.Reason {
 		t.Fatalf("the top-rank blocker was not selected: %q", selected)
 	}
 }
@@ -560,11 +563,11 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 		SysoFiles:  []string{"object.syso"},
 	}
 	scan := maximalPackageExternalEffects(pkg)
-	if scan.preferred != opaqueExternalEffect(externalEffectNative, "reaches cgo external library").reason {
-		t.Fatalf("preferred package diagnostic = %q, want the lexicographic least of the native facts", scan.preferred)
+	if scan.Preferred != opaqueExternalEffect(externalEffectNative, "reaches cgo external library").Reason {
+		t.Fatalf("preferred package diagnostic = %q, want the lexicographic least of the native facts", scan.Preferred)
 	}
-	if len(scan.effects) != 4 {
-		t.Fatalf("package effects = %+v, want four complete facts", scan.effects)
+	if len(scan.Effects) != 4 {
+		t.Fatalf("package effects = %+v, want four complete facts", scan.Effects)
 	}
 }
 
@@ -582,7 +585,7 @@ func Use() { _ = aclient.New(); _ = bclient.New() }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fallbackScan.effects) != 1 || !strings.Contains(fallbackScan.preferred, "import name collision") {
+	if len(fallbackScan.Effects) != 1 || !strings.Contains(fallbackScan.Preferred, "import name collision") {
 		t.Fatalf("fallback scan = %+v, want fail-closed collision", fallbackScan)
 	}
 	// With declared names from the listing, each unnamed import binds its
@@ -595,7 +598,7 @@ func Use() { _ = aclient.New(); _ = bclient.New() }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resolvedScan.effects) != 0 || resolvedScan.preferred != "" {
+	if len(resolvedScan.Effects) != 0 || resolvedScan.Preferred != "" {
 		t.Fatalf("declared-names scan = %+v, want no false collision", resolvedScan)
 	}
 
@@ -635,14 +638,14 @@ func Use() { _ = foo.A() }
 		t.Fatal(err)
 	}
 	h := &Hasher{
-		maximalFiles:      map[string]maximalEffectScan{},
-		selectionResolved: true,
+		maximalFiles: map[string]maximalEffectScan{},
+		selection:    toolchain.SelectionForTest(true, "", "", "", "", nil, nil),
 	}
 	unlistedScan, err := h.maximalFileEffectsCached("example.com/p", filePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(unlistedScan.effects) != 0 {
+	if len(unlistedScan.Effects) != 0 {
 		t.Fatalf("unlisted /v2 scan = %+v, want clean secondary fallback", unlistedScan)
 	}
 	declaredFoo := map[string]string{
@@ -660,17 +663,23 @@ func Use() { _ = foo.A() }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(collisionScan.effects) != 1 || !strings.Contains(collisionScan.preferred, "import name collision") {
+	if len(collisionScan.Effects) != 1 || !strings.Contains(collisionScan.Preferred, "import name collision") {
 		t.Fatalf("declared foo /v2 scan = %+v, want collision on foo", collisionScan)
 	}
 }
 
 func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
-	h := newInMemoryHasher(t)
-	supplyRegisteredFixtures(t, h, "github.com/greatliontech/gofresh/internal/closure/testdata/direct")
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/direct"
+	h, err := newAt(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.list(pkg); err != nil {
+		t.Fatal(err)
+	}
 	h.ctx = &cancelAfterContext{Context: context.Background(), remaining: 1}
-	_, _, err := h.ComputeMaximalBatch([]Subject{{
-		Package: "github.com/greatliontech/gofresh/internal/closure/testdata/direct",
+	_, _, err = h.ComputeMaximalBatch([]Subject{{
+		Package: pkg,
 		Symbol:  "BenchmarkDirect",
 	}})
 	if err == nil {
@@ -737,17 +746,17 @@ func FuzzPreferredReasonTotalAndRankMaximal(f *testing.F) {
 		effects := make([]externalEffect, 0, count%9)
 		for i := 0; i < int(count%9); i++ {
 			effects = append(effects, externalEffect{
-				kind:        kinds[rng.Intn(len(kinds))],
-				packagePath: packagePaths[rng.Intn(len(packagePaths))],
-				reason:      reasons[rng.Intn(len(reasons))],
-				unrefinable: rng.Intn(2) == 0,
-				observable:  rng.Intn(2) == 0,
+				Kind:        kinds[rng.Intn(len(kinds))],
+				PackagePath: packagePaths[rng.Intn(len(packagePaths))],
+				Reason:      reasons[rng.Intn(len(reasons))],
+				Unrefinable: rng.Intn(2) == 0,
+				Observable:  rng.Intn(2) == 0,
 			})
 		}
 		selected := preferredEffectReason(effects)
 		var reasoned []externalEffect
 		for _, effect := range effects {
-			if effect.reason != "" {
+			if effect.Reason != "" {
 				reasoned = append(reasoned, effect)
 			}
 		}
@@ -771,8 +780,8 @@ func FuzzPreferredReasonTotalAndRankMaximal(f *testing.F) {
 			if effectCauseRank(candidate) != bestRank {
 				continue
 			}
-			if want == "" || candidate.reason < want {
-				want = candidate.reason
+			if want == "" || candidate.Reason < want {
+				want = candidate.Reason
 			}
 		}
 		if selected != want {
@@ -800,7 +809,7 @@ func TestEffectCauseRankSymbolFreeStrata(t *testing.T) {
 		t.Fatalf("receiver-escape structural finding ranked %d, want the top stratum", rank)
 	}
 	observable := opaqueExternalEffect(externalEffectTestRuntime, "testing.Short")
-	observable.observable = true
+	observable.Observable = true
 	if rank := effectCauseRank(observable); rank != -1 {
 		t.Fatalf("observable test-runtime effect ranked %d, want last resort", rank)
 	}
@@ -856,41 +865,41 @@ func UnreachedUnixHazard() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(unfiltered.importCandidates) == 0 || !strings.Contains(unfiltered.importCandidates[0].reason, "golang.org/x/sys/unix") {
-		t.Fatalf("unfiltered importCandidates = %+v, want golang.org/x/sys/unix candidate", unfiltered.importCandidates)
+	if len(unfiltered.ImportCandidates) == 0 || !strings.Contains(unfiltered.ImportCandidates[0].Reason, "golang.org/x/sys/unix") {
+		t.Fatalf("unfiltered importCandidates = %+v, want golang.org/x/sys/unix candidate", unfiltered.ImportCandidates)
 	}
 	sawUnlink, sawChdir := false, false
-	for _, eff := range unfiltered.effects {
-		if strings.Contains(eff.reason, "app/sub") {
+	for _, eff := range unfiltered.Effects {
+		if strings.Contains(eff.Reason, "app/sub") {
 			t.Fatalf("dotless user package misclassified as standard effect: %+v", eff)
 		}
-		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Unlink" {
+		if eff.PackagePath == "golang.org/x/sys/unix" && eff.Symbol == "Unlink" {
 			sawUnlink = true
 		}
-		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Chdir" {
+		if eff.PackagePath == "golang.org/x/sys/unix" && eff.Symbol == "Chdir" {
 			sawChdir = true
 		}
 	}
 	if !sawUnlink || !sawChdir {
-		t.Fatalf("unfiltered effects = %+v, want both unix.Unlink and unix.Chdir", unfiltered.effects)
+		t.Fatalf("unfiltered effects = %+v, want both unix.Unlink and unix.Chdir", unfiltered.Effects)
 	}
 
-	reached := map[funcDeclKey]bool{{dir: "/dir", pkgClause: "p", name: "Reached"}: true}
+	reached := map[funcDeclKey]bool{{Dir: "/dir", PkgClause: "p", Name: "Reached"}: true}
 	filtered, err := maximalFileEffectsContentWithContextFiltered(true, "/dir/p.go", src, nil, callerMap, reached)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sawChdirFiltered := false
-	for _, eff := range filtered.effects {
-		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Unlink" {
+	for _, eff := range filtered.Effects {
+		if eff.PackagePath == "golang.org/x/sys/unix" && eff.Symbol == "Unlink" {
 			t.Fatalf("unreached non-hazard unix.Unlink leaked into filtered scan: %+v", eff)
 		}
-		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Chdir" {
+		if eff.PackagePath == "golang.org/x/sys/unix" && eff.Symbol == "Chdir" {
 			sawChdirFiltered = true
 		}
 	}
 	if !sawChdirFiltered {
-		t.Fatalf("filtered effects = %+v, want package-wide unix.Chdir hazard preserved", filtered.effects)
+		t.Fatalf("filtered effects = %+v, want package-wide unix.Chdir hazard preserved", filtered.Effects)
 	}
 }
 
@@ -901,20 +910,20 @@ func TestMaximalFactsRetainHiddenBlockers(t *testing.T) {
 	if !ok {
 		t.Fatal("missing environment classification")
 	}
-	one := newMaximalFacts(identity, []externalEffect{network}, network.reason)
-	complete := newMaximalFacts(identity, []externalEffect{network, environment}, network.reason)
+	one := newMaximalFacts(identity, []externalEffect{network}, network.Reason)
+	complete := newMaximalFacts(identity, []externalEffect{network, environment}, network.Reason)
 	if one.Closure() != complete.Closure() {
 		t.Fatal("fixture must hide the environment blocker behind the same preferred reason")
 	}
 	if one.Equal(complete) || complete.Equal(one) {
 		t.Fatal("equal legacy projections hid a changed blocker inventory")
 	}
-	if !complete.Equal(newMaximalFacts(identity, []externalEffect{environment, network}, network.reason)) {
+	if !complete.Equal(newMaximalFacts(identity, []externalEffect{environment, network}, network.Reason)) {
 		t.Fatal("scan traversal order changed complete facts")
 	}
 	want := []Blocker{
-		{Kind: BlockerEnvironment, Package: "os", Symbol: "Getenv", Reason: environment.reason},
-		{Kind: BlockerNetwork, Package: "net", Reason: network.reason},
+		{Kind: BlockerEnvironment, Package: "os", Symbol: "Getenv", Reason: environment.Reason},
+		{Kind: BlockerNetwork, Package: "net", Reason: network.Reason},
 	}
 	if got := complete.Effects; !slices.Equal(got, want) {
 		t.Fatalf("blockers = %+v, want %+v", got, want)
@@ -925,18 +934,18 @@ func TestMaximalFactsRetainHiddenBlockers(t *testing.T) {
 	// Change every retained field independently, while holding the selected
 	// reason and identity fixed. No field may disappear through projection.
 	for name, change := range map[string]func(*externalEffect){
-		"kind":        func(e *externalEffect) { e.kind = externalEffectFileIO },
-		"package":     func(e *externalEffect) { e.packagePath = "other" },
-		"symbol":      func(e *externalEffect) { e.symbol = "LookupEnv" },
-		"detail":      func(e *externalEffect) { e.detail = "detail" },
-		"reason":      func(e *externalEffect) { e.reason = "different diagnostic" },
-		"observable":  func(e *externalEffect) { e.observable = true },
-		"unrefinable": func(e *externalEffect) { e.unrefinable = true },
+		"kind":        func(e *externalEffect) { e.Kind = externalEffectFileIO },
+		"package":     func(e *externalEffect) { e.PackagePath = "other" },
+		"symbol":      func(e *externalEffect) { e.Symbol = "LookupEnv" },
+		"detail":      func(e *externalEffect) { e.Detail = "detail" },
+		"reason":      func(e *externalEffect) { e.Reason = "different diagnostic" },
+		"observable":  func(e *externalEffect) { e.Observable = true },
+		"unrefinable": func(e *externalEffect) { e.Unrefinable = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := environment
 			change(&changed)
-			other := newMaximalFacts(identity, []externalEffect{network, changed}, network.reason)
+			other := newMaximalFacts(identity, []externalEffect{network, changed}, network.Reason)
 			if complete.Equal(other) || slices.Equal(complete.Effects, other.Effects) {
 				t.Fatalf("changed %s disappeared from retained/projected facts", name)
 			}
@@ -951,7 +960,7 @@ func TestMaximalFactsRetainHiddenBlockers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			changed := identity
 			change(&changed)
-			if complete.Equal(newMaximalFacts(changed, []externalEffect{environment, network}, network.reason)) {
+			if complete.Equal(newMaximalFacts(changed, []externalEffect{environment, network}, network.Reason)) {
 				t.Fatalf("changed %s disappeared from identity equality", name)
 			}
 		})
@@ -962,9 +971,9 @@ func TestMaximalFactsRetainHiddenBlockers(t *testing.T) {
 }
 
 func TestMaximalFactsOwnTheirInputsAndProjections(t *testing.T) {
-	effect := externalEffect{kind: externalEffectNative, packagePath: "native", symbol: "F", detail: "body", reason: "native body", observable: true, unrefinable: true}
+	effect := externalEffect{Kind: externalEffectNative, PackagePath: "native", Symbol: "F", Detail: "body", Reason: "native body", Observable: true, Unrefinable: true}
 	input := []externalEffect{effect}
-	facts := newMaximalFacts(MaximalIdentity{Hash: "core"}, input, effect.reason)
+	facts := newMaximalFacts(MaximalIdentity{Hash: "core"}, input, effect.Reason)
 	want := Blocker{Kind: BlockerNative, Package: "native", Symbol: "F", Detail: "body", Reason: "native body", Observable: true, Unrefinable: true}
 	input[0] = externalEffect{}
 	copyOfFacts := facts.Clone()
@@ -987,7 +996,7 @@ func TestMaximalFactsOwnTheirInputsAndProjections(t *testing.T) {
 	facts.Effects[0] = Blocker{}
 	facts.Identity.Hash = "changed"
 	facts.Diagnostic = "changed"
-	if copyOfFacts.Effects[0] != want || copyOfFacts.Identity.Hash != "core" || copyOfFacts.Diagnostic != effect.reason {
+	if copyOfFacts.Effects[0] != want || copyOfFacts.Identity.Hash != "core" || copyOfFacts.Diagnostic != effect.Reason {
 		t.Fatal("caller changed cloned facts")
 	}
 }
@@ -1004,12 +1013,12 @@ func TestMaximalFactsAvailabilityAndDiagnosticOnlyCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scan.effects) != 0 || scan.preferred == "" {
+	if len(scan.Effects) != 0 || scan.Preferred == "" {
 		t.Fatalf("fixture did not produce a diagnostic-only candidate: %+v", scan)
 	}
 	identity := MaximalIdentity{Hash: "core", TestVariants: "tests", ToolchainContent: "content", AdmissionPolicy: "rules"}
-	facts := newMaximalFacts(identity, scan.effects, scan.preferred)
-	want := Closure{Hash: "core", TestVariants: "tests", ToolchainContent: "content", AdmissionPolicy: "rules", Reason: scan.preferred}
+	facts := newMaximalFacts(identity, scan.Effects, scan.Preferred)
+	want := Closure{Hash: "core", TestVariants: "tests", ToolchainContent: "content", AdmissionPolicy: "rules", Reason: scan.Preferred}
 	if got := facts.Closure(); got != want || len(facts.Effects) != 0 {
 		t.Fatalf("diagnostic-only projection = %+v, want %+v", got, want)
 	}
@@ -1495,7 +1504,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 func referencePreferredOverPool(pool []externalEffect) string {
 	var reasoned []externalEffect
 	for _, effect := range pool {
-		if effect.reason != "" {
+		if effect.Reason != "" {
 			reasoned = append(reasoned, effect)
 		}
 	}
@@ -1513,8 +1522,8 @@ func referencePreferredOverPool(pool []externalEffect) string {
 		if effectCauseRank(effect) != bestRank {
 			continue
 		}
-		if want == "" || effect.reason < want {
-			want = effect.reason
+		if want == "" || effect.Reason < want {
+			want = effect.Reason
 		}
 	}
 	return want
@@ -1528,11 +1537,11 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 	}
 	if strings.Contains(string(content), "//go:wasmimport") {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
-		effect.unrefinable = true
-		scan.add(effect)
+		effect.Unrefinable = true
+		scan.Add(effect)
 	}
 	if hasRawGoLinkname(string(content)) && !auditedLinknamesOnly(true, string(content)) {
-		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
+		scan.Add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)
 	if err != nil {
@@ -1567,25 +1576,25 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			clash = clash && !(versioned[prior] && versioned[pkgPath])
 		}
 		if clash {
-			scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias))
+			scan.Add(opaqueExternalEffect(externalEffectUnauditedStandard, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias))
 		}
 		if named || !explicit[alias] {
 			aliases[alias] = pkgPath
 		}
 		if pkgPath == "testing" {
 			if alias == "." {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
+				scan.Add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
 			}
 			continue
 		}
 		if auditset.AlwaysExternalPackage(pkgPath) && alias != "." && alias != "_" {
-			scan.importCandidates = append(scan.importCandidates, trueExternalEffect(pkgPath))
+			scan.ImportCandidates = append(scan.ImportCandidates, trueExternalEffect(pkgPath))
 		}
 		if alias == "." || (alias == "_" && pkgPath != "unsafe") {
 			if auditset.AlwaysExternalPackage(pkgPath) {
-				scan.add(trueExternalEffect(pkgPath))
+				scan.Add(trueExternalEffect(pkgPath))
 			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
+				scan.Add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
 			}
 		}
 	}
@@ -1605,7 +1614,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		}
 		pkgPath := aliases[ident.Name]
 		if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
-			scan.add(effect)
+			scan.Add(effect)
 		} else if pkgPath == "os" && sel.Sel.Name == "Exit" && referenceInTestMain(file, aliases, sel) {
 			// admitted test-main epilogue - mirrors the production
 			// carve-out
@@ -1614,22 +1623,22 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
 		} else if pkgPath != "testing" && !admittedPureStandardOrDelegateSymbol(true, nil, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
-			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
+			scan.Add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true
 	})
 	for _, effect := range referenceTestingMethodEffects(file, aliases) {
-		scan.add(effect)
+		scan.Add(effect)
 	}
-	scan.preferred = referencePreferredOverPool(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
-	if scan.preferred == "" {
+	scan.Preferred = referencePreferredOverPool(append(append([]externalEffect(nil), scan.Effects...), scan.ImportCandidates...))
+	if scan.Preferred == "" {
 		// An empty pool reduces the frozen reason ladder to its
 		// potential-external fallback, the one arm the selection keeps.
 		fallback, err := referenceMaximalFileReason(filename)
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		scan.preferred = fallback
+		scan.Preferred = fallback
 	}
 	return scan, nil
 }
@@ -1917,4 +1926,72 @@ func referenceImportName(pkgPath string) string {
 		}
 	}
 	return base
+}
+
+// auditset.ClassBPackages matches classBTable's keys so the classifier
+// and the maximal tier's dot-import backstop (packageHasClassifiedExternalAPI)
+// stay aligned by test (REQ-closure-observability-audited-set).
+func TestClassBPackagesMatchTheArms(t *testing.T) {
+	samples := map[string]string{
+		"fmt": "Println", "os": "Getenv", "syscall": "Mkdir", "golang.org/x/sys/unix": "Mkdir", "testing": "Short",
+		"net": "Dial", "net/http": "Get", "html/template": "ParseFiles", "text/template": "ParseFiles", "plugin": "Open",
+		"crypto/rand": "Read",
+	}
+	for _, pkgPath := range auditset.ClassBPackages() {
+		name, ok := samples[pkgPath]
+		if !ok {
+			t.Errorf("%s is listed but this test carries no sample name for it — add one", pkgPath)
+			continue
+		}
+		if _, classified := classBEffect(pkgPath, name); !classified {
+			t.Errorf("%s is listed but %s.%s does not classify", pkgPath, pkgPath, name)
+		}
+		if !packageHasClassifiedExternalAPI(pkgPath) {
+			t.Errorf("%s classifies but the dot-import backstop does not list it", pkgPath)
+		}
+	}
+	for pkgPath := range classBTable {
+		if !auditset.ClassBPackage(pkgPath) {
+			t.Errorf("%s is in classBTable but not in auditset.ClassBPackages", pkgPath)
+		}
+	}
+	for pkgPath := range samples {
+		if !auditset.ClassBPackage(pkgPath) {
+			t.Errorf("%s carries a sample but is not listed", pkgPath)
+		}
+	}
+	for _, pkgPath := range []string{"math/rand", "math/rand/v2", "strings", "encoding/json/v2"} {
+		if packageHasClassifiedExternalAPI(pkgPath) {
+			t.Errorf("%s listed as classified", pkgPath)
+		}
+	}
+}
+
+// An unnamed import binds the identifier the toolchain's package
+// clause declares for a major-versioned path: the last element past
+// the version (REQ-closure-observability-declaration-bindings).
+func TestImplicitImportNameSkipsMajorVersionElements(t *testing.T) {
+	for pkgPath, want := range map[string]string{
+		"math/rand/v2": "rand", "math/rand": "rand", "encoding/json/v2": "json", "fmt": "fmt",
+		"example.com/mod/v3": "mod", "example.com/v": "v", "example.com/v2x": "v2x", "v2": "v2",
+	} {
+		if got := implicitImportName(pkgPath); got != want {
+			t.Errorf("implicitImportName(%q) = %q, want %q", pkgPath, got, want)
+		}
+	}
+}
+
+func TestNonTestMainShapesAreRejectedByUserTestMainDecl(t *testing.T) {
+	for _, src := range []string{
+		"package p\nimport \"testing\"\nfunc TestMain[T any](m *testing.M) {}\n",
+		"package p\nimport \"testing\"\nfunc TestMain(m *testing.M) int { return 0 }\n",
+	} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), "p_test.go", src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := userTestMainDecl(parsed, map[string]string{"testing": "testing"}); got != nil {
+			t.Fatalf("userTestMainDecl(%q) = %v, want nil", src, got)
+		}
+	}
 }

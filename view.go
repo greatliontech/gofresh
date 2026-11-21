@@ -14,6 +14,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -54,7 +55,7 @@ type Snapshot struct {
 	kind                 Kind
 	facts                *observationFacts
 	runtime              *boundRuntime
-	observable           map[Subject]closure.Observability
+	observable           map[Subject]observability.Observability
 	capturedObserved     map[Subject]bool
 	attachedObservations map[Subject]runtimeinput.State
 	sealed               bool
@@ -136,7 +137,7 @@ func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject
 		moduleDir:            moduleDir,
 		kind:                 kind,
 		facts:                facts,
-		observable:           make(map[Subject]closure.Observability, len(subjects)),
+		observable:           make(map[Subject]observability.Observability, len(subjects)),
 		capturedObserved:     make(map[Subject]bool, len(subjects)),
 		attachedObservations: make(map[Subject]runtimeinput.State, len(subjects)),
 	}
@@ -866,7 +867,7 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 	// unchanged tree.
 	sourceFilesBySubject := make(map[Subject][]string, len(unique))
 	maximal := make(map[Subject]subjectFacts, len(unique))
-	observable := make(map[Subject]closure.Observability, len(unique))
+	observable := make(map[Subject]observability.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
 	discharges := make(map[Subject]attestationDischarges, len(unique))

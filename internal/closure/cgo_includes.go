@@ -1,7 +1,9 @@
 package closure
 
 import (
-	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
+	"fmt"
+
+	"github.com/greatliontech/gofresh/internal/cprep"
 )
 
 func cgoPkgConfig(p *listPkg) cprep.CgoPkgConfig {
@@ -33,4 +35,29 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 		}
 		return fb.content, nil
 	})
+}
+
+// ValidateMutableCgoIncludes verifies that p's cgo include roots stay inside
+// p.Dir (or modCache), enumerates all package directory files under check, and
+// verifies no #include directive escapes p.Dir.
+func (h *Hasher) ValidateMutableCgoIncludes(check func() error, p *listPkg) ([]string, error) {
+	modCache := ""
+	read := readBytes
+	if h != nil {
+		modCache = h.modCache
+		read = h.readFile
+	}
+	if root := cgoIncludeRootOutsideDir(p, modCache); root != "" {
+		return nil, fmt.Errorf("closure: cgo include root outside package dir: %s", root)
+	}
+	files, err := allPackageFiles(check, p.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if include, err := cgoEscapingIncludeWith(p, files, read); err != nil {
+		return nil, err
+	} else if include != "" {
+		return nil, fmt.Errorf("closure: cgo include escapes package dir: %s", include)
+	}
+	return files, nil
 }

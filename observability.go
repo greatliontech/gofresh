@@ -9,6 +9,7 @@ import (
 	"maps"
 
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/observability"
 )
 
 func (v *Snapshot) packageMates() []closure.Subject {
@@ -57,7 +58,8 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
 	emitSnapshotViewHook(v.facts.snapshot)
-	hasher, err = closure.NewBracketAt(ctx, v.facts.reader, v.session.buildFlags...)
+	prover, err := observability.NewBracketAt(ctx, v.facts.reader, v.session.buildFlags...)
+	hasher = prover.BaseHasher()
 	emitBeforeAnalysisViewHook()
 	if err != nil {
 		return err
@@ -69,75 +71,44 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	if liveSnapshot.Identity() != v.facts.snapshot.Identity() {
 		return fmt.Errorf("%w: analysis environment", ErrViewChanged)
 	}
-	// The bracket's analysis scope is the view's: the same identity
-	// outside the source closure the observation pass set, so its
-	// memos and the pass's are one store. The observability memo's key
-	// completes with the package test-binary closure hash inside the
-	// Hasher (REQ-closure-observability-memo). Since the per-subject
-	// isolation landed, SHAPE REFUSALS memoize too - a change to the
-	// analyzer's shape capability (a new admitted shape, a widened
-	// guard) must bump ObservationRTA, or cached refusals serve under
-	// semantics that no longer refuse them.
 	hasher.SetAnalysisScope(v.session.analysisScope(v.facts.guards))
-	hasher.SetPackageMates(v.packageMates())
+	prover.SetPackageMates(v.packageMates())
 	if v.session.progress != nil {
 		v.session.wireProgress(hasher)
 	}
-	// The caller's analysis budget bounds only the precise analysis itself: the
-	// Hasher's analysis context carries the budget deadline, so exhaustion
-	// surfaces as analysis failure — degrading to unavailable evidence, never
-	// validity — while the operation, its brackets, and Hasher construction
-	// stay governed by the caller's context alone.
 	var analysisCtx context.Context
 	budget := v.session.analysisBudget
 	if budget > 0 {
 		bound, cancelBudget := analysisBound(ctx, budget)
 		defer cancelBudget()
 		analysisCtx = bound
-		if err := hasher.BoundAnalysis(analysisCtx); err != nil {
+		if err := prover.BoundAnalysis(analysisCtx); err != nil {
 			return err
 		}
 	}
-	observableComputed, err := hasher.ComputeObservabilityBatch(observableRequests)
+	observableComputed, err := prover.ComputeObservabilityBatch(observableRequests)
 	if err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 		}
-		// Isolation retries per subject so a fact reached only by one
-		// subject can never deny a sibling's proof. While the analysis
-		// context lives, the Hasher memoizes load failures, so a failing
-		// package's load runs once per analysis however many subjects
-		// retry; once the analysis budget expires, retries fail at the
-		// subprocess boundary without real work.
-		observableComputed = make(map[closure.Subject]closure.Observability, len(observableRequests))
+		observableComputed = make(map[closure.Subject]observability.Observability, len(observableRequests))
 		cut := 0
 		for _, request := range observableRequests {
-			isolated, isolatedErr := hasher.ComputeObservabilityBatch([]closure.Subject{request})
+			isolated, isolatedErr := prover.ComputeObservabilityBatch([]closure.Subject{request})
 			if isolatedErr != nil {
 				if ctx.Err() != nil {
 					return fmt.Errorf("gofresh: observation proof cancelled: %w", ctx.Err())
 				}
-				// The isolated refusal composes here, outside the batch's
-				// attributed return, so it attributes the selection itself
-				// exactly as its in-batch twin does
-				// (REQ-closure-refusal-channels). A refusal under an
-				// expired analysis budget names the budget: the reason
-				// is the record's, read long after the pass, and "context
-				// deadline exceeded" alone would not say whose deadline
-				// (REQ-fresh-context).
 				reason := unavailableReason(isolatedErr.Error())
 				if analysisCtx != nil && analysisCtx.Err() != nil {
 					cut++
 					reason = unavailableReason(budgetExhausted(budget) + ": " + isolatedErr.Error())
 				}
-				observableComputed[request] = closure.Observability{Reason: closure.AttributeSelection(reason, hasher.SelectionAttribution())}
+				observableComputed[request] = observability.Observability{Reason: closure.AttributeSelection(reason, hasher.SelectionAttribution())}
 				continue
 			}
 			maps.Copy(observableComputed, isolated)
 		}
-		// One diagnostic per pass the budget cut, never one per
-		// subject: the count is the fact, the per-subject reasons
-		// ride the records (REQ-fresh-progress).
 		reportBudgetCut(v.session.progress, budget, cut, "unproven")
 	}
 	after, err := v.observe(ctx)

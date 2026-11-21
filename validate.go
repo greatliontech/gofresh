@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -90,7 +90,7 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 	}
 	var (
 		subjects []Subject
-		expected map[Subject]closure.Observability
+		expected map[Subject]observability.Observability
 		attached map[Subject]runtimeinput.State
 	)
 	if hasObserved {
@@ -143,10 +143,10 @@ func (v *Snapshot) newSeededValidationView(ctx context.Context) (*Snapshot, erro
 	return v.cloneShell(v.subjects, v.requests, v.packages, v.facts), nil
 }
 
-func (v *Snapshot) prepareObservedValidation() ([]Subject, map[Subject]closure.Observability, map[Subject]runtimeinput.State, error) {
+func (v *Snapshot) prepareObservedValidation() ([]Subject, map[Subject]observability.Observability, map[Subject]runtimeinput.State, error) {
 	v.mu.RLock()
 	subjects := make([]Subject, 0, len(v.capturedObserved))
-	expected := make(map[Subject]closure.Observability, len(v.capturedObserved))
+	expected := make(map[Subject]observability.Observability, len(v.capturedObserved))
 	attached := make(map[Subject]runtimeinput.State, len(v.capturedObserved))
 	for _, subject := range v.subjects {
 		if v.capturedObserved[subject] {
@@ -192,7 +192,7 @@ func (v *Snapshot) validateObserved(ctx context.Context) error {
 	return v.validateObservedWithSeeded(ctx, current, subjects, expected, attached)
 }
 
-func (v *Snapshot) validateObservedWithSeeded(ctx context.Context, current *Snapshot, subjects []Subject, expected map[Subject]closure.Observability, attached map[Subject]runtimeinput.State) error {
+func (v *Snapshot) validateObservedWithSeeded(ctx context.Context, current *Snapshot, subjects []Subject, expected map[Subject]observability.Observability, attached map[Subject]runtimeinput.State) error {
 	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
 		return err
 	}
@@ -293,7 +293,7 @@ func (v *Snapshot) holdCutUnavailable(err error) error {
 // perform is an availability failure, not evidence of drift, and an
 // unavailable captured proof — which confers nothing whatever the current
 // analysis says — is consistent with any current disposition.
-func compareObservationProof(subject Subject, observed, captured closure.Observability) error {
+func compareObservationProof(subject Subject, observed, captured observability.Observability) error {
 	if analysisUnavailable(captured.Reason) {
 		return nil
 	}
@@ -308,8 +308,8 @@ func compareObservationProof(subject Subject, observed, captured closure.Observa
 
 // unavailableReason composes an unavailable observability disposition
 // from its cause — the one spelling of the prefix in this package;
-// the closure analysis composes the same prefix at its own refusal
-// sites (closure/observability.go), which analysisUnavailable
+// the observability analysis composes the same prefix at its own refusal
+// sites (observability/observability.go), which analysisUnavailable
 // recognizes alike.
 func unavailableReason(cause string) string {
 	return analysisUnavailablePrefix + ": " + cause
@@ -388,7 +388,7 @@ func differingGuard(a, b guard.Guards) string {
 
 // describeObservability renders an observability disposition for drift
 // refusals: the verdict class and its reason, compact.
-func describeObservability(o closure.Observability) string {
+func describeObservability(o observability.Observability) string {
 	if o.Observable {
 		return "observable"
 	}

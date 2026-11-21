@@ -480,8 +480,14 @@ func parseRapidPackage(t *testing.T, src string) *packages.Package {
 
 func TestStructHasNoExportedFieldsAndScreening(t *testing.T) {
 	if !MayBeHarnessPkgPath("pgregory.net/rapid") || !MayBeHarnessPkgPath("example.com/propcheck/sub") ||
-		MayBeHarnessPkgPath("testing") || MayBeHarnessPkgPath("fmt") || MayBeHarnessPkgPath("main") || MayBeHarnessPkgPath("") {
+		MayBeHarnessPkgPath("testing") || MayBeHarnessPkgPath("fmt") || MayBeHarnessPkgPath("main") || MayBeHarnessPkgPath("C") || MayBeHarnessPkgPath("") {
 		t.Fatal("MayBeHarnessPkgPath misclassified package path")
+	}
+	if MayBeHarnessImports("C", []string{"testing"}) {
+		t.Fatal("MayBeHarnessImports accepted pseudo-package C")
+	}
+	if _, reason := screenPackageInternal(true, &packages.Package{PkgPath: "C"}); reason != "standard or non-module pkg" {
+		t.Fatalf("screenPackageInternal(C) reason = %q, want standard or non-module pkg", reason)
 	}
 	if !MayBeHarnessImports("example.com/propcheck", []string{"testing", "reflect", "time"}) {
 		t.Fatal("MayBeHarnessImports rejected clean stdlib + testing import set")

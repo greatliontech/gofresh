@@ -61,7 +61,7 @@ func isNonStdModuleStruct(p *packages.Package, named *types.Named) (syntaxutil.T
 		if imp.Module == nil {
 			return syntaxutil.TypeRef{}, false
 		}
-	} else if syntaxutil.IsStandardLibraryPkgPath(pkgPath) {
+	} else if !syntaxutil.HasModuleImportPathShape(pkgPath) {
 		return syntaxutil.TypeRef{}, false
 	}
 	ref := syntaxutil.TypeRef{Pkg: pkgPath, Name: named.Obj().Name()}

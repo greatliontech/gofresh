@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"go/ast"
 	"go/importer"
@@ -640,11 +641,11 @@ func UsePoolAndHooks() {
 				},
 			},
 		}
-		surv, _, dis := dischargeCulprits(closure.RootedFunctions{Complete: true, Fns: map[string]bool{}}, vds, "example.com/p")
+		surv, _, dis := dischargeCulprits(observability.RootedFunctions{Complete: true, Fns: map[string]bool{}}, vds, "example.com/p")
 		if surv != "" || !dis[depVar] {
 			t.Fatalf("unreachable culprit was not discharged: surv=%q dis=%v", surv, dis)
 		}
-		survReached, _, _ := dischargeCulprits(closure.RootedFunctions{Complete: true, Fns: map[string]bool{"example.com/p.Caller": true}}, vds, "example.com/p")
+		survReached, _, _ := dischargeCulprits(observability.RootedFunctions{Complete: true, Fns: map[string]bool{"example.com/p.Caller": true}}, vds, "example.com/p")
 		if survReached == "" {
 			t.Fatal("reachable culprit was erroneously discharged")
 		}

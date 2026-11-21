@@ -17,6 +17,30 @@ func UnderlyingType(t types.Type) types.Type {
 	return nil
 }
 
+// RecvBaseTypeName extracts the base type identifier name from a method
+// receiver type expression, unwrapping parentheses, a leading pointer star,
+// and generic type-parameter index expressions.
+func RecvBaseTypeName(expr ast.Expr) string {
+	expr = ast.Unparen(expr)
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = ast.Unparen(star.X)
+	}
+	for {
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		case *ast.Ident:
+			return e.Name
+		default:
+			return ""
+		}
+	}
+}
+
 // RecvTypeName returns a method declaration's receiver type name with any
 // leading pointer star and generic type parameters stripped, or "" for a plain
 // function or unnameable receiver.
@@ -24,23 +48,7 @@ func RecvTypeName(fd *ast.FuncDecl) string {
 	if fd == nil || fd.Recv == nil || len(fd.Recv.List) == 0 {
 		return ""
 	}
-	t := fd.Recv.List[0].Type
-	for {
-		switch e := t.(type) {
-		case *ast.ParenExpr:
-			t = e.X
-		case *ast.StarExpr:
-			t = e.X
-		case *ast.IndexExpr:
-			t = e.X
-		case *ast.IndexListExpr:
-			t = e.X
-		case *ast.Ident:
-			return e.Name
-		default:
-			return ""
-		}
-	}
+	return RecvBaseTypeName(fd.Recv.List[0].Type)
 }
 
 // MethodRecvNamedTypeName returns the declared receiver type's bare name
@@ -429,14 +437,34 @@ func StructHasExportedReflectTypeField(st *types.Struct) bool {
 	return false
 }
 
-// IsStandardLibraryPkgPath reports whether pkgPath has no dot in its first path
-// segment.
+// IsStandardLibraryPkgPath reports whether pkgPath has standard-library import
+// path shape (non-empty, not the cgo pseudo-package "C", and no dot in its
+// first path segment).
 func IsStandardLibraryPkgPath(pkgPath string) bool {
-	if pkgPath == "" {
+	if pkgPath == "" || pkgPath == "C" {
 		return false
 	}
 	first, _, _ := strings.Cut(pkgPath, "/")
 	return !strings.Contains(first, ".")
+}
+
+// HasModuleImportPathShape reports whether pkgPath has a domain-qualified
+// module import path shape (non-empty with a dot in its first path segment,
+// excluding standard-library packages, empty paths, and pseudo-packages such
+// as "C").
+func HasModuleImportPathShape(pkgPath string) bool {
+	if pkgPath == "" {
+		return false
+	}
+	first, _, _ := strings.Cut(pkgPath, "/")
+	return strings.Contains(first, ".")
+}
+
+// IsInternalStdPkgPath reports whether pkgPath is an internal standard-library
+// package path ("internal/..." or ".../internal/...").
+func IsInternalStdPkgPath(pkgPath string) bool {
+	return IsStandardLibraryPkgPath(pkgPath) &&
+		(pkgPath == "internal" || strings.HasPrefix(pkgPath, "internal/") || strings.HasSuffix(pkgPath, "/internal") || strings.Contains(pkgPath, "/internal/"))
 }
 
 // IsTrueStdlibInPkg reports whether pkgPath resolves to a genuine standard

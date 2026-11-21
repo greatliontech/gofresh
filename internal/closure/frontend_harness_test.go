@@ -2,13 +2,10 @@ package closure
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
-	"go/types"
 	"io/fs"
 	"os"
 	"path"
@@ -19,13 +16,70 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"fmt"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	progpkg "github.com/greatliontech/gofresh/internal/closure/internal/program"
+	"github.com/greatliontech/gofresh/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/toolchain"
 	"github.com/greatliontech/gofresh/internal/trace"
+)
+
+type (
+	externalEffect     = ExternalEffect
+	externalEffectKind = ExternalEffectKind
+	maximalEffectScan  = MaximalEffectScan
+	funcDeclKey        = FuncDeclKey
+	pkgVarKey          = PkgVarKey
+)
+
+const (
+	externalEffectOpaque             = ExternalEffectOpaque
+	externalEffectStandardInput      = ExternalEffectStandardInput
+	externalEffectFormattedOutput    = ExternalEffectFormattedOutput
+	externalEffectEnvironment        = ExternalEffectEnvironment
+	externalEffectFileIO             = ExternalEffectFileIO
+	externalEffectFilesystemMutation = ExternalEffectFilesystemMutation
+	externalEffectPathMutation       = ExternalEffectPathMutation
+	externalEffectTestRuntime        = ExternalEffectTestRuntime
+	externalEffectNetwork            = ExternalEffectNetwork
+	externalEffectPlugin             = ExternalEffectPlugin
+	externalEffectNative             = ExternalEffectNative
+	externalEffectLinkage            = ExternalEffectLinkage
+	externalEffectUnauditedStandard  = ExternalEffectUnauditedStandard
+)
+
+var (
+	opaqueExternalEffect        = OpaqueExternalEffect
+	symbolExternalEffect        = SymbolExternalEffect
+	unauditedStandardEffect     = UnauditedStandardEffect
+	appendExternalEffect        = AppendExternalEffect
+	effectCauseRank             = EffectCauseRank
+	effectLess                  = EffectLess
+	preferEffectReason          = PreferEffectReason
+	preferredEffectReason       = PreferredEffectReason
+	classBEffect                = ClassBEffect
+	classBReason                = ClassBReason
+	classBPureStandard          = ClassBPureStandard
+	auditedStandardSymbol                = AuditedStandardSymbol
+	admittedPureStandardOrDelegateSymbol = AdmittedPureStandardOrDelegateSymbol
+	hasRawGoLinkname                     = cprep.HasRawGoLinkname
+	isSourceOnlyStandardPackage = IsSourceOnlyStandardPackage
+	isStandardFallbackExempt    = IsStandardFallbackExempt
+	fmtFprintFamily             = FmtFprintFamily
+	fmtFscanFamily              = FmtFscanFamily
+	flagRegistrationSymbol      = FlagRegistrationSymbol
+	isCompileTimeUnsafeIntrinsic = IsCompileTimeUnsafeIntrinsic
+	propertyHarnessFact         = PropertyHarnessFact
+	isPropertyHarnessFact       = IsPropertyHarnessFact
+	maximalObservabilityBlocker = MaximalObservabilityBlocker
+	hasExternalCgo              = HasExternalCgo
+	hasExternalCgoMeta          = HasExternalCgoMeta
+	listPkgHasNativeOrEmbed     = ListPkgHasNativeOrEmbed
+	isStdImportPath             = syntaxutil.IsStandardLibraryPkgPath
 )
 
 // TestMain gives this test binary its own memo root under os.TempDir so a
@@ -64,58 +118,6 @@ func parseAndTypecheckDAG(t testing.TB, virtualDir string, filesByPkg map[string
 	return testenv.ParseAndTypecheckDAG(t, virtualDir, filesByPkg)
 }
 
-var (
-	cachedUnixListPkgMu   sync.Mutex
-	cachedUnixListPkgVal  *listPkg
-	cachedUnixListPkgDone bool
-)
-
-func cachedUnixListPkgOnce() *listPkg {
-	cachedUnixListPkgMu.Lock()
-	defer cachedUnixListPkgMu.Unlock()
-	if cachedUnixListPkgDone {
-		return cachedUnixListPkgVal
-	}
-	cachedUnixListPkgDone = true
-	uPkg, err := testenv.CachedStdlibPackageErr(os.Environ(), "golang.org/x/sys/unix")
-	if err != nil || uPkg == nil || len(uPkg.GoFiles) == 0 {
-		return nil
-	}
-	dir := filepath.Dir(uPkg.GoFiles[0])
-	var goFiles, sFiles []string
-	for _, f := range uPkg.GoFiles {
-		goFiles = append(goFiles, filepath.Base(f))
-	}
-	if entries, err := os.ReadDir(dir); err == nil {
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".s") {
-				if matched, mErr := build.Default.MatchFile(dir, e.Name()); mErr == nil && matched {
-					sFiles = append(sFiles, e.Name())
-				}
-			}
-		}
-	}
-	modDir := filepath.Dir(dir)
-	var modVersion string
-	if _, after, ok := strings.Cut(filepath.Base(modDir), "@"); ok {
-		modVersion = after
-	}
-	cachedUnixListPkgVal = &listPkg{
-		ImportPath: "golang.org/x/sys/unix",
-		Name:       "unix",
-		Dir:        dir,
-		GoFiles:    goFiles,
-		SFiles:     sFiles,
-		Module: &listMod{
-			Path:    "golang.org/x/sys",
-			Version: modVersion,
-			Dir:     modDir,
-			Main:    false,
-		},
-	}
-	return cachedUnixListPkgVal
-}
-
 func extractEmbedMatches(af *ast.File, available []string) []string {
 	var patterns []string
 	for _, cg := range af.Comments {
@@ -143,270 +145,6 @@ func extractEmbedMatches(af *ast.File, available []string) []string {
 	}
 	slices.Sort(out)
 	return out
-}
-
-func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, filesByPkg map[string]map[string]string) (*progpkg.Program, []listPkg, []*packages.Package, func(), error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	pkgs, resolvedDir, cleanup, err := testenv.ParseAndTypecheckDAGWithStdlibErr(os.Environ(), virtualDir, filesByPkg)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	prog, err := progpkg.FromPackages(ctx, pkgMain, pkgs)
-	if err != nil {
-		cleanup()
-		return nil, nil, nil, nil, err
-	}
-	prog.GOARCH = runtime.GOARCH
-
-	mod := &listMod{
-		Path: "example.com",
-		Dir:  resolvedDir,
-		Main: true,
-	}
-	if gomod := filepath.Join(resolvedDir, "go.mod"); gomod != "" {
-		if _, statErr := os.Stat(gomod); statErr == nil {
-			mod.GoMod = gomod
-		}
-	}
-	var metas []listPkg
-	reachesUnix := false
-	for _, p := range prog.Pkgs {
-		if p.PkgPath == "golang.org/x/sys/unix" {
-			reachesUnix = true
-		}
-	}
-
-	byPkgPath := make(map[string]*packages.Package, len(pkgs))
-	for _, p := range pkgs {
-		byPkgPath[p.PkgPath] = p
-	}
-
-	for _, p := range pkgs {
-		basePath := strings.TrimSuffix(p.PkgPath, "_test")
-		pkgDir := filepath.Join(resolvedDir, filepath.FromSlash(basePath))
-		var imps []string
-		for imp := range p.Imports {
-			imps = append(imps, imp)
-		}
-		slices.Sort(imps)
-
-		var availableRaw []string
-		rawFiles, ok := filesByPkg[p.PkgPath]
-		if !ok {
-			rawFiles = filesByPkg[basePath]
-		}
-		for name := range rawFiles {
-			availableRaw = append(availableRaw, name)
-		}
-		slices.Sort(availableRaw)
-
-		var allGo, baseGo, testOnlyGo, hFiles, sFiles, sysoFiles, baseEmbed, allEmbed []string
-		for _, full := range p.CompiledGoFiles {
-			base := filepath.Base(full)
-			allGo = append(allGo, base)
-			if strings.HasSuffix(base, "_test.go") {
-				testOnlyGo = append(testOnlyGo, base)
-			} else {
-				baseGo = append(baseGo, base)
-			}
-		}
-		for _, name := range availableRaw {
-			switch {
-			case strings.HasSuffix(name, ".h"):
-				hFiles = append(hFiles, name)
-			case strings.HasSuffix(name, ".s"):
-				sFiles = append(sFiles, name)
-			case strings.HasSuffix(name, ".syso"):
-				sysoFiles = append(sysoFiles, name)
-			}
-		}
-
-		var baseImps []string
-		baseImpSet := map[string]bool{}
-		baseEmbedSet := map[string]bool{}
-		allEmbedSet := map[string]bool{}
-		for _, af := range p.Syntax {
-			fname := filepath.Base(p.Fset.PositionFor(af.Pos(), false).Filename)
-			isTest := strings.HasSuffix(fname, "_test.go")
-			for _, emb := range extractEmbedMatches(af, availableRaw) {
-				if !allEmbedSet[emb] {
-					allEmbedSet[emb] = true
-					allEmbed = append(allEmbed, emb)
-				}
-				if !isTest && !baseEmbedSet[emb] {
-					baseEmbedSet[emb] = true
-					baseEmbed = append(baseEmbed, emb)
-				}
-			}
-			if isTest {
-				continue
-			}
-			for _, spec := range af.Imports {
-				imp := strings.Trim(spec.Path.Value, `"`)
-				if !baseImpSet[imp] {
-					baseImpSet[imp] = true
-					baseImps = append(baseImps, imp)
-				}
-			}
-		}
-		slices.Sort(baseImps)
-		slices.Sort(baseEmbed)
-		slices.Sort(allEmbed)
-
-		if strings.HasSuffix(p.PkgPath, "_test") {
-			if _, hasPrimary := byPkgPath[basePath]; !hasPrimary {
-				metas = append(metas, listPkg{
-					ImportPath: basePath,
-					Name:       strings.TrimSuffix(p.Name, "_test"),
-					Dir:        pkgDir,
-					Module:     mod,
-				})
-			}
-			metas = append(metas, listPkg{
-				ImportPath: fmt.Sprintf("%s [%s.test]", p.PkgPath, p.ForTest),
-				Name:       p.Name,
-				Dir:        pkgDir,
-				GoFiles:    allGo,
-				EmbedFiles: allEmbed,
-				Imports:    imps,
-				ForTest:    p.ForTest,
-				Module:     mod,
-			})
-			continue
-		}
-
-		metas = append(metas, listPkg{
-			ImportPath: p.PkgPath,
-			Name:       p.Name,
-			Dir:        pkgDir,
-			GoFiles:    baseGo,
-			HFiles:     hFiles,
-			SFiles:     sFiles,
-			SysoFiles:  sysoFiles,
-			EmbedFiles: baseEmbed,
-			Imports:    baseImps,
-			Module:     mod,
-		})
-		if p.ForTest != "" && (len(testOnlyGo) > 0 || len(allEmbed) > len(baseEmbed)) {
-			metas = append(metas, listPkg{
-				ImportPath: fmt.Sprintf("%s [%s.test]", p.PkgPath, p.ForTest),
-				Name:       p.Name,
-				Dir:        pkgDir,
-				GoFiles:    allGo,
-				HFiles:     hFiles,
-				SFiles:     sFiles,
-				SysoFiles:  sysoFiles,
-				EmbedFiles: allEmbed,
-				Imports:    imps,
-				ForTest:    p.ForTest,
-				Module:     mod,
-			})
-		}
-	}
-	if reachesUnix {
-		if uMeta := cachedUnixListPkgOnce(); uMeta != nil {
-			metas = append(metas, *uMeta)
-		}
-	}
-	return prog, metas, pkgs, cleanup, nil
-}
-
-// buildInMemorySSA constructs a *program.Program, []listPkg metadata slice, and
-// []*packages.Package DAG in memory from virtual file maps without spawning any
-// per-test `go list` or `packages.Load` subprocess.
-func buildInMemorySSA(t testing.TB, virtualDir, pkgMain string, filesByPkg map[string]map[string]string) (*progpkg.Program, []listPkg, []*packages.Package) {
-	t.Helper()
-	if virtualDir == "" {
-		virtualDir = t.TempDir()
-	}
-	prog, metas, pkgs, cleanup, err := buildInMemorySSAFromFiles(context.Background(), virtualDir, pkgMain, filesByPkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cleanup != nil {
-		t.Cleanup(cleanup)
-	}
-	return prog, metas, pkgs
-}
-
-// supplyInMemoryPackage builds an in-memory *program.Program and listing for
-// pkgMain from filesByPkg and registers both in h so subsequent Compute* calls
-// analyze pkgMain without spawning `go list` or `packages.Load`.
-func supplyInMemoryPackage(t testing.TB, h *Hasher, pkgMain string, filesByPkg map[string]map[string]string) *progpkg.Program {
-	t.Helper()
-	prog, metas, _ := buildInMemorySSA(t, "", pkgMain, filesByPkg)
-	h.progs[pkgMain] = prog
-	h.lists[pkgMain] = metas
-	return prog
-}
-
-type cachedRegisteredFixture struct {
-	prog    *progpkg.Program
-	metas   []listPkg
-	cleanup func()
-}
-
-func cloneRegisteredFixtureProgram(src *progpkg.Program) *progpkg.Program {
-	cloned := *src
-	cloned.PkgScopeProbe = nil
-	cloned.Summaries = nil
-	cloned.MutatedGlobals = nil
-	cloned.GOARCH = runtime.GOARCH
-	cloned.ReadSource = nil
-	return &cloned
-}
-
-func loadRegisteredInMemoryFixture(ctx context.Context, cache map[string]cachedRegisteredFixture, pkgPath string) (*progpkg.Program, []listPkg, func(), bool, error) {
-	filesByPkg, ok := inMemoryFixtureRegistry[pkgPath]
-	if !ok {
-		return nil, nil, nil, false, nil
-	}
-	if ctx != nil {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, nil, true, err
-		}
-	}
-	if cache != nil {
-		if cached, found := cache[pkgPath]; found {
-			return cloneRegisteredFixtureProgram(cached.prog), slices.Clone(cached.metas), nil, true, nil
-		}
-	}
-	prog, metas, _, cleanup, err := buildInMemorySSAFromFiles(ctx, "", pkgPath, filesByPkg)
-	if err != nil {
-		return nil, nil, nil, true, err
-	}
-	if cache != nil {
-		cache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas, cleanup: cleanup}
-		return cloneRegisteredFixtureProgram(prog), slices.Clone(metas), nil, true, nil
-	}
-	return cloneRegisteredFixtureProgram(prog), slices.Clone(metas), cleanup, true, nil
-}
-
-func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
-	t.Helper()
-	seen := map[string]bool{}
-	for _, pkgPath := range pkgPaths {
-		if seen[pkgPath] {
-			continue
-		}
-		seen[pkgPath] = true
-		prog, metas, cleanup, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cleanup != nil {
-			t.Cleanup(cleanup)
-		}
-		if ok {
-			h.progs[pkgPath] = prog
-			h.lists[pkgPath] = metas
-		}
-	}
 }
 
 type scannedDirPkg struct {
@@ -727,14 +465,14 @@ func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHashe
 					continue
 				}
 				stdImportsSeen[imp] = true
-				if h != nil && h.source.inventory != nil {
-					if inv, ok := h.source.inventory[imp]; ok {
+				if h != nil {
+					if invDir, invFiles, ok := h.Selection().StandardPackageMeta(imp); ok {
 						metas = append(metas, listPkg{
 							ImportPath: imp,
 							Name:       implicitImportName(imp),
 							Standard:   true,
-							Dir:        inv.Dir,
-							GoFiles:    inv.Files,
+							Dir:        invDir,
+							GoFiles:    invFiles,
 						})
 						continue
 					}
@@ -846,7 +584,6 @@ func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHashe
 		}
 		h.lists[targetPkg] = metas
 		if pkgs, perr := testenv.ParseAndTypecheckInPlaceWithStdlib(os.Environ(), dir, targetPkgDirs, targetFilesByPkg); perr == nil {
-			h.progs[targetPkg] = &program{PkgPath: targetPkg, Pkgs: pkgs}
 			if st != nil {
 				st.pkgs[targetPkg] = pkgs
 				st.lists[targetPkg] = metas
@@ -856,16 +593,14 @@ func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHashe
 }
 
 type inMemoryHasherState struct {
-	pkgs     map[string][]*packages.Package
-	lists    map[string][]listPkg
-	fixtures map[string]cachedRegisteredFixture
+	pkgs  map[string][]*packages.Package
+	lists map[string][]listPkg
 }
 
 func newInMemoryHasherState() *inMemoryHasherState {
 	return &inMemoryHasherState{
-		pkgs:     map[string][]*packages.Package{},
-		lists:    map[string][]listPkg{},
-		fixtures: map[string]cachedRegisteredFixture{},
+		pkgs:  map[string][]*packages.Package{},
+		lists: map[string][]listPkg{},
 	}
 }
 
@@ -885,12 +620,8 @@ func (st *inMemoryHasherState) cleanup() {
 	if st == nil {
 		return
 	}
-	for _, entry := range st.fixtures {
-		if entry.cleanup != nil {
-			entry.cleanup()
-		}
-	}
-	clear(st.fixtures)
+	clear(st.pkgs)
+	clear(st.lists)
 }
 
 func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
@@ -899,16 +630,10 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 			st.cleanup()
 			return nil, false
 		}
-		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
+		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 || h.dir == "" {
 			return nil, false
 		}
 		if h.ctx != nil && h.ctx.Err() != nil {
-			return nil, false
-		}
-		if h.dir == "" {
-			if _, metas, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
-				return metas, true
-			}
 			return nil, false
 		}
 		primeHasherIntoState(nil, h, h.dir, st)
@@ -917,46 +642,18 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 		}
 		return nil, false
 	}
-	h.loadProgramOnMiss = func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error) {
-		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
-			return nil, false, nil
-		}
-		if ctx != nil && ctx.Err() != nil {
-			return nil, false, nil
-		}
-		if h.dir == "" {
-			if inMemProg, metas, _, ok, err := loadRegisteredInMemoryFixture(ctx, st.fixtures, pkgPath); ok {
-				if err == nil && h.lists[pkgPath] == nil {
-					h.lists[pkgPath] = metas
-				}
-				return inMemProg, true, err
-			}
-			return nil, false, nil
-		}
-		pkgs, metas, ok := st.lookupPrimedPkg(h, pkgPath)
-		if !ok {
-			primeHasherIntoState(nil, h, h.dir, st)
-			pkgs, metas, ok = st.lookupPrimedPkg(h, pkgPath)
-		}
-		if !ok || len(pkgs) == 0 {
-			return nil, false, nil
-		}
-		built, err := progpkg.FromPackages(ctx, pkgPath, pkgs)
-		if err == nil && h.lists[pkgPath] == nil && len(metas) > 0 {
-			h.lists[pkgPath] = metas
-		}
-		return built, true, err
-	}
-	h.testingPackagesOnMiss = func(h *Hasher, pkgPath string) *program {
-		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
+	h.SetLoadedPackagesLookup(func(pkgPath string) []*packages.Package {
+		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 || h.dir == "" {
 			return nil
 		}
 		if h.ctx != nil && h.ctx.Err() != nil {
 			return nil
 		}
-		if h.dir == "" {
-			if inMemProg, _, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
-				return inMemProg
+		if pkgPath == "" {
+			for _, pkgs := range st.pkgs {
+				if len(pkgs) > 0 {
+					return pkgs
+				}
 			}
 			return nil
 		}
@@ -966,10 +663,10 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 			pkgs, _, ok = st.lookupPrimedPkg(h, pkgPath)
 		}
 		if ok {
-			return &program{PkgPath: pkgPath, Pkgs: pkgs}
+			return pkgs
 		}
 		return nil
-	}
+	})
 }
 
 func markHasherEligible(h *Hasher) {
@@ -987,8 +684,7 @@ func unprimeHasher(h *Hasher) {
 		h.listOnMiss(nil, "")
 	}
 	h.listOnMiss = nil
-	h.loadProgramOnMiss = nil
-	h.testingPackagesOnMiss = nil
+	h.SetLoadedPackagesLookup(nil)
 }
 
 var (
@@ -1097,291 +793,6 @@ func isolateProofCache(t *testing.T) {
 func unauditedTagGOROOT(t *testing.T) string {
 	t.Helper()
 	return testenv.UnauditedTagGOROOT(t, os.Environ())
-}
-
-// computeTier2ResultAndReach runs the per-subject precise-analysis pipeline
-// the observability proof is built on — program load, subject rooting,
-// package listing, attributed reachability, and the analyzer projection —
-// for a single subject, returning the raw analyzer result plus the names of
-// the subject-reachable functions (the attribution surface the analyzer
-// projects), so root-resolution tests assert reach directly. A symbol that
-// cannot be rooted in the loaded test-binary program is a subject-local
-// error naming the subject; a name declared by both the package and its
-// external test package errors naming the ambiguity.
-//
-// The program and listing are loaded locally and released with the call
-// unless already cached on the Hasher: table tests share one Hasher
-// across many fixture packages, and retaining every whole-program SSA
-// would grow peak memory with the table instead of the largest single
-// test binary.
-func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result, map[string]bool, error) {
-	origList, hadList := h.lists[pkgPath]
-	_, hadProg := h.progs[pkgPath]
-	defer func() {
-		if !hadProg {
-			if hadList {
-				h.lists[pkgPath] = origList
-			} else {
-				delete(h.lists, pkgPath)
-			}
-		}
-	}()
-	prog := h.progs[pkgPath]
-	if prog != nil && prog.Prog == nil && len(prog.Pkgs) > 0 {
-		built, err := progpkg.FromPackages(h.ctx, pkgPath, prog.Pkgs)
-		if err != nil {
-			return tier2Result{}, nil, err
-		}
-		prog = built
-		h.progs[pkgPath] = built
-	}
-	if prog == nil {
-		if inMemProg, metas, cleanup, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath); ok {
-			if err != nil {
-				return tier2Result{}, nil, err
-			}
-			if cleanup != nil {
-				defer cleanup()
-			}
-			prog = inMemProg
-			h.lists[pkgPath] = metas
-		} else if h.loadProgramOnMiss != nil {
-			built, handled, err := h.loadProgramOnMiss(h.ctx, h, pkgPath)
-			if handled {
-				if err != nil {
-					return tier2Result{}, nil, err
-				}
-				prog = built
-			}
-		}
-		if prog == nil {
-			var err error
-			prog, err = progpkg.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
-			if err != nil {
-				return tier2Result{}, nil, err
-			}
-		}
-	}
-	if prog.Roots[symbol] == nil {
-		if prog.Ambiguous[symbol] {
-			return tier2Result{}, nil, fmt.Errorf("closure: subject name %s is ambiguous in %s (declared by both the package and its external test package)", symbol, pkgPath)
-		}
-		return tier2Result{}, nil, fmt.Errorf("closure: subject %s not found in %s", symbol, pkgPath)
-	}
-	metas, err := h.list(pkgPath)
-	if err != nil {
-		return tier2Result{}, nil, err
-	}
-	reachable, err := attributedReachableSets(h.ctx, true, h.source.pureDelegates, prog, []Subject{{Package: pkgPath, Symbol: symbol}})
-	if err != nil {
-		return tier2Result{}, nil, err
-	}
-	result, err := h.tier2Reachable(newTier2Base(h, prog, metas), reachable[0])
-	if err != nil {
-		return tier2Result{}, nil, err
-	}
-	reach := make(map[string]bool, len(reachable[0].functions))
-	for fn := range reachable[0].functions {
-		if fn != nil {
-			reach[fn.String()] = true
-		}
-	}
-	return result, reach, nil
-}
-
-func computeTier2Result(h *Hasher, pkgPath, symbol string) (tier2Result, error) {
-	result, _, err := computeTier2ResultAndReach(h, pkgPath, symbol)
-	return result, err
-}
-
-// fixturePrograms shares loaded representation, never analysis results, for
-// unchanged fixtures under one Hasher's configuration. Only the latest SSA
-// program is held; its own PkgPath is the key, so a failed replacement cannot
-// leave a stale key beside a nil program. An explicit roster additionally holds
-// one typed preparation for the parent. Its source/dependencies and effective
-// build configuration stay quiescent through cleanup. Source-editing and
-// independent-load tests do not use this helper. The owner and its callers are
-// sequential, including lazy type/SSA method construction.
-type fixturePrograms struct {
-	h        *Hasher
-	loaded   *program
-	fixtures map[string]cachedRegisteredFixture
-	// An explicit immutable roster opts into one typed generation. Preparation
-	// is lazy: a table whose subtests are all filtered out loads nothing.
-	roster                []string
-	prepared              *progpkg.Prepared
-	prepareErr            error
-	attempted             bool
-	prepare               func(context.Context, string, []string, []string, ...string) (*progpkg.Prepared, error)
-	typedLoads, ssaBuilds int
-}
-
-func newFixturePrograms(t *testing.T, h *Hasher, roster ...string) *fixturePrograms {
-	t.Helper()
-	f := &fixturePrograms{
-		h:        h,
-		fixtures: map[string]cachedRegisteredFixture{},
-		prepare:  progpkg.Prepare,
-	}
-	for _, path := range roster {
-		if !slices.Contains(f.roster, path) {
-			f.roster = append(f.roster, path)
-		}
-	}
-	t.Cleanup(f.release)
-	return f
-}
-
-func (f *fixturePrograms) supply(t *testing.T, pkgPath string) {
-	t.Helper()
-	if err := f.acquire(pkgPath); err != nil {
-		t.Fatalf("load fixture %s: %v", pkgPath, err)
-	}
-}
-
-func (f *fixturePrograms) acquire(pkgPath string) error {
-	if f.h.ctx != nil {
-		if err := f.h.ctx.Err(); err != nil {
-			f.releaseProgram()
-			return err
-		}
-	}
-	if len(f.roster) > 0 && !slices.Contains(f.roster, pkgPath) {
-		f.releaseProgram()
-		return fmt.Errorf("fixture %s is outside the immutable roster", pkgPath)
-	}
-	if f.loaded == nil || f.loaded.PkgPath != pkgPath {
-		f.releaseProgram()
-		if len(f.roster) > 0 && !f.attempted {
-			f.attempted = true
-			f.typedLoads++
-			var diskRoster []string
-			for _, r := range f.roster {
-				if _, ok := inMemoryFixtureRegistry[r]; ok {
-					continue
-				}
-				if existing := f.h.progs[r]; existing != nil && (existing.Prog != nil || len(existing.Pkgs) > 0) {
-					continue
-				}
-				if f.h.testingPackagesOnMiss != nil && f.h.testingPackagesOnMiss(f.h, r) != nil {
-					continue
-				}
-				diskRoster = append(diskRoster, r)
-			}
-			if len(diskRoster) > 0 {
-				f.prepared, f.prepareErr = f.prepare(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, diskRoster...)
-			}
-		}
-		// Cancellation never licenses an independent fallback, including a
-		// context error returned by a preparation whose context is still live.
-		if err := f.h.ctx.Err(); err != nil {
-			return err
-		}
-		if errors.Is(f.prepareErr, context.Canceled) || errors.Is(f.prepareErr, context.DeadlineExceeded) {
-			return f.prepareErr
-		}
-		// Cache only successful fixture loads, as the precise-analysis
-		// driver's local-load path does. A failed case still fails the test;
-		// later cases retain their opportunity to load and assert independently.
-		var p *program
-		var err error
-		handled := false
-		f.ssaBuilds++
-		if inMemProg, metas, _, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, f.fixtures, pkgPath); ok {
-			handled = true
-			p, err = inMemProg, inMemErr
-			if err == nil {
-				f.h.lists[pkgPath] = metas
-			}
-		} else if existing := f.h.progs[pkgPath]; existing != nil && len(existing.Pkgs) > 0 && existing.Prog == nil && f.prepareErr == nil {
-			handled = true
-			p, err = progpkg.FromPackages(f.h.ctx, pkgPath, existing.Pkgs)
-		} else if f.prepareErr == nil && f.h.loadProgramOnMiss != nil {
-			if built, ok, loadErr := f.h.loadProgramOnMiss(f.h.ctx, f.h, pkgPath); ok {
-				handled = true
-				p, err = built, loadErr
-			}
-		}
-		if !handled {
-			if f.prepared != nil {
-				p, err = f.prepared.Build(f.h.ctx, pkgPath)
-			} else {
-				// Only a load-wide operational preparation failure reaches this
-				// fallback. Per-root selection/load errors remain Build errors.
-				f.typedLoads++
-				p, err = progpkg.Load(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, pkgPath)
-			}
-		}
-		if err != nil {
-			return err
-		}
-		f.loaded = p
-	}
-	// Reset analysis-failure discrimination; only structural SSA caches may
-	// carry across these otherwise independent singleton analyses.
-	f.loaded.PkgScopeProbe = nil
-	f.h.progs[pkgPath] = f.loaded
-	return nil
-}
-
-func (f *fixturePrograms) releaseProgram() {
-	if f.loaded != nil {
-		delete(f.h.progs, f.loaded.PkgPath)
-		if _, ok := inMemoryFixtureRegistry[f.loaded.PkgPath]; ok {
-			delete(f.h.lists, f.loaded.PkgPath)
-		}
-		f.loaded = nil
-	}
-}
-
-func (f *fixturePrograms) release() {
-	f.releaseProgram()
-	for _, entry := range f.fixtures {
-		if entry.cleanup != nil {
-			entry.cleanup()
-		}
-	}
-	f.fixtures = nil
-	f.prepared = nil
-	f.roster = nil
-	f.prepareErr = nil
-}
-
-// checkPreparationCounts uses the actually entered subtests' transitions, so
-// legitimate -run filtering retains the same cost assertions.
-func (f *fixturePrograms) checkPreparationCounts(t *testing.T, transitions int) {
-	t.Helper()
-	wantLoads := 0
-	if transitions > 0 {
-		wantLoads = 1
-	}
-	if f.typedLoads != wantLoads || f.ssaBuilds != transitions {
-		t.Errorf("fixture preparation: typed loads=%d SSA builds=%d, want %d/%d", f.typedLoads, f.ssaBuilds, wantLoads, transitions)
-	}
-}
-
-func TestFixtureProgramSupplyKeepsOnlyLoadedRepresentation(t *testing.T) {
-	h := &Hasher{progs: map[string]*program{}}
-	owner := newFixturePrograms(t, h)
-	p := &program{PkgPath: "example.com/fixture", PkgScopeProbe: map[bool]error{true: errors.New("prior analysis")}}
-	owner.loaded = p
-	owner.supply(t, p.PkgPath)
-	if p.PkgScopeProbe != nil || h.progs[p.PkgPath] != p {
-		t.Fatal("supplying loaded representation retained failure analysis or lost the actual program")
-	}
-	owner.release()
-	if owner.loaded != nil || len(h.progs) != 0 {
-		t.Fatal("release retained the fixture's loaded representation")
-	}
-	var childOwner *fixturePrograms
-	t.Run("owner cleanup", func(t *testing.T) {
-		childOwner = newFixturePrograms(t, h)
-		childOwner.loaded = p
-		childOwner.supply(t, p.PkgPath)
-	})
-	if childOwner.loaded != nil || len(h.progs) != 0 {
-		t.Fatal("the completed owner's cleanup retained its program")
-	}
 }
 
 func writeFile(t testing.TB, dir, rel, content string) {
@@ -1542,7 +953,7 @@ func requireBareAxis(t *testing.T, name, notice, attribution string) {
 
 func hasEffectReason(effects []externalEffect, want string) bool {
 	for _, effect := range effects {
-		if strings.Contains(effect.reason, want) {
+		if strings.Contains(effect.Reason, want) {
 			return true
 		}
 	}
@@ -1562,708 +973,6 @@ func (c *cancelAfterContext) Err() error {
 	return nil
 }
 
-// Synthetic stdlib fixture sources shared across hermetic and integration
-// toolchain-surface verifier tests.
-const syntheticInternalTestlogSrc = `package testlog
-import "sync/atomic"
-type Interface interface {
-	Getenv(string)
-	Stat(string)
-	Open(string)
-	Chdir(string)
-}
-var logger atomic.Pointer[Interface]
-func SetLogger(impl Interface) {
-	if !logger.CompareAndSwap(nil, &impl) {
-		panic("testlog: SetLogger must be called only once")
-	}
-}
-func Logger() Interface {
-	impl := logger.Load()
-	if impl == nil {
-		return nil
-	}
-	return *impl
-}
-func Getenv(name string) {
-	if log := Logger(); log != nil {
-		log.Getenv(name)
-	}
-}
-func Open(name string) {
-	if log := Logger(); log != nil {
-		log.Open(name)
-	}
-}
-func Stat(name string) {
-	if log := Logger(); log != nil {
-		log.Stat(name)
-	}
-}
-func Chdir(name string) {
-	if log := Logger(); log != nil {
-		log.Chdir(name)
-	}
-}
-`
-
-const syntheticOSSrc = `package os
-import (
-	"errors"
-	"internal/testlog"
-	"io"
-	"syscall"
-)
-var ErrInvalid = errors.New("invalid argument")
-var ErrClosed = errors.New("file already closed")
-type PathError struct {
-	Op   string
-	Path string
-	Err  error
-}
-func (e *PathError) Error() string { return e.Op }
-type pollFD struct {
-	Sysfd int
-}
-func (fd *pollFD) Read(p []byte) (int, error)  { return 0, io.EOF }
-func (fd *pollFD) Write(p []byte) (int, error) { return len(p), nil }
-func (fd *pollFD) Fchdir() error               { return nil }
-func (fd *pollFD) Close() error                { return nil }
-type file struct {
-	pfd  pollFD
-	name string
-}
-type File struct {
-	*file
-}
-func newFile(fd int, name string) *File {
-	return &File{&file{pfd: pollFD{Sysfd: fd}, name: name}}
-}
-func Exit(code int) {
-	if code == 0 && testlog.PanicOnExit0() {
-		panic("os.Exit(0)")
-	}
-	syscall.Exit(code)
-}
-func Getenv(key string) string {
-	testlog.Getenv(key)
-	return ""
-}
-func LookupEnv(key string) (string, bool) {
-	testlog.Getenv(key)
-	return "", false
-}
-func Open(name string) (*File, error) {
-	return OpenFile(name, 0, 0)
-}
-func Create(name string) (*File, error) {
-	return OpenFile(name, 1, 0o666)
-}
-func OpenFile(name string, flag int, perm uint32) (*File, error) {
-	testlog.Open(name)
-	return openFileNolog(name, flag, perm)
-}
-func openFileNolog(name string, flag int, perm uint32) (*File, error) {
-	r, err := syscall.Open(name, flag, perm)
-	if err != nil {
-		return nil, &PathError{Op: "open", Path: name, Err: err}
-	}
-	return newFile(r, name), nil
-}
-func openDir(name string) (*File, error) {
-	testlog.Open(name)
-	return &File{&file{name: name}}, nil
-}
-func statOrZero(f *File) int64 {
-	return 0
-}
-func readFileContents(statSize int64, read func([]byte) (int, error)) ([]byte, error) {
-	var buf [1]byte
-	_, err := read(buf[:])
-	if err == io.EOF {
-		return nil, nil
-	}
-	return nil, err
-}
-func (f *File) Read(b []byte) (int, error) {
-	if err := f.checkValid("read"); err != nil {
-		return 0, err
-	}
-	return f.pfd.Read(b)
-}
-func ReadFile(name string) ([]byte, error) {
-	f, err := Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return readFileContents(statOrZero(f), f.Read)
-}
-func ReadDir(name string) ([]any, error) {
-	f, err := openDir(name)
-	_ = f
-	return nil, err
-}
-func Stat(name string) (any, error) {
-	testlog.Stat(name)
-	return nil, nil
-}
-func Lstat(name string) (any, error) {
-	testlog.Stat(name)
-	return nil, nil
-}
-func Getwd() (string, error) {
-	dir, err := syscall.Getwd()
-	return dir, err
-}
-func Chdir(dir string) error {
-	if e := syscall.Chdir(dir); e != nil {
-		testlog.Open(dir)
-		return &PathError{Op: "chdir", Path: dir, Err: e}
-	}
-	if log := testlog.Logger(); log != nil {
-		wd, err := Getwd()
-		if err == nil {
-			log.Chdir(wd)
-		}
-	}
-	return nil
-}
-func (f *File) checkValid(op string) error {
-	if f == nil {
-		return ErrInvalid
-	}
-	return nil
-}
-func (f *File) wrapErr(op string, err error) error {
-	if err == nil || err == io.EOF {
-		return err
-	}
-	return &PathError{Op: op, Path: f.name, Err: err}
-}
-func (f *File) Write(b []byte) (n int, err error) {
-	if err := f.checkValid("write"); err != nil {
-		return 0, err
-	}
-	n, e := f.write(b)
-	if n < 0 {
-		n = 0
-	}
-	if n != len(b) {
-		err = io.ErrShortWrite
-	}
-	if e != nil {
-		err = f.wrapErr("write", e)
-	}
-	return n, err
-}
-func (f *File) WriteString(s string) (n int, err error) {
-	return f.Write([]byte(s))
-}
-func (f *File) write(b []byte) (n int, err error) {
-	n, err = f.pfd.Write(b)
-	return n, err
-}
-func (f *File) Fd() uintptr {
-	return f.fd()
-}
-func (f *File) fd() uintptr {
-	if f == nil {
-		return ^(uintptr(0))
-	}
-	return uintptr(f.pfd.Sysfd)
-}
-func (f *File) Close() error {
-	if f == nil {
-		return ErrInvalid
-	}
-	return f.file.close()
-}
-func (file *file) close() error {
-	if file == nil {
-		return syscall.EINVAL
-	}
-	var err error
-	if e := file.pfd.Close(); e != nil {
-		err = &PathError{Op: "close", Path: file.name, Err: e}
-	}
-	return err
-}
-func (f *File) Chdir() error {
-	if err := f.checkValid("chdir"); err != nil {
-		return err
-	}
-	if e := f.pfd.Fchdir(); e != nil {
-		return f.wrapErr("chdir", e)
-	}
-	if l := testlog.Logger(); l != nil {
-		wd, err := Getwd()
-		if err == nil {
-			l.Chdir(wd)
-		}
-	}
-	return nil
-}
-`
-
-const syntheticBufioSrc = `package bufio
-import "io"
-const defaultBufSize = 4096
-type Writer struct {
-	err error
-	buf []byte
-	n   int
-	wr  io.Writer
-}
-func NewWriterSize(w io.Writer, size int) *Writer {
-	b, ok := w.(*Writer)
-	if ok && len(b.buf) >= size {
-		return b
-	}
-	if size <= 0 {
-		size = defaultBufSize
-	}
-	return &Writer{
-		buf: make([]byte, size),
-		wr:  w,
-	}
-}
-func NewWriter(w io.Writer) *Writer {
-	return NewWriterSize(w, defaultBufSize)
-}
-func (b *Writer) Available() int { return len(b.buf) - b.n }
-func (b *Writer) Buffered() int  { return b.n }
-func (b *Writer) Flush() error {
-	if b.err != nil {
-		return b.err
-	}
-	if b.n == 0 {
-		return nil
-	}
-	n, err := b.wr.Write(b.buf[0:b.n])
-	if n < b.n && err == nil {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		if n > 0 && n < b.n {
-			copy(b.buf[0:b.n-n], b.buf[n:b.n])
-		}
-		b.n -= n
-		b.err = err
-		return err
-	}
-	b.n = 0
-	return nil
-}
-func (b *Writer) WriteByte(c byte) error {
-	if b.err != nil {
-		return b.err
-	}
-	if b.Available() <= 0 && b.Flush() != nil {
-		return b.err
-	}
-	b.buf[b.n] = c
-	b.n++
-	return nil
-}
-func (b *Writer) WriteString(s string) (int, error) {
-	var sw io.StringWriter
-	tryStringWriter := true
-	nn := 0
-	for len(s) > b.Available() && b.err == nil {
-		var n int
-		if b.Buffered() == 0 && sw == nil && tryStringWriter {
-			sw, tryStringWriter = b.wr.(io.StringWriter)
-		}
-		if b.Buffered() == 0 && tryStringWriter {
-			n, b.err = sw.WriteString(s)
-		} else {
-			n = copy(b.buf[b.n:], s)
-			b.n += n
-			b.Flush()
-		}
-		nn += n
-		s = s[n:]
-	}
-	if b.err != nil {
-		return nn, b.err
-	}
-	n := copy(b.buf[b.n:], s)
-	b.n += n
-	nn += n
-	return nn, nil
-}
-`
-
-const syntheticTestdepsSrc = `package testdeps
-import (
-	"bufio"
-	"internal/testlog"
-	"io"
-	"strings"
-	"sync"
-)
-type TestDeps struct{}
-type testLog struct {
-	mu  sync.Mutex
-	w   *bufio.Writer
-	set bool
-}
-func (l *testLog) Getenv(key string) { l.add("getenv", key) }
-func (l *testLog) Open(name string)  { l.add("open", name) }
-func (l *testLog) Stat(name string)  { l.add("stat", name) }
-func (l *testLog) Chdir(name string) { l.add("chdir", name) }
-func (l *testLog) add(op, name string) {
-	if strings.Contains(name, "\n") || name == "" {
-		return
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.w == nil {
-		return
-	}
-	l.w.WriteString(op)
-	l.w.WriteByte(' ')
-	l.w.WriteString(name)
-	l.w.WriteByte('\n')
-}
-var log testLog
-func (TestDeps) StartTestLog(w io.Writer) {
-	log.mu.Lock()
-	log.w = bufio.NewWriter(w)
-	if !log.set {
-		log.set = true
-		testlog.SetLogger(&log)
-		log.w.WriteString("# test log\n")
-	}
-	log.mu.Unlock()
-}
-func (TestDeps) StopTestLog() error {
-	log.mu.Lock()
-	defer log.mu.Unlock()
-	err := log.w.Flush()
-	log.w = nil
-	return err
-}
-`
-
-const syntheticTestingInlineSrc = `package testing
-import (
-	"context"
-	"flag"
-	"io"
-	"os"
-	"path/filepath"
-	"runtime"
-)
-var testlog = flag.String("test.testlogfile", "", "")
-type common struct {
-	ctx      context.Context
-	cleanups []func()
-}
-func (c *common) checkFuzzFn(string) {}
-func (c *common) checkParallel()     {}
-func (c *common) Fatal(...any)       {}
-func (c *common) Fatalf(string, ...any) {}
-func (c *common) Context() context.Context { c.checkFuzzFn("Context"); return c.ctx }
-func (c *common) Cleanup(f func()) {
-	c.checkFuzzFn("Cleanup")
-	c.cleanups = append(c.cleanups, f)
-}
-func (c *common) runCleanup() {
-	for len(c.cleanups) > 0 {
-		last := len(c.cleanups) - 1
-		cleanup := c.cleanups[last]
-		c.cleanups = c.cleanups[:last]
-		cleanup()
-	}
-}
-func (c *common) Setenv(key, value string) {
-	c.checkFuzzFn("Setenv")
-	prevValue, ok := os.LookupEnv(key)
-	if err := os.Setenv(key, value); err != nil {
-		c.Fatalf("setenv: %v", err)
-	}
-	if ok {
-		c.Cleanup(func() { os.Setenv(key, prevValue) })
-	} else {
-		c.Cleanup(func() { os.Unsetenv(key) })
-	}
-}
-func (c *common) Chdir(dir string) {
-	c.checkFuzzFn("Chdir")
-	oldwd, err := os.Open(".")
-	if err != nil {
-		c.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		c.Fatal(err)
-	}
-	switch runtime.GOOS {
-	case "windows", "plan9":
-	default:
-		if !filepath.IsAbs(dir) {
-			dir, err = os.Getwd()
-			if err != nil {
-				c.Fatal(err)
-			}
-		}
-		c.Setenv("PWD", dir)
-	}
-	c.Cleanup(func() {
-		err := oldwd.Chdir()
-		oldwd.Close()
-		if err != nil {
-			panic(err)
-		}
-	})
-}
-type testDeps interface {
-	StartTestLog(io.Writer)
-	StopTestLog() error
-}
-type M struct {
-	deps  testDeps
-	tests []InternalTest
-}
-type InternalTest struct {
-	Name string
-	F    func(*T)
-}
-type T struct{ common }
-func (t *T) Chdir(dir string) {
-	t.checkParallel()
-	t.common.Chdir(dir)
-}
-func MainStart(d testDeps) *M { return &M{deps: d} }
-func runTests(tests []InternalTest) bool {
-	for _, it := range tests {
-		it.F(&T{})
-	}
-	return true
-}
-func (m *M) Run() int {
-	flag.Parse()
-	if *testlog != "" {
-		f, err := os.Create(*testlog)
-		if err != nil {
-			os.Exit(2)
-		}
-		m.deps.StartTestLog(f)
-		_ = runTests(m.tests)
-		if err := m.deps.StopTestLog(); err != nil {
-			panic(err)
-		}
-		if err := f.Close(); err != nil {
-			os.Exit(2)
-		}
-		return 0
-	}
-	_ = runTests(m.tests)
-	return 0
-}
-`
-
-const syntheticTestingSplitSrc = `package testing
-import (
-	"context"
-	"flag"
-	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"runtime"
-	"sync"
-	"time"
-)
-var (
-	initRan     bool
-	testlog     *string
-	matchList   *string
-	cpuProfile  *string
-	testlogFile *os.File
-)
-func Init() {
-	if initRan {
-		return
-	}
-	initRan = true
-	testlog = flag.String("test.testlogfile", "", "")
-	matchList = flag.String("test.list", "", "")
-	cpuProfile = flag.String("test.cpuprofile", "", "")
-}
-type common struct {
-	ctx      context.Context
-	cleanups []func()
-}
-func (c *common) checkFuzzFn(string)    {}
-func (c *common) checkParallel()        {}
-func (c *common) Fatal(...any)          {}
-func (c *common) Fatalf(string, ...any) {}
-func (c *common) Context() context.Context { c.checkFuzzFn("Context"); return c.ctx }
-func (c *common) Cleanup(f func()) {
-	c.checkFuzzFn("Cleanup")
-	c.cleanups = append(c.cleanups, f)
-}
-func (c *common) runCleanup() {
-	for len(c.cleanups) > 0 {
-		last := len(c.cleanups) - 1
-		cleanup := c.cleanups[last]
-		c.cleanups = c.cleanups[:last]
-		cleanup()
-	}
-}
-func (c *common) Setenv(key, value string) {
-	c.checkFuzzFn("Setenv")
-	prevValue, ok := os.LookupEnv(key)
-	if err := os.Setenv(key, value); err != nil {
-		c.Fatalf("setenv: %v", err)
-	}
-	if ok {
-		c.Cleanup(func() { os.Setenv(key, prevValue) })
-	} else {
-		c.Cleanup(func() { os.Unsetenv(key) })
-	}
-}
-func (c *common) Chdir(dir string) {
-	c.checkFuzzFn("Chdir")
-	oldwd, err := os.Open(".")
-	if err != nil {
-		c.Fatal(err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		c.Fatal(err)
-	}
-	switch runtime.GOOS {
-	case "windows", "plan9":
-	default:
-		if !filepath.IsAbs(dir) {
-			dir, err = os.Getwd()
-			if err != nil {
-				c.Fatal(err)
-			}
-		}
-		c.Setenv("PWD", dir)
-	}
-	c.Cleanup(func() {
-		err := oldwd.Chdir()
-		oldwd.Close()
-		if err != nil {
-			panic(err)
-		}
-	})
-}
-type testDeps interface {
-	StartTestLog(io.Writer)
-	StopTestLog() error
-}
-type M struct {
-	deps      testDeps
-	tests     []InternalTest
-	afterOnce sync.Once
-	exitCode  int
-	numRun    int
-}
-type InternalTest struct {
-	Name string
-	F    func(*T)
-}
-type T struct{ common }
-func (t *T) Chdir(dir string) {
-	t.checkParallel()
-	t.common.Chdir(dir)
-}
-func MainStart(d testDeps, tests []InternalTest) *M {
-	Init()
-	return &M{deps: d, tests: tests}
-}
-func runTests(tests []InternalTest) bool {
-	for _, it := range tests {
-		it.F(&T{})
-	}
-	return true
-}
-func (m *M) Run() (code int) {
-	defer func() {
-		code = m.exitCode
-	}()
-	m.numRun++
-	if !flag.Parsed() {
-		flag.Parse()
-	}
-	if *matchList != "" {
-		m.exitCode = 0
-		return
-	}
-	m.before()
-	defer m.after()
-	m.startAlarm()
-	if !runTests(m.tests) {
-		m.exitCode = 1
-		return
-	}
-	m.exitCode = 0
-	return
-}
-func (m *M) before() {
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-			return
-		}
-		_ = f.Close()
-	}
-	if *testlog != "" {
-		f, err := os.Create(*testlog)
-		if err != nil {
-			os.Exit(2)
-		}
-		m.deps.StartTestLog(f)
-		testlogFile = f
-	}
-}
-func (m *M) after() {
-	m.afterOnce.Do(func() {
-		m.writeProfiles()
-	})
-}
-func (m *M) writeProfiles() {
-	if *testlog != "" {
-		if err := m.deps.StopTestLog(); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-		}
-		if err := testlogFile.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
-			os.Exit(2)
-		}
-	}
-	if *cpuProfile != "" {
-		coverReport()
-	}
-}
-func coverReport() {
-	if _, err := os.Create("cov"); err != nil {
-		os.Exit(2)
-	}
-}
-func (m *M) startAlarm() {
-	_ = time.AfterFunc(time.Minute, func() {
-		m.after()
-		panic("test timed out")
-	})
-}
-`
-
-func mustMutateFixture(t *testing.T, src, old, new string) string {
-	t.Helper()
-	if !strings.Contains(src, old) {
-		t.Fatalf("fixture source does not contain %q", old)
-	}
-	return strings.Replace(src, old, new, 1)
-}
-
 // The analyzing frontend is spelled once and every persistent memo
 // scope holding a frontend derivation composes it — the three
 // syntax-level scopes and the four type-level ones (through the shared
@@ -2278,13 +987,13 @@ func mustMutateFixture(t *testing.T, src, old, new string) string {
 // carries the probe-able claims (REQ-closure-identity-strategy).
 func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	frontend := runtime.Version()
-	if AnalyzingFrontend() != frontend {
-		t.Fatalf("AnalyzingFrontend = %q, want %q", AnalyzingFrontend(), frontend)
+	if toolchain.AnalyzingFrontend() != frontend {
+		t.Fatalf("AnalyzingFrontend = %q, want %q", toolchain.AnalyzingFrontend(), frontend)
 	}
 	if canonicalScope() != canonicalStrategy+" "+frontend || variantParseScope() != variantParseStrategy+" "+frontend {
 		t.Fatalf("syntax memo scopes %q, %q do not compose the frontend %q", canonicalScope(), variantParseScope(), frontend)
 	}
-	if got := (&Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}}).effectScanScope(); !strings.HasPrefix(got, effectScanStrategy+" "+frontend) {
+	if got := (&Hasher{selection: toolchain.SelectionForTest(true, "", "", "content", "policy", nil, nil)}).effectScanScope(); !strings.HasPrefix(got, effectScanStrategy+" "+frontend) {
 		t.Fatalf("effect scan scope %q does not compose the frontend", got)
 	}
 	scope := AnalysisScope{Toolchain: "go1.x", BuildConfig: "cfg", ProofStrategy: "proofs@1", FactStrategy: "facts@1", toolchainContent: "content", admissionPolicy: "policy"}
@@ -2302,61 +1011,64 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	allowed := map[string]bool{"AnalyzingFrontend": true, "resolveSelection": true, "toolchainSourceScope": true, "NewAt": true}
 	tracked := map[string]bool{"canonicalScope": false, "effectScanScope": false, "variantParseScope": false, "guards": false}
 	fset := token.NewFileSet()
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if path != "." && !strings.HasPrefix(path, "internal") {
-				return filepath.SkipDir
+	for _, root := range []string{".", "../toolchain", "../observability"} {
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
 			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		f, err := parser.ParseFile(fset, path, src, 0)
-		if err != nil {
-			return err
-		}
-		// The whole file is walked — package-level initializers included
-		// — with the enclosing function tracked, and every mention of
-		// runtime.Version counts, called or not.
-		var enclosing []string
-		ast.Inspect(f, func(n ast.Node) bool {
-			if n == nil {
-				enclosing = enclosing[:len(enclosing)-1]
-				return false
+			if d.IsDir() {
+				return nil
 			}
-			name := "<package level>"
-			if fn, ok := n.(*ast.FuncDecl); ok {
-				name = fn.Name.Name
-			} else if len(enclosing) > 0 {
-				name = enclosing[len(enclosing)-1]
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
 			}
-			enclosing = append(enclosing, name)
-			if sel, ok := n.(*ast.SelectorExpr); ok {
-				if x, ok := sel.X.(*ast.Ident); ok && x.Name == "runtime" && sel.Sel.Name == "Version" && !allowed[name] {
-					t.Errorf("%s: %s spells runtime.Version outside the frontend helper and the toolchain audit", path, name)
+			src, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			f, err := parser.ParseFile(fset, path, src, 0)
+			if err != nil {
+				return err
+			}
+			var enclosing []string
+			ast.Inspect(f, func(n ast.Node) bool {
+				if n == nil {
+					enclosing = enclosing[:len(enclosing)-1]
+					return false
 				}
-			}
-			if call, ok := n.(*ast.CallExpr); ok {
-				if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "AnalyzingFrontend" {
-					if _, isTracked := tracked[name]; isTracked {
-						tracked[name] = true
+				name := "<package level>"
+				if fn, ok := n.(*ast.FuncDecl); ok {
+					name = fn.Name.Name
+				} else if len(enclosing) > 0 {
+					name = enclosing[len(enclosing)-1]
+				}
+				enclosing = append(enclosing, name)
+				if sel, ok := n.(*ast.SelectorExpr); ok {
+					if x, ok := sel.X.(*ast.Ident); ok && x.Name == "runtime" && sel.Sel.Name == "Version" && !allowed[name] {
+						t.Errorf("%s: %s spells runtime.Version outside the frontend helper and the toolchain audit", path, name)
 					}
 				}
-			}
-			return true
+				if call, ok := n.(*ast.CallExpr); ok {
+					calledFrontend := false
+					switch fn := call.Fun.(type) {
+					case *ast.Ident:
+						calledFrontend = fn.Name == "AnalyzingFrontend"
+					case *ast.SelectorExpr:
+						calledFrontend = fn.Sel.Name == "AnalyzingFrontend"
+					}
+					if calledFrontend {
+						if _, isTracked := tracked[name]; isTracked {
+							tracked[name] = true
+						}
+					}
+				}
+				return true
+			})
+			return nil
 		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	for scope, reads := range tracked {
 		if !reads {
@@ -2365,74 +1077,3 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	}
 }
 
-// TestSSAHandlesDoNotInventSourceUnsafePointers exercises the iterator and
-// defer-stack handles introduced by the SSA builder, beside real source
-// unsafe pointers (REQ-closure-observability-unsafe).
-func TestSSAHandlesDoNotInventSourceUnsafePointers(t *testing.T) {
-	cases := []struct {
-		name, source string
-		observable   bool
-	}{
-		{"maprange", `package p
-func Subject() int { n := 0; for k, v := range map[int]int{1: 2} { n += k+v }; return n }
-`, true},
-		{"stringrange", `package p
-func Subject() int { n := 0; for _, r := range "abc" { n += int(r) }; return n }
-`, true},
-		{"deferredrange", `package p
-func values(yield func(int) bool) { yield(3) }
-func Subject() (n int) { for v := range values { defer func() { n += v }() }; return }
-`, true},
-		{"sourceunsafe", `package p
-import "unsafe"
-type rangeIter unsafe.Pointer
-func Subject() int { n := 3; p := rangeIter(unsafe.Pointer(&n)); return *(*int)(p) }
-`, false},
-	}
-	h := newInMemoryHasher(t)
-	var subjects []Subject
-	for _, tc := range cases {
-		pkgPath := "example.com/ssahandles/" + tc.name
-		supplyInMemoryPackage(t, h, pkgPath, map[string]map[string]string{
-			pkgPath: {"p.go": tc.source},
-		})
-		subjects = append(subjects, Subject{Package: pkgPath, Symbol: "Subject"})
-	}
-	proofs, err := h.ComputeObservabilityBatch(subjects)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, tc := range cases {
-		p := proofs[subjects[i]]
-		if p.Observable != tc.observable || !tc.observable && !strings.Contains(p.Reason, "unsafe pointer") {
-			t.Errorf("%s: %+v, want observable=%v", tc.name, p, tc.observable)
-		}
-	}
-}
-
-func TestSSAHandleRecognitionKeepsSourceAndUnknownTypes(t *testing.T) {
-	named := func(pkg, name string, underlying types.Type) types.Type {
-		var p *types.Package
-		if pkg != "" {
-			p = types.NewPackage(pkg, "ssa")
-		}
-		return types.NewNamed(types.NewTypeName(token.NoPos, p, name, nil), underlying, nil)
-	}
-	for _, tc := range []struct {
-		name string
-		typ  types.Type
-		want bool
-	}{
-		{"iterator", named("$ssa", "rangeIter", types.Typ[types.UnsafePointer]), true},
-		{"defer stack", named("$ssa", "deferStack", types.Typ[types.UnsafePointer]), true},
-		{"source name", named("example.com/ssa", "rangeIter", types.Typ[types.UnsafePointer]), false},
-		{"unknown token", named("$ssa", "other", types.Typ[types.UnsafePointer]), false},
-		{"changed representation", named("$ssa", "rangeIter", types.Typ[types.Int]), false},
-		{"no package", named("", "rangeIter", types.Typ[types.UnsafePointer]), false},
-		{"source pointer", types.Typ[types.UnsafePointer], false},
-	} {
-		if got := ssaOpaqueHandle(tc.typ); got != tc.want {
-			t.Errorf("%s: handle=%v, want %v", tc.name, got, tc.want)
-		}
-	}
-}

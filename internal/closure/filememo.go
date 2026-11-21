@@ -177,24 +177,24 @@ func newFileMemos() *fileMemos {
 // fileScan serves one file's effect scan under its digest — from the
 // persistent store (stored true), or from a byte-identical sibling
 // derived earlier in this pass and still pending its merge.
-func (h *Hasher) fileScan(dir, digest string) (scan maximalEffectScan, ok, stored bool) {
+func (h *Hasher) fileScan(dir, digest string) (scan MaximalEffectScan, ok, stored bool) {
 	if h.fileMemo == nil {
-		return maximalEffectScan{}, false, false
+		return MaximalEffectScan{}, false, false
 	}
 	payload, ok, stored := h.fileMemo.scans.lookup(h.effectScanScope(), dir, digest, true)
 	if !ok {
-		return maximalEffectScan{}, false, false
+		return MaximalEffectScan{}, false, false
 	}
-	return maximalEffectScan{effects: decodeEffects(payload.Effects), importCandidates: decodeEffects(payload.ImportCandidates), preferred: payload.Selected}, true, stored
+	return MaximalEffectScan{Effects: decodeEffects(payload.Effects), ImportCandidates: decodeEffects(payload.ImportCandidates), Preferred: payload.Selected}, true, stored
 }
 
 // recordFileScan queues one freshly derived scan for the directory's
 // merge.
-func (h *Hasher) recordFileScan(dir, digest string, scan maximalEffectScan) {
+func (h *Hasher) recordFileScan(dir, digest string, scan MaximalEffectScan) {
 	if h.fileMemo == nil {
 		return
 	}
-	h.fileMemo.scans.record(h.effectScanScope(), dir, digest, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
+	h.fileMemo.scans.record(h.effectScanScope(), dir, digest, effectScanPayload{Effects: encodeEffects(scan.Effects), ImportCandidates: encodeEffects(scan.ImportCandidates), Selected: scan.Preferred})
 }
 
 // variantParseFile returns a ParseFileFunc backed by the per-directory
