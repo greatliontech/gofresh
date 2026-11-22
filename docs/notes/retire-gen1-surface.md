@@ -15,10 +15,31 @@
 - **Step 7.2 — Retire `internal/outcome` & Prune `internal/runtimeinput` (DONE & VERIFIED)**:
   - Folded `internal/outcome` into `internal/runtimeinput/outcome.go` + `outcome_test.go`, unexporting `outcomeSpan`, `bindOutcome`, `prepareTrackedChdir`, and `matchesTrackedChdir` so cross-package capability forging is unrepresentable.
   - Pruned `Absolute`, `Relative`, `Adopt`, `Merge`, `convertIdentityKinds`, `convertAttributionDir`, and multi-process `Observation.seal` in `internal/runtimeinput/observation.go` (`Observation` retains `process string` + `sealed State` for $O(1)$ tamper detection in `CompletedState`).
-  - Verified `go test -short -race -failfast ./internal/runtimeinput ./internal/observability` green.
-- **Step 7.3 — Retire Generation-1 Root Exports, Consolidate `subjectEntry`/`subjectTxState` & Split `view.go` (DONE & COMPILED)**:
+- **Step 7.3 — Retire Generation-1 Root Exports, Consolidate `subjectEntry`/`subjectTxState` & Split `view.go` (DONE & VERIFIED)**:
   - Removed Generation-1 exports (`CaptureGuards`, `BuildDescription.GoEnv`, `Session.SnapshotFor`, `Snapshot.CaptureObservedBatch` -> `captureObservedBatch`, `Snapshot.AttachObservation`, `Snapshot.Sibling` -> `sibling`, `Snapshot.Check*`, `Snapshot.Validate` -> `validate`, `Snapshot.PrepareTrackedChdirSupport`, `RuntimeBinding.ProducerSnapshot`, `CulpritFromReason`, `ResolveToolchainSelection`, and raw `Bracket*`/`Observation`/`CompletedObservationState`/`IncompleteRuntimeObservation`/`AbsoluteObservation`/`RelativeObservation`/`AdoptObservation`/`MergeObservations`/`FromTestLog*`/`TestLogOption`/`With*`/`TrackedChdirSupport`/`InputRoots`/`FrameOptions`/`ProducerFrame`/`CaptureProducerFrame`/`ProducerIngest`/top-level `CheckFileInputEligibility`) and `deferredCheckClose`/`applicabilityChecks`.
   - Consolidated `observationFacts` maps into `subjects map[Subject]subjectEntry`, `executionModelProjection` maps into `subjects map[Subject]projectedSubject`, and `Snapshot` transaction maps into `txState map[Subject]subjectTxState`.
-  - Split `view.go` into `errors.go`, `facts.go`, and `view.go`; verified `go build .` green and 100% of production files in `gofresh` `<= 991` LOC.
-- **Step 7.4 — Migrate Root Tests onto `Unit` and `CheckingUnit` & Update Static `stipulator` Bindings (IN PROGRESS)**.
-- **Step 7.5 — Dual-Toolchain Suites, Mutation Probes, Adversarial Review & CI Release (NEXT)**.
+  - Split `view.go` into `errors.go`, `facts.go`, and `view.go`; verified **100% of non-test `.go` files across `gofresh` are `<= 1,007` LOC**.
+- **Step 7.4 — Root Test Migration & Static `stipulator` Alignment (DONE & VERIFIED)**:
+  - Migrated all 14 root test files onto `Unit`, `CheckingUnit`, `RuntimeBinding`, and internal `Snapshot` helpers; deleted redundant `producer_snapshot_test.go`.
+  - Retargeted/unbound 33 moved/retired `stipulator` binding rows across `.stipulator/bindings/*.textproto`, updated `.stipulator/policy.textproto`, compiled, pinned, and verified **939/939 rows `current` and `resolved`**.
+
+## Root-Cause Diagnoses & Fixes Surfaced During Verification
+
+1. **`CheckingUnit.Close` Pass Economy & Non-Upgrade Monotonicity (`checking.go`)**:
+   - *Diagnosis*: `CheckingUnit.close` unconditionally built a `newSeededValidationView` (1 `observe` pass) *and* ran `closeValidationReobservation` (a 2nd `observe` pass) even when zero slots selected an applicability proof (`slot.result.selected == false`), doubling `go list` + source-hashing + `go env` work on every `RuntimeBinding.Check` / `CheckBatchWithLedgers`. Furthermore, if an opening round judged an applicability-bearing candidate `Unverifiable` (e.g., due to a current applicability cut or unsupported inventory), leaving `records[i].observed = true` on `Close` allowed a seeded closing view to upgrade that slot from `Unverifiable` to `Valid`.
+   - *Fix*: Added `needsSeededCloseView()` (`slot.result.selected`) so `Close` uses `cloneShell` + the single closing `closeValidationReobservation` when no applicability proof needs re-establishment, and cleared `records[i].observed = false` in `closeSlots` whenever `slot.result.verdict.Status != Valid` (verified via 2-round `CheckingUnit` regression test and `gomutant ephemeral` probe).
+2. **`outflowAnalyzer` Mutual-Recursion Termination (`internal/dynstate/summary_env_returns.go`, `summary_env_returns_eval.go`)**:
+   - *Diagnosis*: Surfaced when scanning `gofresh`'s own packages under `TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution`: `checkPlainCallReachArg` invoked `allowSigLeaf -> evalFree(ctx, leaf)` on signature-carrying non-mutable-reach call expressions (such as functions returning structs with `func` fields), and `evalFree` invoked `checkPlainCallReachArg` with a freshly reset `seen` map, causing infinite recursion on cyclic mutable-reach call writebacks (`m["self"] = deriveHook(m)`).
+   - *Fix*: Moved `reachVisiting map[reachVisitKey]bool` (`{obj, allowInsParam}`) onto `outflowEvalCtx` (propagated across `litCtx`), guaranteeing termination on all cycles while preserving `judgeObj`'s coinductive `provingDepth` for parameter insertion. Pinned by `TestOutflowEvalTerminatesOnCyclicSignatureLeafCallWriteback`.
+3. **Root-Indexed Bitset Hub Solver (`internal/dynstate/internal/seams/parallel_solve.go`) & Parallel `Compose` (`scan_dynstate.go`)**:
+   - *Diagnosis*: `seams.(*parGraph).buildAndSolve` previously ran two full-graph DFSs + slice sorts per internal node with `liveIn >= 2 && liveOut >= 2` ($O(V \cdot E)$ on large packages), and `scanDynamicState` ran `dynstate.Compose` serially across all view packages.
+   - *Fix*: Replaced per-node hub DFSs with 1 forward + 1 backward root-indexed `[]uint64` bitset propagation pass per distinct root and zero-allocation `compareRootBitsets` (verified by `TestRapidCompareRootBitsetsMatchesSliceCompare`), added `dynstate.factof.start` tracing + `FactOfWithHooksCtx(ctx, ...)`, and parallelized pure `dynstate.Compose` across `viewPackages` with a bounded `GOMAXPROCS` worker pool.
+4. **Nil `v.facts` Guarding on Synthetic Test Snapshots (`judgment.go`, `facts.go`, `view.go`)**:
+   - Guarded `v.facts != nil` in `judgmentFor`, `observationFacts.closure`, and `purityMatches` so synthetic uninitialized `&Snapshot{moduleDir: dir}` test fixtures never dereference `nil` `v.facts`.
+
+## Verification Summary (Step 7.5)
+
+- **Full `godst` (`go1.27.4-dst.17`) `-race -failfast ./...` suite**: 100% GREEN across all 25 packages (root `1573.88s`, including `TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution` in `612.16s`).
+- **Full Vanilla Go (`1.27.4`) `-race -failfast ./...` suite**: 100% GREEN across all 25 packages (root `1621.13s`, `internal/observability` `919.90s`, `internal/toolchain` `174.04s`, `internal/closure` `160.12s`, `internal/dynstate` `51.96s`).
+- **Targeted `gomutant ephemeral` Probes**: 5/5 killed (`internal/runtimeinput/observation.go` `CompletedState`, `internal/dynstate/internal/seams/parallel_solve.go` `compareRootBitsets`, `internal/dynstate/summary_env_returns_eval.go` `checkPlainCallReachArg`, `checking.go` `closeSlots`, `judgment.go` `judgmentFor`).
+- **Static `stipulator` Alignment**: 939/939 binding rows `current` and `resolved`.
