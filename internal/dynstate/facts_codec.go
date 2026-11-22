@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"go/ast"
+	"go/token"
+	"go/types"
 	"sort"
 	"strings"
 
@@ -118,28 +120,133 @@ func recordPackageMethodDirectives(p *packages.Package, fact *Fact) {
 	if p == nil {
 		return
 	}
+	recordKey := func(key, pureKey, externalKey string) {
+		if pureKey != "" {
+			if fact.PureMethods == nil {
+				fact.PureMethods = map[string]string{}
+			}
+			fact.PureMethods[key] = pureKey
+		}
+		if externalKey != "" {
+			if fact.ExternalMethods == nil {
+				fact.ExternalMethods = map[string]string{}
+			}
+			fact.ExternalMethods[key] = externalKey
+		}
+	}
+	recordMember := func(key string, doc *ast.CommentGroup, node ast.Node) {
+		var pureKey, externalKey string
+		if syntaxutil.HasDirective(doc, "//gofresh:pure") {
+			pureKey = syntaxutil.NodeDeclarationKey(p, node)
+		}
+		if syntaxutil.HasDirective(doc, "//gofresh:external") {
+			externalKey = syntaxutil.NodeDeclarationKey(p, node)
+		}
+		recordKey(key, pureKey, externalKey)
+	}
+	var localDirs map[types.Object]localMemberDir
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv == nil {
-				continue
-			}
-			recv := syntaxutil.RecvTypeName(fd)
-			if recv == "" {
-				continue
-			}
-			key := recv + "." + fd.Name.Name
-			if syntaxutil.HasDirective(fd.Doc, "//gofresh:pure") {
-				if fact.PureMethods == nil {
-					fact.PureMethods = map[string]string{}
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil || d.Name == nil || d.Name.Name == "_" {
+					continue
 				}
-				fact.PureMethods[key] = syntaxutil.NodeDeclarationKey(p, fd.Name)
-			}
-			if syntaxutil.HasDirective(fd.Doc, "//gofresh:external") {
-				if fact.ExternalMethods == nil {
-					fact.ExternalMethods = map[string]string{}
+				recv := syntaxutil.RecvTypeName(d)
+				if recv == "" {
+					continue
 				}
-				fact.ExternalMethods[key] = syntaxutil.NodeDeclarationKey(p, fd.Name)
+				recordMember(recv+"."+d.Name.Name, d.Doc, d.Name)
+			case *ast.GenDecl:
+				if d.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok || ts.Name == nil || ts.Name.Name == "_" {
+						continue
+					}
+					collectASTMemberDirectives(p, ts, &localDirs, nil)
+					var fields *ast.FieldList
+					isStruct := false
+					switch t := ast.Unparen(ts.Type).(type) {
+					case *ast.StructType:
+						fields = t.Fields
+						isStruct = true
+					case *ast.InterfaceType:
+						fields = t.Methods
+					}
+					if fields == nil {
+						continue
+					}
+					for _, fld := range fields.List {
+						if fld.Doc == nil {
+							continue
+						}
+						if len(fld.Names) == 0 {
+							if isStruct {
+								if ident := embeddedFieldIdent(fld.Type); ident != nil && ident.Name != "_" {
+									recordMember(ts.Name.Name+"."+ident.Name, fld.Doc, ident)
+								}
+							}
+							continue
+						}
+						for _, ident := range fld.Names {
+							if ident != nil && ident.Name != "_" {
+								recordMember(ts.Name.Name+"."+ident.Name, fld.Doc, ident)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	if p.Types == nil || p.Types.Scope() == nil || len(localDirs) == 0 {
+		return
+	}
+	scope := p.Types.Scope()
+	for _, name := range scope.Names() {
+		if name == "_" {
+			continue
+		}
+		tn, ok := scope.Lookup(name).(*types.TypeName)
+		if !ok {
+			continue
+		}
+		typ := tn.Type()
+		_, isIface := typ.Underlying().(*types.Interface)
+		var methodSets []*types.MethodSet
+		if isIface {
+			methodSets = []*types.MethodSet{types.NewMethodSet(typ)}
+		} else {
+			methodSets = []*types.MethodSet{
+				types.NewMethodSet(types.NewPointer(typ)),
+				types.NewMethodSet(typ),
+			}
+		}
+		seenMethods := map[string]bool{}
+		for _, methods := range methodSets {
+			for i := 0; i < methods.Len(); i++ {
+				method, ok := methods.At(i).Obj().(*types.Func)
+				if !ok || method.Name() == "_" || seenMethods[method.Name()] {
+					continue
+				}
+				seenMethods[method.Name()] = true
+				if d, ok := localDirs[method.Origin()]; ok {
+					recordKey(name+"."+method.Name(), d.pureKey, d.externalKey)
+				}
+			}
+		}
+		if _, isStruct := typ.Underlying().(*types.Struct); isStruct {
+			for _, candName := range collectStructFieldCandidates(typ) {
+				fieldObj, _, _ := types.LookupFieldOrMethod(typ, true, p.Types, candName)
+				v, ok := fieldObj.(*types.Var)
+				if !ok || !v.IsField() {
+					continue
+				}
+				if d, ok := localDirs[v.Origin()]; ok {
+					recordKey(name+"."+candName, d.pureKey, d.externalKey)
+				}
 			}
 		}
 	}

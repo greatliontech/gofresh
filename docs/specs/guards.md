@@ -209,22 +209,22 @@ valid — validity requires proof, so an unevaluable guard is absence of proof, 
 recording written before a guard existed re-measures rather than being trusted.
 
 **REQ-guard-selective-capture** (behavior): An analysis view MUST capture exactly the
-guards applicable to its caller-declared result kind. A code-result view captures the
-code guards and leaves machine and runtime-configuration values absent without
-probing machine support; a measurement view additionally captures both measurement
-guards. In the explicit split form, the source/build generation captures the
+guards applicable to its caller-declared result kind. Source-result and code-result
+views capture the code guards and leave machine and runtime-configuration values
+absent without probing machine support; a measurement view requires callable
+subjects and additionally captures both measurement guards. In the explicit split form, the source/build generation captures the
 source/build guards and its runtime binding captures the applicable measurement
 guards; neither another binding nor a later generation overwrites either set.
 Observed runtime-input evidence belongs to its producing unit and retained
-record, and is checked under the selected runtime binding for both result kinds;
-it is never shared source/build state. The view's
+record, and is checked under the selected runtime binding for executed code and
+measurement result kinds; a source-result carries no runtime-input evidence. The view's
 result kind is fixed at construction and a check under another kind is refused.
 Every fingerprint records that nonzero kind and a check derives its
 view policy from the recording rather than accepting a replacement kind from the
 caller; missing or mismatched kind evidence is refused. Unavailable measurement
-support therefore cannot block a code result, and a measurement recording cannot be
-validated under code-only guards. A code-kind fingerprint carrying non-empty
+support therefore cannot block a source-result or code-result, and a measurement recording cannot be
+validated under code-only guards. A source-kind or code-kind fingerprint carrying non-empty
 measurement guard values is internally inconsistent and refused rather than treated
 as permission to ignore them. This selective capture policy does not discharge
-runtime or machine effects that can change the code result; their evidence is
+runtime or machine effects that can change an executed code result; their evidence is
 governed separately by REQ-guard-runtime-relevance.

@@ -143,7 +143,8 @@ clear text — so a consumer can explain a digest mismatch by naming what the ru
 recorded to observe. The same surface attributes a digest mismatch to the moved
 inputs by identity: each entry's recorded digest compared against its current
 recompute names exactly the movers, environment inputs by name alone with values
-undisclosed.
+undisclosed, and check-window endpoint evaluations retain those exact sorted
+moved-input identities from the deciding endpoint without post-window re-reads.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
@@ -667,7 +668,17 @@ classification itself applies, so declaring and matching agree with or
 without a refusal. Observation-kind seals that are not per-path dispositions
 — an untracked or unbalanced chdir's working-directory seal — are never discharged by excluding the
 path they ride with.
-Environment identities are never excludable through path exclusions.
+Environment identities are never excludable through path exclusions. Observation
+construction separately accepts explicit caller-declared environment-variable
+name exclusions — each a non-empty valid UTF-8 variable name containing no `=`,
+NUL, CR, or LF, with `PWD` strictly non-excludable and any malformed or `PWD`
+declaration refused before execution or ingestion — and records neither an
+environment identity nor a per-environment disposition for a matching `getenv`
+observation, while preserving the complete process environment for execution
+binding, working-directory truthfulness, and classification-root resolution. An
+environment exclusion carries the same explicit caller soundness responsibility
+for runner-injected ephemeral variables (such as per-invocation coverage or IPC
+coordinates) that path exclusions carry for volatile paths.
 
 **REQ-inputs-guard-covered** (behavior): Observation construction from a test-harness
 log MUST classify under three classes of guard-covered root — the producing

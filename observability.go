@@ -33,9 +33,19 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
+	if len(subjects) == 0 {
+		return nil
+	}
+	if v.kind == SourceResult {
+		return errors.New("gofresh: source-result snapshot has no runtime observation proof")
+	}
 	v.mu.RLock()
 	observableRequests := make([]closure.Subject, 0, len(subjects))
 	for _, subject := range subjects {
+		if v.facts.maximal[subject].staticDecl {
+			v.mu.RUnlock()
+			return fmt.Errorf("gofresh: non-callable declaration %s.%s has no runtime execution", subject.Package, subject.Symbol)
+		}
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 		if _, ok := v.observable[subject]; !ok {
 			observableRequests = append(observableRequests, request)
@@ -71,7 +81,10 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	if liveSnapshot.Identity() != v.facts.snapshot.Identity() {
 		return fmt.Errorf("%w: analysis environment", ErrViewChanged)
 	}
-	hasher.SetAnalysisScope(v.session.analysisScope(v.facts.guards))
+	execModel := v.effectiveExecutionModel()
+	scope := v.session.analysisScope(v.facts.guards)
+	scope.SingleSubject, scope.PackageProcess = execModel.singleSubject(), execModel.packageProcess()
+	hasher.SetAnalysisScope(scope)
 	prover.SetPackageMates(v.packageMates())
 	if v.session.progress != nil {
 		v.session.wireProgress(hasher)

@@ -480,14 +480,38 @@ func newLeakView(t *testing.T, dir string, subjects []Subject, opts ...option) *
 func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
 	pkg := "example.com/p"
 	s := func(sym string) Subject { return Subject{Package: pkg, Symbol: sym} }
+	genModel := &modelScanState{
+		downgradeReason:  map[Subject]string{s("B"): "gen-reason"},
+		downgradeCulprit: map[Subject]Subject{s("B"): {Package: "example.com/dep", Symbol: "Hooks"}},
+		vouchDischarges:  map[Subject]string{s("A"): "v"},
+		discharges:       map[Subject]attestationDischarges{},
+	}
+	pkgModel := &modelScanState{
+		downgradeReason:  map[Subject]string{},
+		downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges:  map[Subject]string{s("A"): "v"},
+		discharges:       map[Subject]attestationDischarges{s("C"): {packageProcess: "pp"}},
+	}
+	soloModel := &modelScanState{
+		downgradeReason:  map[Subject]string{s("B"): "reason"},
+		downgradeCulprit: map[Subject]Subject{s("B"): {Package: "example.com/dep", Symbol: "Hooks"}},
+		vouchDischarges:  map[Subject]string{s("A"): "v"},
+		discharges:       map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
+	}
 	scan := &subjectScan{
-		known: map[Subject]bool{s("A"): true, s("B"): true, s("C"): true}, pure: map[Subject]bool{s("A"): true},
-		openWorld: map[Subject]string{s("B"): "parameter f func()"}, external: map[Subject]bool{s("C"): true},
+		staticDecl:       map[Subject]bool{s("D"): true},
+		known:            map[Subject]bool{s("A"): true, s("B"): true, s("C"): true, s("D"): true},
+		pure:             map[Subject]bool{s("A"): true},
+		openWorld:        map[Subject]string{s("B"): "parameter f func()"},
+		external:         map[Subject]bool{s("C"): true},
 		downgradeReason:  map[Subject]string{s("B"): "reason"},
 		downgradeCulprit: map[Subject]Subject{s("B"): {Package: "example.com/dep", Symbol: "Hooks"}},
 		vouchDischarges:  map[Subject]string{s("A"): "v"},
 		discharges:       map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
 		ambiguous:        map[Subject]string{s("C"): "declared twice"},
+		loadErr:          map[string]string{},
+		byModel:          [3]*modelScanState{genModel, pkgModel, soloModel},
+		hasModel:         [3]bool{true, true, true},
 	}
 	raw, err := json.Marshal(entryOf(scan, pkg))
 	if err != nil {
@@ -500,7 +524,7 @@ func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
 	if entry.Version != scanEntryVersion {
 		t.Fatalf("version %d, want %d", entry.Version, scanEntryVersion)
 	}
-	got := scanFromEntries(map[string]packageScanEntry{pkg: entry})
+	got := scanFromEntriesForModel(map[string]packageScanEntry{pkg: entry}, SingleSubjectExecution)
 	if !reflect.DeepEqual(got, scan) {
 		t.Fatalf("round trip lost an output:\n got %+v\nwant %+v", got, scan)
 	}

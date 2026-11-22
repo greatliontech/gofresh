@@ -29,6 +29,7 @@ const (
 	SharedDynamicStateCause
 	OpenWorldCause
 	AmbiguousSubjectCause
+	AdmissionPolicyCause
 )
 
 // CauseCondition distinguishes missing or unsupported evidence from observed
@@ -198,9 +199,10 @@ func admittedObservationWithSupport(rec Fingerprint, subject Subject, cl closure
 }
 
 func (v *Snapshot) judgmentFor(subject Subject, verdict Verdict) Verdict {
-	verdict.Ground.Scope = JudgmentScope{Subject: subject, ResultKind: v.kind}
-	if v.session != nil {
-		verdict.Ground.Scope.ExecutionModel = v.session.executionModel
+	verdict.Ground.Scope = JudgmentScope{
+		Subject:        subject,
+		ResultKind:     v.kind,
+		ExecutionModel: v.effectiveExecutionModel(),
 	}
 	// A cut is the immutable pass's unavailability, not proof that the
 	// surviving culprit affects this subject. It still blocks observation lift.
@@ -292,6 +294,15 @@ func recordedEvidenceVerdict(rec Fingerprint, current closure.Closure) (Verdict,
 	if rec.ToolchainContent != "" && current.ToolchainContent != "" && rec.ToolchainContent != current.ToolchainContent {
 		return refusal(Stale, ToolchainContentCause, Changed, "toolchain content"), true
 	}
+	if rec.ResultKind == SourceResult {
+		if rec.ClosureStrategy != ClosureStrategy {
+			return closureStrategyVerdict(rec), true
+		}
+		if rec.AdmissionPolicy != "" && current.AdmissionPolicy != "" && rec.AdmissionPolicy != current.AdmissionPolicy {
+			return refusal(Stale, AdmissionPolicyCause, Changed, "admission policy"), true
+		}
+		return Verdict{}, false
+	}
 	if rec.DynamicStateStrategy != DynamicStateStrategy {
 		// The dynamic-state derivation the record was computed under
 		// moved (or predates the field): its verdict semantics are not
@@ -332,6 +343,23 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 			condition = Missing
 		}
 		return refusal(Unverifiable, ToolchainContentCause, condition, "toolchain content evidence unavailable")
+	}
+	if kind == SourceResult {
+		if rec.AdmissionPolicy == "" || cl.AdmissionPolicy == "" {
+			condition := Unavailable
+			if rec.AdmissionPolicy == "" {
+				condition = Missing
+			}
+			return refusal(Unverifiable, AdmissionPolicyCause, condition, "admission policy evidence unavailable")
+		}
+		accepted := AcceptedAuthority{GuardAgreement: true}
+		if cl.Unverifiable && cl.Refusal == closure.AmbiguousSubjectRefusal {
+			verdict := refusal(Unverifiable, AmbiguousSubjectCause, Refused, reasonOr(cl.Reason, "ambiguous subject"))
+			verdict.Ground.Accepted = accepted
+			return verdict
+		}
+		accepted.Applicability = rec.InertTestVariantApplicability
+		return Verdict{Status: Valid, Ground: JudgmentGround{Accepted: accepted}}
 	}
 	// An external-state declaration withholds reuse whenever the guards hold:
 	// unverifiability by the author's word, immune to purity overrides and

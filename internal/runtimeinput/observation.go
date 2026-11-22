@@ -88,6 +88,7 @@ type State struct {
 type Observation struct {
 	State
 	Attribution string
+	MovedInputs []string
 	processes   []processObservation
 	empty       bool
 	pkgDir      string

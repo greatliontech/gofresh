@@ -57,7 +57,7 @@ func CaptureRuntime(ctx context.Context, env []string, kind Kind) (guards Runtim
 	if err := ctx.Err(); err != nil {
 		return RuntimeGuards{}, err
 	}
-	if kind != CodeResult && kind != Measurement {
+	if !ValidKind(kind) {
 		return RuntimeGuards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
 	env, err = gotool.NormalizeEnv(env)
@@ -71,7 +71,7 @@ func captureRuntimeFor(ctx context.Context, kind Kind, machine func() (MachineFa
 	if err := ctx.Err(); err != nil {
 		return RuntimeGuards{}, err
 	}
-	if kind == CodeResult {
+	if kind != Measurement {
 		return RuntimeGuards{}, nil
 	}
 	facts, err := machine()
@@ -95,7 +95,16 @@ const (
 	// Measurement is a timing result (a benchmark): the measurement guards apply
 	// in addition to the code guards.
 	Measurement
+	// SourceResult is a static source/declaration certificate (symbol resolution,
+	// shape pin, static classification): only the code guards apply, and runtime
+	// execution obligations do not apply.
+	SourceResult
 )
+
+// ValidKind reports whether kind is a recognized result kind.
+func ValidKind(kind Kind) bool {
+	return kind == CodeResult || kind == Measurement || kind == SourceResult
+}
 
 // Capture gathers the guard values applicable to kind under the pass's
 // reader: its directory is the one `go` resolves the toolchain and
@@ -130,7 +139,7 @@ func Capture(ctx context.Context, reader *gotool.EnvReader, runtimeEnv []string,
 		return Guards{}, errors.New("guard: nil environment reader")
 	}
 	// The input-decidable refusals come before the pass's one spawn.
-	if kind != CodeResult && kind != Measurement {
+	if !ValidKind(kind) {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
 	if reader.Env == nil {
@@ -172,7 +181,7 @@ func Capture(ctx context.Context, reader *gotool.EnvReader, runtimeEnv []string,
 }
 
 func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
-	if kind != CodeResult && kind != Measurement {
+	if !ValidKind(kind) {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
 	snapshot, err := reader.Snapshot(ctx)
@@ -250,7 +259,7 @@ type Mismatch struct {
 // CompareFacts compares the same ordered guards as Compare, preserving the
 // deciding facts rather than requiring consumers to classify its diagnostic.
 func CompareFacts(recorded, current Guards, kind Kind) Mismatch {
-	if kind != CodeResult && kind != Measurement {
+	if !ValidKind(kind) {
 		return Mismatch{Axis: KindAxis}
 	}
 	type pair struct {

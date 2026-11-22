@@ -326,7 +326,29 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		}
 	}
 
+	bindingsHasImportedRef := func(b *TestVariantFileBindings, refs []string) bool {
+		if b == nil || len(b.Imports) == 0 {
+			return false
+		}
+		impNames := make(map[string]bool, len(b.Imports))
+		for _, imp := range b.Imports {
+			if imp.Name != "" && imp.Name != "_" {
+				impNames[imp.Name] = true
+			}
+		}
+		if impNames["."] {
+			return true
+		}
+		for _, r := range refs {
+			if impNames[r] {
+				return true
+			}
+		}
+		return false
+	}
+
 	baseRefsByPkg := map[string]map[string]bool{}
+	basePkgHasImportedRef := map[string]bool{}
 	for _, base := range before.BaseFiles {
 		if base.Bindings == nil {
 			continue
@@ -338,6 +360,9 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		}
 		for _, ref := range base.Bindings.References {
 			refs[ref] = true
+		}
+		if bindingsHasImportedRef(base.Bindings, base.Bindings.References) {
+			basePkgHasImportedRef[base.Bindings.Package] = true
 		}
 	}
 
@@ -427,10 +452,82 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		return true
 	}
 
+	propagateReachable := func() {
+		for {
+			progressed := false
+			for i, decl := range before.Declarations {
+				if reachableDecls[i] {
+					continue
+				}
+				if decl.Kind == "method" {
+					rt := recvTypes[i]
+					if rt == "" || reachableNamesByPkg[decl.Package][rt] {
+						progressed = markDecl(i) || progressed
+					}
+					continue
+				}
+				if decl.Name == "_" && decl.Kind != "const" {
+					continue
+				}
+				if reachableNamesByPkg[decl.Package][decl.Name] {
+					progressed = markDecl(i) || progressed
+				}
+			}
+			if !progressed {
+				break
+			}
+		}
+	}
+
+	recvTypeCanResolveMember := func(startIdx int) bool {
+		visited := map[int]bool{startIdx: true}
+		queue := []int{startIdx}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			d := before.Declarations[cur]
+			if slices.Contains(d.References, name) || bindingsHasImportedRef(oldFiles[d.File], d.References) {
+				return true
+			}
+			basePkg, isExt := strings.CutSuffix(d.Package, "_test")
+			if !isExt {
+				basePkg = d.Package
+			}
+			for _, ref := range d.References {
+				if (!isExt || ast.IsExported(ref)) && baseRefsByPkg[basePkg][ref] && (baseRefsByPkg[basePkg][name] || basePkgHasImportedRef[basePkg]) {
+					return true
+				}
+				for j, other := range before.Declarations {
+					sameScope := other.Package == d.Package || (isExt && ast.IsExported(ref) && other.Package == basePkg)
+					if !sameScope {
+						continue
+					}
+					if other.Kind == "method" {
+						if other.Name == name && recvTypes[j] == ref {
+							return true
+						}
+						continue
+					}
+					if !visited[j] && other.Kind == "type" && other.Name == ref {
+						visited[j] = true
+						queue = append(queue, j)
+					}
+				}
+			}
+		}
+		return false
+	}
+
 	rooted := false
+	var matchedRecvTypes []int
 	for i, decl := range before.Declarations {
 		if matchesSubject(i, decl) {
 			rooted = true
+			markDecl(i)
+			continue
+		}
+		if hasDot && decl.Kind == "type" && decl.Name == recv {
+			matchedRecvTypes = append(matchedRecvTypes, i)
 			markDecl(i)
 			continue
 		}
@@ -448,45 +545,44 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 			}
 		}
 	}
-	for _, base := range before.BaseFiles {
-		if base.Bindings == nil {
-			continue
-		}
-		if slices.Contains(base.Bindings.References, name) && (!hasDot || slices.Contains(base.Bindings.References, recv)) {
+	for pkg, refs := range baseRefsByPkg {
+		if !hasDot && refs[name] {
 			rooted = true
-			addName(base.Bindings.Package, name)
-			if hasDot {
-				addName(base.Bindings.Package, recv)
+			addName(pkg, name)
+		} else if hasDot && refs[recv] {
+			addName(pkg, recv)
+			if refs[name] || basePkgHasImportedRef[pkg] {
+				rooted = true
+				addName(pkg, name)
 			}
+		}
+	}
+
+	propagateReachable()
+
+	if !rooted && hasDot {
+		seededMember := false
+		for pkg, refs := range baseRefsByPkg {
+			if refs[recv] && (refs[name] || reachableNamesByPkg[pkg][name] || basePkgHasImportedRef[pkg]) {
+				rooted = true
+				addName(pkg, name)
+				seededMember = true
+			}
+		}
+		for _, idx := range matchedRecvTypes {
+			decl := before.Declarations[idx]
+			if recvTypeCanResolveMember(idx) {
+				rooted = true
+				addName(decl.Package, name)
+				seededMember = true
+			}
+		}
+		if seededMember {
+			propagateReachable()
 		}
 	}
 	if !rooted {
 		return false
-	}
-
-	for {
-		progressed := false
-		for i, decl := range before.Declarations {
-			if reachableDecls[i] {
-				continue
-			}
-			if decl.Kind == "method" {
-				rt := recvTypes[i]
-				if rt == "" || reachableNamesByPkg[decl.Package][rt] {
-					progressed = markDecl(i) || progressed
-				}
-				continue
-			}
-			if decl.Name == "_" && decl.Kind != "const" {
-				continue
-			}
-			if reachableNamesByPkg[decl.Package][decl.Name] {
-				progressed = markDecl(i) || progressed
-			}
-		}
-		if !progressed {
-			break
-		}
 	}
 
 	for _, change := range d.Changed {

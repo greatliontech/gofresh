@@ -1258,3 +1258,135 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 		}
 	})
 }
+
+func TestExcludedEnvValidationAndElision(t *testing.T) {
+	for _, invalid := range []string{"", "PWD", "A=1", "BAD\x00NAME", "BAD\nNAME", "BAD\rNAME", string([]byte{0xff})} {
+		if err := ValidateExcludedEnv([]string{invalid}); err == nil {
+			t.Fatalf("ValidateExcludedEnv(%q) = nil, want error", invalid)
+		}
+		dir := t.TempDir()
+		bracket, err := CaptureBracket(t.Context(), dir, []string{"."})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := FromTestLog([]byte("getenv FOO\n"), dir, dir, []string{"PWD=" + dir, "FOO=1"},
+			WithCompletedProcess("worker"), WithBracket(bracket), WithExcludedEnv(invalid)); err == nil {
+			t.Fatalf("FromTestLog with invalid ExcludedEnv %q succeeded", invalid)
+		}
+	}
+
+	dir := t.TempDir()
+	bracket, err := CaptureBracket(t.Context(), dir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PWD=" + dir, "GOCOVERDIR=/tmp/ephemeral-1", "KEEP_VAR=alpha"}
+	obs, err := FromTestLog([]byte("getenv GOCOVERDIR\ngetenv KEEP_VAR\ngetenv PWD\n"), dir, dir, env,
+		WithCompletedProcess("worker"), WithBracket(bracket), WithExcludedEnv("GOCOVERDIR"))
+	if err != nil {
+		t.Fatalf("FromTestLog with valid ExcludedEnv: %v", err)
+	}
+	desc, err := Describe(obs.Manifest, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(desc.EnvNames, []string{"KEEP_VAR", "PWD"}) {
+		t.Fatalf("recorded env = %v, want [KEEP_VAR PWD] (GOCOVERDIR elided, PWD retained)", desc.EnvNames)
+	}
+	// Changing GOCOVERDIR at check time keeps state matching; changing KEEP_VAR moves it.
+	envMovedCover := []string{"PWD=" + dir, "GOCOVERDIR=/tmp/ephemeral-2", "KEEP_VAR=alpha"}
+	cur, err := Current(t.Context(), obs.Manifest, dir, envMovedCover)
+	if err != nil || !cur.OK || cur.Digest != obs.Digest {
+		t.Fatalf("Current after excluded GOCOVERDIR change = (%+v, %v), want digest %q", cur, err, obs.Digest)
+	}
+	envMovedKeep := []string{"PWD=" + dir, "GOCOVERDIR=/tmp/ephemeral-2", "KEEP_VAR=beta"}
+	movers, err := MovedInputs(t.Context(), obs.Manifest, dir, envMovedKeep)
+	if err != nil || !slices.Equal(movers, []string{"env KEEP_VAR"}) {
+		t.Fatalf("MovedInputs after KEEP_VAR change = (%v, %v), want [env KEEP_VAR]", movers, err)
+	}
+}
+
+func TestResolveProducerFrameAndBracketMovedInputs(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "pkg")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(sub, "fixture.txt")
+	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// ResolveProducerFrame resolves coordinates without capturing a bracket, and
+	// still synthesizes canonical incomplete observations on abnormal completion.
+	light := ResolveProducerFrame(dir, sub)
+	if light.PkgRel != "pkg" || light.Reason() == "" {
+		t.Fatalf("ResolveProducerFrame = %+v, want PkgRel=pkg and non-empty bracketless reason", light)
+	}
+	env := []string{"PWD=" + light.PkgDir}
+	receipt, err := light.Completion("proc-1", env, "signal: killed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incObs, incReason, err := light.ObserveInputs(t.Context(), "", ProducerIngest{
+		Identity:   "proc-1",
+		Env:        env,
+		Completion: receipt,
+	})
+	if err != nil || incReason != "signal: killed" || !incObs.Unverifiable {
+		t.Fatalf("ObserveInputs abnormal on lightweight frame = (%+v, %q, %v), want incomplete signal: killed", incObs, incReason, err)
+	}
+
+	// Full bracket capture populates Observation.MovedInputs when a bracketed file moves.
+	full := CaptureProducerFrame(t.Context(), dir, sub, FrameOptions{})
+	if full.Reason() != "" {
+		t.Fatalf("CaptureProducerFrame reason = %q, want empty", full.Reason())
+	}
+	logPath := filepath.Join(t.TempDir(), "test.log")
+	if err := os.WriteFile(logPath, []byte("# test log\nopen fixture.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	okReceipt, err := full.Completion("proc-2", env, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	movedObs, _, err := full.ObserveInputs(t.Context(), logPath, ProducerIngest{
+		Identity:   "proc-2",
+		Env:        env,
+		Completion: okReceipt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !movedObs.BracketMoved || !slices.Contains(movedObs.MovedInputs, "path pkg/fixture.txt") {
+		t.Fatalf("moved bracket observation: BracketMoved=%v MovedInputs=%v, want path pkg/fixture.txt", movedObs.BracketMoved, movedObs.MovedInputs)
+	}
+
+	// Symlinked moduleDir normalizes and deduplicates MovedInputs to module-relative paths without raw realpath duplicates.
+	symParent := t.TempDir()
+	symDir := filepath.Join(symParent, "sym-mod")
+	if err := os.Symlink(dir, symDir); err != nil {
+		t.Fatal(err)
+	}
+	symSub := filepath.Join(symDir, "pkg")
+	symBracket, err := CaptureBracket(t.Context(), symDir, []string{"pkg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := filepath.Join(sub, "created.txt")
+	if err := os.WriteFile(created, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symEnv := []string{"PWD=" + symSub}
+	symLog := []byte("# test log\nopen created.txt\nstat .\n")
+	symObs, err := FromTestLog(symLog, symDir, symSub, symEnv, WithCompletedProcess("proc-sym"), WithBracket(symBracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !symObs.BracketMoved || !slices.Equal(symObs.MovedInputs, []string{"path pkg/created.txt"}) {
+		t.Fatalf("symlinked moduleDir MovedInputs = %v (BracketMoved=%v), want [path pkg/created.txt]", symObs.MovedInputs, symObs.BracketMoved)
+	}
+}

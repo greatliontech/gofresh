@@ -504,15 +504,20 @@ func (v *Snapshot) withMovedInputs(ctx context.Context, verdict Verdict, recorde
 }
 
 func (v *Snapshot) withEndpointMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint, ep *runtimeEndpoint) Verdict {
+	verdict, _ = v.withEndpointMovedInputsList(ctx, verdict, recorded, ep)
+	return verdict
+}
+
+func (v *Snapshot) withEndpointMovedInputsList(ctx context.Context, verdict Verdict, recorded Fingerprint, ep *runtimeEndpoint) (Verdict, []string) {
 	if verdict.Status != Stale || verdict.Ground.Cause.Kind != RuntimeInputsCause || recorded.RuntimeInputs == "" || v.session == nil {
-		return verdict
+		return verdict, nil
 	}
 	movers := v.moversFromEndpoint(ctx, recorded.RuntimeInputs, ep)
 	if len(movers) == 0 {
-		return verdict
+		return verdict, nil
 	}
 	verdict.Reason = "runtimeinputs (moved: " + cappedList(movers) + ")"
-	return verdict
+	return verdict, slices.Clone(movers)
 }
 
 // requireCompletedAttachments is the one statement of what a validation
@@ -691,6 +696,9 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			}
 			if current.cut[subject] && !base.cut[subject] {
 				base.takeCut(current, subject)
+			}
+			if err := compareModelProjectionsDuringConstruction(ctx, base, current, subject); err != nil {
+				return err
 			}
 			if !slices.Equal(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject]) {
 				if err := ctx.Err(); err != nil {

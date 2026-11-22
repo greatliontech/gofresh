@@ -43,10 +43,11 @@ type CheckedExtension struct {
 // Index is the zero-based operation slot, in append order across all rounds.
 // Extension is present only for a valid explicitly requested transformation.
 type CheckedCandidate struct {
-	Index     int
-	Subject   Subject
-	Verdict   Verdict
-	Extension *CheckedExtension
+	Index       int
+	Subject     Subject
+	Verdict     Verdict
+	Extension   *CheckedExtension
+	MovedInputs []string
 }
 
 // recordCheck separates per-record historical policy from the subject-shared
@@ -55,13 +56,15 @@ type CheckedCandidate struct {
 // skipping proof selection, mover attribution, and motion re-judgment.
 type recordCheck struct {
 	Candidate
-	observed      bool
-	terminalStale Verdict
-	refusal       Verdict
+	observed       bool
+	terminalStale  Verdict
+	terminalMovers []string
+	refusal        Verdict
 }
 
 type recordResult struct {
 	verdict     Verdict
+	movedInputs []string
 	evaluated   bool
 	before      runtimeinput.State
 	after       runtimeinput.State
@@ -146,14 +149,20 @@ func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior
 }
 
 func (v *Snapshot) runtimeMotionAt(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State, ep *runtimeEndpoint) Verdict {
+	verdict, _ := v.runtimeMotionAtWithMovers(ctx, candidate, prior, nil, before, after, ep)
+	return verdict
+}
+
+func (v *Snapshot) runtimeMotionAtWithMovers(ctx context.Context, candidate Candidate, prior Verdict, priorMovers []string, before, after runtimeinput.State, ep *runtimeEndpoint) (Verdict, []string) {
 	if candidate.Recorded.RuntimeInputs == "" || before == after || prior.Status == Stale {
-		return prior
+		return prior, priorMovers
 	}
 	moved, failed := runtimeInputVerdict(candidate.Recorded, after)
 	if !failed {
 		moved = refusal(Stale, RuntimeInputsCause, Changed, "runtimeinputs")
 	}
-	return v.judgmentFor(candidate.Subject, v.withEndpointMovedInputs(ctx, moved, candidate.Recorded, ep))
+	moved, movers := v.withEndpointMovedInputsList(ctx, moved, candidate.Recorded, ep)
+	return v.judgmentFor(candidate.Subject, moved), movers
 }
 
 // checkRecords is the one ordered checking kernel. Callers prepare the whole
@@ -176,12 +185,13 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 	results = make([]recordResult, len(records))
 	positives := make([]ObservationAuthority, len(records))
 	var outcomeSets map[string]map[string]bool
-	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
+	singleSubject := v.effectiveExecutionModel().singleSubject()
 	hasRuntime := false
 	for i, record := range records {
 		if record.terminalStale.Status != "" {
 			results[i].evaluated = true
 			results[i].verdict = record.terminalStale
+			results[i].movedInputs = slices.Clone(record.terminalMovers)
 			hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
 			continue
 		}
@@ -267,7 +277,7 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 		if record.observed {
 			verdict = decideAfterClosureObserved(rec, cl, v.guards(), before.states[i], v.kind, pure, positives[i])
 		}
-		results[i].verdict = v.withEndpointMovedInputs(ctx, verdict, rec, &before)
+		results[i].verdict, results[i].movedInputs = v.withEndpointMovedInputsList(ctx, verdict, rec, &before)
 	}
 	after, err = v.observeRecordInputs(ctx, records, results)
 	if err != nil {
@@ -280,7 +290,9 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 		result := &results[i]
 		result.before, result.after = before.states[i], after.states[i]
 		if record.terminalStale.Status == "" {
-			result.verdict = v.judgmentFor(record.Subject, v.runtimeMotionAt(ctx, record.Candidate, result.verdict, before.states[i], after.states[i], &after))
+			movedVerdict, movers := v.runtimeMotionAtWithMovers(ctx, record.Candidate, result.verdict, result.movedInputs, before.states[i], after.states[i], &after)
+			result.verdict = v.judgmentFor(record.Subject, movedVerdict)
+			result.movedInputs = movers
 			result.selected = selected[i] && positives[i].CurrentApplicability && result.verdict.Status == Valid
 			if retain && result.selected {
 				if err := v.retainApplicabilityCheck(ctx, record.Recorded, record.Subject, true); err != nil {
@@ -491,7 +503,12 @@ func (u *CheckingUnit) finishWork(ctx context.Context, err error) error {
 }
 
 func (s checkingSlot) checked(index int) CheckedCandidate {
-	result := CheckedCandidate{Index: index, Subject: s.record.Subject, Verdict: s.result.verdict}
+	result := CheckedCandidate{
+		Index:       index,
+		Subject:     s.record.Subject,
+		Verdict:     s.result.verdict,
+		MovedInputs: slices.Clone(s.result.movedInputs),
+	}
 	if s.extension && result.Verdict.Status == Valid {
 		result.Extension = &CheckedExtension{Fingerprint: s.record.Recorded, Ledger: s.ledger.Clone()}
 	}
@@ -582,6 +599,7 @@ func (u *CheckingUnit) closeSlots(ctx context.Context, current *Snapshot) ([]Che
 			records[i].refusal = slot.result.verdict
 		} else if slot.result.verdict.Status == Stale {
 			records[i].terminalStale = slot.result.verdict
+			records[i].terminalMovers = slices.Clone(slot.result.movedInputs)
 			staleSlots++
 		}
 	}
@@ -601,9 +619,10 @@ func (u *CheckingUnit) closeSlots(ctx context.Context, current *Snapshot) ([]Che
 		result := results[i]
 		if slot.result.verdict.Status == Stale {
 			result.verdict = slot.result.verdict
+			result.movedInputs = slices.Clone(slot.result.movedInputs)
 		} else if slot.result.evaluated {
-			result.verdict = current.runtimeMotionAt(ctx, slot.record.Candidate, result.verdict, slot.result.before, result.before, &before)
-			result.verdict = current.runtimeMotionAt(ctx, slot.record.Candidate, result.verdict, slot.result.after, result.after, &after)
+			result.verdict, result.movedInputs = current.runtimeMotionAtWithMovers(ctx, slot.record.Candidate, result.verdict, result.movedInputs, slot.result.before, result.before, &before)
+			result.verdict, result.movedInputs = current.runtimeMotionAtWithMovers(ctx, slot.record.Candidate, result.verdict, result.movedInputs, slot.result.after, result.after, &after)
 		}
 		if (slot.extension && slot.result.verdict.Status == Valid || slot.result.selected) && result.verdict.Status != Valid {
 			if result.verdict.Status == Unverifiable && result.unavailable != nil {
@@ -815,7 +834,7 @@ func (v *Snapshot) currentApplicabilityObservableMode(subject Subject, outcomeMe
 	if !p.Observable {
 		return false, false
 	}
-	if p.RequiresSingleSubject && (v.session == nil || !v.session.executionModel.singleSubject()) {
+	if p.RequiresSingleSubject && !v.effectiveExecutionModel().singleSubject() {
 		return false, false
 	}
 	if outcomeMethod == outcome.StaticMethod {

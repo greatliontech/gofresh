@@ -130,6 +130,15 @@ retains every contributing dependency and its authority boundary.
 
 The dependency set is claim-specific: a declaration lookup, a cross-selection
 seeding judgment and an executed witness verdict need not share one scope.
+Native source-result fingerprints express static derivation certificates directly
+for both callable and non-callable Go declarations, checking closure,
+test-variant compartment (with optional inert compartment extension), closure
+strategy, selected toolchain content, admission policy, and code guards while
+refusing ambiguous declarations and omitting runtime execution obligations;
+non-callable Go declarations (`type`, `const`, `var`, `Type.Field`, and
+`Iface.Method`) also admit static code-result certificates (additionally
+refusing explicit external-state declarations) while refusing producing
+execution units and timing measurements.
 A native analysis memo caches a source-derived fact too; its reuse obeys the
 same complete-dependency rule even though it is disposable cache data rather
 than a consumer's durable execution record.
@@ -299,12 +308,21 @@ different permitted uses; closing preserves those distinctions rather than
 requiring every unit to claim an executed, supported success.
 
 Ordinary production selects observation obligations per subject from the same
-admitted source and assertion evidence used by checking. A subject already
+admitted source and assertion evidence used by checking, and a runtime binding
+exposes that same pre-execution predicate for a non-empty callable subject set
+within one package so an executor knows before spawning whether capture is
+required (refusing source-result snapshots, non-callable declarations, unknown
+or cross-package subjects, and multi-subject sets under a single-subject
+execution model). A subject already
 supported without observation acquires no observation-completeness assertion on
 its fingerprint. A unit whose subjects are all supported this way needs no outcome
 proof. A normally completed unit with no selected observation
 obligation may omit its capture; that absence establishes no observation facts,
-rather than an incomplete observation. A supplied optional capture retains its
+rather than an incomplete observation, and registration plus normal-completion
+closing perform no directory-bracket walk, precise-analysis proof or
+tracked-chdir derivation, classification-root `go env` probe, or test-log I/O,
+while abnormal completion still synthesizes incomplete process evidence from the
+resolved frame coordinates. A supplied optional capture retains its
 ordinary input guards and refusals without becoming outcome authority. Explicit
 identity-only diagnostic selection remains distinct from this automatic selection.
 
@@ -343,8 +361,10 @@ contributing process per unit; a second registration refuses. Registration fixes
 the process identity, any capture path and observation declarations before execution,
 with each selected capture exclusively assigned and protected through finalization.
 Malformed
-scratch namespace declarations refuse before frame/proof preparation or reservation
-of the contribution, using the runtime-input namespace grammar. A relative
+scratch namespace, path-exclusion, bracket-path, or environment-exclusion
+declarations (including any attempt to exclude `PWD`) refuse before frame/proof
+preparation or reservation of the contribution, using the runtime-input
+declaration grammars. A relative
 capture path resolves against the admitted runtime directory; execution and
 finalization receive that same absolute coordinate, preserving a symlink/parent
 path's filesystem meaning rather than lexically cancelling its components.
@@ -435,7 +455,11 @@ checking unit). Answers before closing
 are provisional, including transformed endpoints and ledgers. Only successful
 closing grants final judgments or checked transformed evidence; failure,
 cancellation or abort grants none and ends the transaction. Closing validates
-all selected obligations, not just the last candidate. A checking transaction
+all selected obligations, not just the last candidate. When a candidate is
+stale on its runtime-input guard, the checked candidate retains the sorted,
+uncapped moved-input identities observed at the deciding check-window endpoint
+(preserving mover attribution across revert intervals without post-window
+filesystem re-reads), while judgments themselves remain value-comparable. A checking transaction
 owns no producing contribution, cannot synthesize historical execution support
 and cannot seal its snapshot, runtime binding or another transaction. A singleton
 check uses this same lifecycle. The caller retains protection of the checked
@@ -492,7 +516,8 @@ admit package-process production under these obligations:
   is not a successful closing or durable-publication receipt.
 - **runtime-failure-finalization** — Finalization records established observation
   facts before refusing a demonstrated runtime-input span failure. The structured
-  closing failure carries the deciding runtime-input cause; diagnostics are a
+  closing failure carries the deciding runtime-input cause and any moved bracket
+  identities established by revalidation; diagnostics are a
   projection. No finalized subject evidence escapes, while the process account
   retains the typed guard failure, terminal disposition and attribution. Caller
   cancellation and a winning abort retain their precedence.

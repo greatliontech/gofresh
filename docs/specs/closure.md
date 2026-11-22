@@ -298,8 +298,10 @@ behavior of a specific subject by computing the transitive syntactic reference
 cone of that subject across the prior ledger's declarations (including all
 `init`, `var`, `directive`, and `TestMain` declarations and any compartment
 declarations referenced by base files, propagating exported references from
-the `_test` package to the base package and matching methods by reachable
-receiver type) and requiring that no declaration in that cone changed or was
+the `_test` package to the base package, matching methods by reachable
+receiver type, and for `<Type>.<Member>` struct-field or interface-method
+subjects marking any compartment `type <Type>` declaration reachable so edits or
+removals to `<Type>` or its embedded types defeat inertness) and requiring that no declaration in that cone changed or was
 removed, every added declaration is an inert kind whose name does not shadow
 any reachable or base-file reference, no embedded file header changed, and
 every file containing a reachable declaration retains its package and import
@@ -2660,8 +2662,9 @@ scan-strategy version.
 
 **REQ-closure-scan-memo** (behavior): A view package's scan — the
 shared-dynamic-state facts of its typed test-binary program, the
-directive, dynamic-signature, external, and ambiguity marks of every
-subject the package declares, and the discharges the caller's vouches and
+callability, directive, dynamic-signature, external, and ambiguity marks
+(including enclosing-type ambiguity propagated to member declarations) of every
+subject the package declares, and the per-execution-model discharges the caller's vouches and
 execution attestations carried for them — MAY be served whole from a
 persistent memo, because every output is a pure function of its key's
 complete input identity — the shared-dynamic-state judgment reads the

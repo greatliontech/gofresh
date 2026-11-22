@@ -19,9 +19,15 @@ and leaves measuring and storing to the caller.
 
 ## Vocabulary
 
-**subject** (term): the named Go symbol whose freshness is tracked — a function
-reachable as an analysis root, such as a benchmark, a test, or any callable a
-caller keys a cached result on. The unit of freshness. An `init` function,
+**subject** (term): the named Go declaration whose freshness is tracked — a
+callable top-level function, concrete method (`Type.Method`), or positional
+`init` function, or a non-callable static declaration (`type`, `const`,
+package-level `var`, struct field `Type.Field` including unambiguously promoted
+fields, or interface method specification `Iface.Method`), excluding blank `_`
+declarations. The unit of freshness. Non-callable static declarations have no
+runtime execution: they admit source-result and static code-result certificates
+and revalidation, and are refused by producing execution units and timing
+measurement views. An `init` function,
 which Go keeps unaddressable by name, is a subject under the declaration
 ledger's positional identity — the symbol `init#<file>#<ordinal>`, where
 `<file>` is the declaring file's base name in the pure-Go compilation and
@@ -301,9 +307,11 @@ the separate caller-responsible override.
 **REQ-fresh-guard-set** (behavior): A caller MUST check a result under the code
 guards always, and under the measurement guards only when the result is a timing
 measurement — a benchmark measurement is additionally guarded against machine
-and runtime-configuration drift. A code result omits those measurement fields,
-not its behavior-affecting dependencies: relevance is governed by
-REQ-guard-runtime-relevance, and missing required evidence is never agreement.
+and runtime-configuration drift. Source-result and code-result kinds omit those
+measurement fields; for an executed code result, behavior-affecting runtime
+dependencies remain governed by REQ-guard-runtime-relevance, while a
+source-result judges only static source and compilation equivalence without
+runtime execution obligations, and missing required evidence is never agreement.
 
 **REQ-fresh-go-command-policy** (behavior): Every `go` command gofresh
 spawns itself MUST run through its internal go-command runner: under one
@@ -387,9 +395,11 @@ the encoding library's refusal — a key the form does not define, a duplicated
 key, an explicit null, trailing data after the object (where the entry point has
 not already refused it), a proof without its observable, a positive proof
 carrying a reason, and every fingerprint the validity ladder refuses — a result
-kind that is neither code-result nor measurement (zero is a recording written
-without one) and a code-result fingerprint carrying a measurement guard
-(REQ-guard-selective-capture); the encoder refuses the ladder's refusals so an
+kind that is none of source-result, code-result, or measurement (zero is a
+recording written without one), a source-result or code-result fingerprint
+carrying a measurement guard (REQ-guard-selective-capture), and a source-result
+fingerprint carrying runtime-execution, purity, dynamic-state, or observation
+fields; the encoder refuses the ladder's refusals so an
 invalid record is never written, and the ladder is exposed as data for a caller
 assembling a fingerprint another way. A refused record decodes to nothing.
 Observation evidence a decoded proof carries that the check finds inconsistent
@@ -530,7 +540,14 @@ a sibling's validation re-observes the tree exactly as any view's, an
 observed capture over a subject whose proof the parent never captured
 computes it fresh, and a subject outside the parent refuses.
 For a runtime-bound view, the inherited observation includes the same runtime
-binding and applicable guards. Creating a different runtime binding is not a
+binding and applicable guards. A snapshot observed under a test-binary execution
+model (package-process or single-subject) also projects sibling snapshots across
+general, package-process, and single-subject execution models over that same
+source/build observation without re-reading source, reloading packages, or
+spawning Go commands, owning fresh transactional state and re-observing under
+the projected model at closing; a snapshot observed under the general execution
+model projects only the general execution model and refuses test-binary
+projections. Creating a different runtime binding is not a
 sibling derivation: it retains the source/build generation but establishes its
 own applicable runtime-side guard observation. Neither operation transfers
 attachments, selected execution support or a closing seal between transactions.

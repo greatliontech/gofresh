@@ -128,3 +128,14 @@ func (s AnalysisScope) Scan() string {
 	sort.Strings(keys)
 	return scope + "|vouches:" + strings.Join(keys, ",")
 }
+
+// SourceScan is the source-only declaration scan memo's scope: keyed by the
+// code guards, analyzing frontend, selected toolchain content, and admission
+// policy, disjoint from dynamic-state view scans.
+func (s AnalysisScope) SourceScan() string {
+	base := s.TestingScan()
+	if base == "" {
+		return ""
+	}
+	return "gofresh/source-scan@1|" + base
+}

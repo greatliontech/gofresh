@@ -84,9 +84,13 @@ func (p *Prover) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 		return err
 	}
 	defer p.releaseProgram(group.path)
-	computed := make(map[string]RootedFunctions, len(group.subjects))
-	rooted := group.subjects[:0:0]
-	for _, subject := range group.subjects {
+	return p.rootedOnProgram(ctx, group.path, group.closureHash, group.subjects, prog, results)
+}
+
+func (p *Prover) rootedOnProgram(ctx context.Context, pkgPath, closureHash string, subjects []Subject, prog *Program, results map[Subject]RootedFunctions) error {
+	computed := make(map[string]RootedFunctions, len(subjects))
+	var rooted []Subject
+	for _, subject := range subjects {
 		if prog.Roots[subject.Symbol] == nil {
 			results[subject] = RootedFunctions{}
 			computed[subject.Symbol] = RootedFunctions{}
@@ -109,15 +113,15 @@ func (p *Prover) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 			results[subject] = inv
 			computed[subject.Symbol] = inv
 		}
-		if memoScope := p.Hasher.Scope().Rooted(); memoScope != "" && group.closureHash != "" && len(computed) > 0 && ctx.Err() == nil {
-			storeRootedMemo(memoScope, group.closureHash, computed)
+		if memoScope := p.Hasher.Scope().Rooted(); memoScope != "" && closureHash != "" && len(computed) > 0 && ctx.Err() == nil {
+			storeRootedMemo(memoScope, closureHash, computed)
 		}
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	if memoScope := p.Hasher.Scope().Rooted(); memoScope != "" && group.closureHash != "" && len(computed) > 0 {
-		storeRootedMemo(memoScope, group.closureHash, computed)
+	if memoScope := p.Hasher.Scope().Rooted(); memoScope != "" && closureHash != "" && len(computed) > 0 {
+		storeRootedMemo(memoScope, closureHash, computed)
 	}
 	return nil
 }
@@ -234,6 +238,10 @@ func (p *Prover) binaryRootedPackage(ctx context.Context, path, closureHash stri
 		return RootedFunctions{}, err
 	}
 	defer p.releaseProgram(path)
+	return p.binaryRootedOnProgram(ctx, path, closureHash, prog, true)
+}
+
+func (p *Prover) binaryRootedOnProgram(ctx context.Context, path, closureHash string, prog *Program, emitUnit bool) (RootedFunctions, error) {
 	persist := func(inv RootedFunctions) (RootedFunctions, error) {
 		if err := ctx.Err(); err != nil {
 			return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -259,12 +267,181 @@ func (p *Prover) binaryRootedPackage(ctx context.Context, path, closureHash stri
 		return persist(RootedFunctions{Fns: map[string]bool{}, Complete: true})
 	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
-	p.Hasher.Unit("prove", path, 1, 1)
+	if emitUnit {
+		p.Hasher.Unit("prove", path, 1, 1)
+	}
 	inv, err := binaryReachableUnion(ctx, p.Hasher.SelectionAudited(), p.Hasher.PureDelegates(), prog, subjects)
 	if err != nil {
 		return RootedFunctions{}, err
 	}
 	return persist(inv)
+}
+
+// ComputeRootedAndBinaryFunctions derives both per-subject rooted-flow
+// inventories and per-package binary rooted-flow inventories in a single pass,
+// loading and building at most one SSA program per uncached package.
+func (p *Prover) ComputeRootedAndBinaryFunctions(ctx context.Context, subjects []Subject, binaryPaths []string) (map[Subject]RootedFunctions, map[string]RootedFunctions, error) {
+	p.ResetCallScope()
+	defer p.Hasher.DropCallBuffers()
+	var (
+		rootedResults map[Subject]RootedFunctions
+		binaryResults map[string]RootedFunctions
+	)
+	err := p.Hasher.WithContext(ctx, func() error {
+		rootedResults = make(map[Subject]RootedFunctions, len(subjects))
+		binaryResults = make(map[string]RootedFunctions, len(binaryPaths))
+
+		type combinedPkg struct {
+			path            string
+			subjects        []Subject
+			wantBinary      bool
+			closureHash     string
+			rootedMemo      map[string]RootedFunctions
+			binaryInventory RootedFunctions
+			binaryMemoized  bool
+			checked         bool
+		}
+		byPath := map[string]*combinedPkg{}
+		var pkgs []*combinedPkg
+		ensurePkg := func(path string) *combinedPkg {
+			cp := byPath[path]
+			if cp == nil {
+				cp = &combinedPkg{path: path}
+				byPath[path] = cp
+				pkgs = append(pkgs, cp)
+			}
+			return cp
+		}
+		seenSubj := map[Subject]bool{}
+		for _, subj := range subjects {
+			if seenSubj[subj] {
+				continue
+			}
+			seenSubj[subj] = true
+			cp := ensurePkg(subj.Package)
+			cp.subjects = append(cp.subjects, subj)
+		}
+		for _, path := range binaryPaths {
+			ensurePkg(path).wantBinary = true
+		}
+
+		resolveMemos := func(cp *combinedPkg) (needRooted, needBinary bool) {
+			if !cp.checked && ctx.Err() == nil {
+				cp.checked = true
+				if len(cp.subjects) > 0 {
+					cp.closureHash, cp.rootedMemo = p.rootedGroupMemo(cp.path)
+				}
+				if cp.wantBinary {
+					var binHash string
+					binHash, cp.binaryInventory, cp.binaryMemoized = p.binaryRootedMemo(cp.path)
+					if cp.closureHash == "" {
+						cp.closureHash = binHash
+					}
+				}
+			}
+			if len(cp.subjects) > 0 {
+				if len(cp.rootedMemo) == 0 {
+					needRooted = true
+				} else {
+					for _, s := range cp.subjects {
+						if _, ok := cp.rootedMemo[s.Symbol]; !ok {
+							needRooted = true
+							break
+						}
+					}
+				}
+			}
+			if cp.wantBinary && !cp.binaryMemoized {
+				needBinary = true
+			}
+			return needRooted, needBinary
+		}
+
+		currentIdx := 0
+		bp := &batchPreparer{
+			p: p,
+			candidates: func() []string {
+				var uncached []string
+				for _, cp := range pkgs[currentIdx:] {
+					if ctx.Err() != nil {
+						break
+					}
+					if _, ok := p.progs[cp.path]; ok {
+						continue
+					}
+					if _, failed := p.progErrs[cp.path]; failed {
+						continue
+					}
+					if nr, nb := resolveMemos(cp); nr || nb {
+						uncached = append(uncached, cp.path)
+					}
+				}
+				return uncached
+			},
+		}
+
+		for i, cp := range pkgs {
+			currentIdx = i
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("closure: analysis cancelled: %w", err)
+			}
+			needRooted, needBinary := resolveMemos(cp)
+			var remainingSubjects []Subject
+			if len(cp.subjects) > 0 {
+				if len(cp.rootedMemo) > 0 {
+					for _, s := range cp.subjects {
+						if val, ok := cp.rootedMemo[s.Symbol]; ok {
+							rootedResults[s] = val
+						} else {
+							remainingSubjects = append(remainingSubjects, s)
+						}
+					}
+					if len(remainingSubjects) < len(cp.subjects) {
+						p.Hasher.Served("rooted functions", cp.path)
+					}
+				} else {
+					remainingSubjects = cp.subjects
+				}
+			}
+			if cp.wantBinary && cp.binaryMemoized {
+				p.Hasher.Served("binary rooted functions", cp.path)
+				binaryResults[cp.path] = cp.binaryInventory
+			}
+			if !needRooted && !needBinary {
+				continue
+			}
+			if len(remainingSubjects) > 0 {
+				p.Hasher.Unit("prove", cp.path, 1, 1)
+			}
+			prog, err := p.loadCachedFrom(ctx, cp.path, bp)
+			if err != nil {
+				return err
+			}
+			var runErr error
+			if len(remainingSubjects) > 0 {
+				runErr = p.rootedOnProgram(ctx, cp.path, cp.closureHash, remainingSubjects, prog, rootedResults)
+			}
+			if runErr == nil && needBinary {
+				var inv RootedFunctions
+				inv, runErr = p.binaryRootedOnProgram(ctx, cp.path, cp.closureHash, prog, len(remainingSubjects) == 0)
+				if runErr == nil {
+					binaryResults[cp.path] = inv
+				}
+			}
+			p.releaseProgram(cp.path)
+			if runErr != nil {
+				return runErr
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return rootedResults, binaryResults, nil
 }
 
 // InMemoryRootedFunctions derives per-subject rooted-flow inventories in memory

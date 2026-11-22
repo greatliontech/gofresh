@@ -53,6 +53,8 @@ type Snapshot struct {
 	packages             []string
 	moduleDir            string
 	kind                 Kind
+	executionModel       ExecutionModel
+	hasExecutionModel    bool
 	facts                *observationFacts
 	runtime              *boundRuntime
 	observable           map[Subject]observability.Observability
@@ -129,6 +131,12 @@ func (s *Session) observeSnapshot(ctx context.Context, subjects []Subject, modul
 }
 
 func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind, facts *observationFacts) *Snapshot {
+	var execModel ExecutionModel
+	var hasExecModel bool
+	if s != nil {
+		execModel = s.executionModel
+		hasExecModel = true
+	}
 	return &Snapshot{
 		session:              s,
 		subjects:             subjects,
@@ -136,6 +144,8 @@ func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject
 		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
+		executionModel:       execModel,
+		hasExecutionModel:    hasExecModel,
 		facts:                facts,
 		observable:           make(map[Subject]observability.Observability, len(subjects)),
 		capturedObserved:     make(map[Subject]bool, len(subjects)),
@@ -145,6 +155,8 @@ func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject
 
 func (v *Snapshot) cloneShell(subjects []Subject, requests []closure.Subject, packages []string, facts *observationFacts) *Snapshot {
 	shell := newSnapshotShell(v.session, subjects, requests, packages, v.moduleDir, v.kind, facts)
+	shell.executionModel = v.executionModel
+	shell.hasExecutionModel = v.hasExecutionModel
 	shell.parent = v.parent
 	shell.runtime = v.runtime
 	shell.runtimeCurrent = v.runtimeCurrent
@@ -199,9 +211,15 @@ type observationFacts struct {
 	// of the same bytes the compartment hashes fold, so the agreement
 	// pair's hash comparison vouches for them.
 	testVariantLedgers map[string]testvariant.TestVariantLedger
+	modelProjections   [3]executionModelProjection
+	hasProjection      [3]bool
 }
 
 func (s *Session) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
+	return s.observeViewWithExecution(ctx, subjects, requests, packages, moduleDir, kind, s.executionModel)
+}
+
+func (s *Session) observeViewWithExecution(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind, execModel ExecutionModel) (facts observationFacts, err error) {
 	emitObserveViewHook()
 	var hasher *closure.Hasher
 	defer func() { accountPass(ctx, hasher) }()
@@ -275,8 +293,12 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
 	scope := hasher.SetAnalysisScope(s.analysisScope(guards))
 	emitFactScopeViewHook(scope.Facts())
-	emitScanScopeViewHook(scope.Scan())
-	scan, source, cut, err := scanViewSubjects(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, packages...)
+	if kind == SourceResult {
+		emitScanScopeViewHook(scope.SourceScan())
+	} else {
+		emitScanScopeViewHook(scope.Scan())
+	}
+	scan, source, cut, err := scanViewSubjectsWithMode(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, kind == SourceResult, execModel, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -284,6 +306,19 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	// the discharge's twin of the proof pass's report (REQ-fresh-progress).
 	reportBudgetCut(s.progress, s.analysisBudget, len(cut), "undischarged")
 	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
+	if kind == SourceResult {
+		for _, pkg := range packages {
+			if errMsg := scan.loadErr[pkg]; errMsg != "" {
+				return observationFacts{}, fmt.Errorf("gofresh: load %s: %s", pkg, errMsg)
+			}
+		}
+	} else {
+		for _, s := range subjects {
+			if (!known[s] || scan.staticDecl[s]) && scan.loadErr[s.Package] != "" {
+				return observationFacts{}, fmt.Errorf("gofresh: load %s: %s", s.Package, scan.loadErr[s.Package])
+			}
+		}
+	}
 	// Subject existence is decided by the scan; refusing here, before
 	// the maximal fold reads and hashes every contributing file, is
 	// preparation — the fold below cannot change the answer. The
@@ -291,6 +326,11 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	// caller narrows its batch in one step (REQ-fresh-preparation).
 	if err := requireSubjects(subjects, func(s Subject) bool { return known[s] }, SelectedSource); err != nil {
 		return observationFacts{}, err
+	}
+	if kind == Measurement {
+		if err := checkStaticDeclsForMeasurement(ctx, subjects, scan.staticDecl, moduleDir); err != nil {
+			return observationFacts{}, err
+		}
 	}
 	emitMaximalBatchViewHook()
 	computed, sources, err := hasher.ComputeMaximalFactsBatch(requests)
@@ -339,67 +379,51 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 			observation.fileDigests[path] = digest
 		}
 	}
+	if kind != SourceResult {
+		observation.modelProjections, observation.hasProjection = buildModelProjections(subjects, scan, hasher.SelectionAttribution(), budgetExhausted(s.analysisBudget))
+	}
 	for _, subject := range subjects {
-		maximal := subjectFacts{source: computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]}
-		// The two consumer-tier judgments — signature dynamism and
-		// shared dynamic state — ran under the selection the Hasher
-		// resolved, so each attributes it at its own composition, as
-		// the closure tiers do at theirs; the declaration-borne refusals
-		// below (ambiguous identity, the external directive) are no
-		// degraded judgment and carry none (REQ-closure-refusal-channels).
-		if term := openWorld[subject]; term != "" {
-			maximal.openWorld = &subjectRefusal{reason: closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
+		isStatic := scan.staticDecl[subject]
+		maximal := subjectFacts{
+			source:     computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}],
+			staticDecl: isStatic,
+			sourceOnly: kind == SourceResult,
 		}
-		if reason := scan.downgradeReason[subject]; reason != "" {
-			// A culprit the budget left unjudged names the budget: the
-			// reason is the record's, read long after the pass, and the
-			// culprit alone would read as the program's own refusal
-			// (REQ-fresh-context).
-			var culprit Subject
-			if !cut[subject] {
-				culprit = scan.downgradeCulprit[subject]
+		if kind != SourceResult && !isStatic {
+			if term := openWorld[subject]; term != "" {
+				maximal.openWorld = &subjectRefusal{reason: closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
 			}
-			if cut[subject] {
-				reason += " (reachability unjudged: " + budgetExhausted(s.analysisBudget) + ")"
+			if reason := scan.downgradeReason[subject]; reason != "" {
+				var culprit Subject
+				if !cut[subject] {
+					culprit = scan.downgradeCulprit[subject]
+				}
+				if cut[subject] {
+					reason += " (reachability unjudged: " + budgetExhausted(s.analysisBudget) + ")"
+				}
+				maximal.sharedState = &subjectRefusal{
+					reason:  closure.AttributeSelection(reason, hasher.SelectionAttribution()),
+					culprit: culprit,
+				}
 			}
-			maximal.sharedState = &subjectRefusal{
-				reason:  closure.AttributeSelection(reason, hasher.SelectionAttribution()),
-				culprit: culprit,
+			if discharges := scan.vouchDischarges[subject]; discharges != "" {
+				observation.vouchDischarges[subject] = discharges
 			}
-		}
-		if discharges := scan.vouchDischarges[subject]; discharges != "" {
-			observation.vouchDischarges[subject] = discharges
-		}
-		if d := scan.discharges[subject]; d != (attestationDischarges{}) {
-			observation.discharges[subject] = d
+			if d := scan.discharges[subject]; d != (attestationDischarges{}) {
+				observation.discharges[subject] = d
+			}
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
-			// Distinct declarations collapsed onto this identity: capture
-			// is refused for this subject alone — the maximal package
-			// closure stays the sound floor (it spans every declaring
-			// variant), but no evidence can say WHICH declaration it
-			// vouches for (REQ-purity-directive).
 			maximal.ambiguous = &subjectRefusal{reason: "ambiguous subject identity: " + detail + "; rename one declaration to address either"}
 		}
-		if external[subject] {
-			// The author declared external state: unverifiable by
-			// declaration, and no purity attribution is recorded — a purity
-			// assertion confers nothing on an external-state subject
-			// (REQ-external-directive, REQ-external-precedence).
+		if kind != SourceResult && external[subject] {
 			maximal.external = true
 		}
 		observation.maximal[subject] = maximal
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 		observation.sourceFilesBySubject[subject] = slices.Clone(sources[request])
 		sort.Strings(observation.sourceFilesBySubject[subject])
-		if external[subject] {
-			continue
-		}
-		if scan.ambiguous[subject] != "" {
-			// A purity attribution names one declarer taking
-			// responsibility; a collapsed identity has two, so neither a
-			// caller assertion nor a directive can be attributed
-			// (REQ-purity-directive, REQ-purity-responsibility).
+		if kind == SourceResult || isStatic || external[subject] || scan.ambiguous[subject] != "" {
 			continue
 		}
 		switch caller, directive := s.assumePure(subject), directivePure(subject); {
@@ -537,6 +561,17 @@ func (v *Snapshot) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, e
 // fingerprintLocked projects the view's immutable producing facts. Callers
 // hold the view lock; observed capture adds its independently derived proof.
 func (v *Snapshot) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprint {
+	if v.kind == SourceResult {
+		return Fingerprint{
+			MaximalClosure:     cl.Hash,
+			TestVariantClosure: cl.TestVariants,
+			ToolchainContent:   cl.ToolchainContent,
+			AdmissionPolicy:    cl.AdmissionPolicy,
+			Guards:             v.guards(),
+			ClosureStrategy:    ClosureStrategy,
+			ResultKind:         SourceResult,
+		}
+	}
 	d := v.facts.discharges[subject]
 	return Fingerprint{
 		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
@@ -605,7 +640,7 @@ func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fi
 
 func (v *Snapshot) observedFingerprintLocked(subject Subject) Fingerprint {
 	disposition := v.observable[subject]
-	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
+	singleSubject := v.effectiveExecutionModel().singleSubject()
 	observable := disposition.Observable
 	reason := disposition.Reason
 	effectFree := disposition.EffectFree
@@ -930,6 +965,8 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 		sourceFilesBySubject: sourceFilesBySubject,
 		fileDigests:          v.facts.fileDigests,
 		testVariantLedgers:   ledgers,
+		modelProjections:     restrictModelProjections(v.facts.modelProjections, v.facts.hasProjection, unique),
+		hasProjection:        v.facts.hasProjection,
 	})
 	shell.parent = rootParent
 	shell.observable = observable
@@ -961,7 +998,7 @@ func (v *Snapshot) evidenceEnv() []string {
 // the session and runtime guards under the view's immutable binding. The composed
 // result is comparison-only; it never replaces shared source facts.
 func (v *Snapshot) observe(ctx context.Context) (observationFacts, error) {
-	facts, err := v.session.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
+	facts, err := v.session.observeViewWithExecution(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind, v.effectiveExecutionModel())
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -980,16 +1017,24 @@ func (v *Snapshot) compareObservationContext(ctx context.Context, observation ob
 }
 
 // takeCut adopts the other observation's fail-closed shape for a subject
-// it cut: the undischarged downgrade and the absent discharges.
+// it cut: the undischarged downgrade and Stage-A-only discharges.
 func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
 	base := f.maximal[subject]
 	base.sharedState = other.maximal[subject].sharedState
 	f.maximal[subject] = base
-	delete(f.discharges, subject)
+	if d := other.discharges[subject]; d != (attestationDischarges{}) {
+		if f.discharges == nil {
+			f.discharges = map[Subject]attestationDischarges{}
+		}
+		f.discharges[subject] = d
+	} else {
+		delete(f.discharges, subject)
+	}
 	if f.cut == nil {
 		f.cut = map[Subject]bool{}
 	}
 	f.cut[subject] = true
+	takeModelCut(f, other, subject)
 }
 
 // analysisScope is the pass's analysis identity outside the source
@@ -1140,6 +1185,8 @@ func (e *RecordedBatchError) Unwrap() []error {
 // producing unit's or historical candidate's admission.
 type subjectFacts struct {
 	source      closure.MaximalFacts
+	staticDecl  bool
+	sourceOnly  bool
 	openWorld   *subjectRefusal
 	sharedState *subjectRefusal
 	ambiguous   *subjectRefusal
@@ -1166,6 +1213,9 @@ func sameRefusal(a, b *subjectRefusal) bool {
 // even when a higher-priority diagnostic is selected here.
 func (f subjectFacts) closure() closure.Closure {
 	c := f.source.Closure()
+	if (f.sourceOnly || f.staticDecl) && c.Hash != "" {
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = false, 0, "", closure.Subject{}
+	}
 	if f.openWorld != nil {
 		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.OpenWorldRefusal, f.openWorld.reason, closure.Subject{}
 	}
@@ -1188,7 +1238,8 @@ func (f subjectFacts) closure() closure.Closure {
 // cut can change only the shared-state discharge; all other obligations must
 // still agree, including ones hidden by the selected diagnostic.
 func (f subjectFacts) equal(other subjectFacts, cut bool) bool {
-	return f.source.Equal(other.source) && sameRefusal(f.openWorld, other.openWorld) &&
+	return f.source.Equal(other.source) && f.staticDecl == other.staticDecl && f.sourceOnly == other.sourceOnly &&
+		sameRefusal(f.openWorld, other.openWorld) &&
 		(cut || sameRefusal(f.sharedState, other.sharedState)) &&
 		sameRefusal(f.ambiguous, other.ambiguous) && f.external == other.external
 }

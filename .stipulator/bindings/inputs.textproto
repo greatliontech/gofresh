@@ -333,8 +333,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-identities"
-  content_hash: "9c4bc95498fd7ee3f95fe7d5c0ba1112060d562d71bbd6a6ce30f565871f4cc2"
-  source_hash: "9adb6f3957c6673ebf04748bd7dc4429a3a9e707f0b50fc555acdfb2fb6b3ea7"
+  content_hash: "d20ed2e51b3574967e310c59993f7fa1bbb169f40a79ec9f52b1c4479109d75c"
+  source_hash: "ab7013d41d214689a777bc059fda8a00fc0bfb3efc99908ca3f2e1c9a3687166"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestStaleRuntimeInputsNamesTheMover"
   role: BINDING_ROLE_TESTS
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-path-identities"
-  content_hash: "9c4bc95498fd7ee3f95fe7d5c0ba1112060d562d71bbd6a6ce30f565871f4cc2"
-  source_hash: "9adb6f3957c6673ebf04748bd7dc4429a3a9e707f0b50fc555acdfb2fb6b3ea7"
+  content_hash: "d20ed2e51b3574967e310c59993f7fa1bbb169f40a79ec9f52b1c4479109d75c"
+  source_hash: "ab7013d41d214689a777bc059fda8a00fc0bfb3efc99908ca3f2e1c9a3687166"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestMovedInputsNamesTheMover"
   role: BINDING_ROLE_TESTS
@@ -483,8 +483,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-exclusions"
-  content_hash: "bf0b3b73973ccaba2fa4bd15387e6a7494642c834b664b396a82d327d42a947b"
-  source_hash: "84780e4d91343478c202ed708ae5e7475bbebb162cd442266662527f42fc9da0"
+  content_hash: "273510c9c41f866deaefedc7dd2456cec7d56baf4d345de4a0a2bf67d4d8b181"
+  source_hash: "cc965dc3c7176f2a4b086bb1f66ab4d30334a51b86da4d5f220cbb985a72ff32"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestExcludedPathsAreNeverRecorded"
   role: BINDING_ROLE_TESTS
@@ -493,8 +493,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-exclusions"
-  content_hash: "bf0b3b73973ccaba2fa4bd15387e6a7494642c834b664b396a82d327d42a947b"
-  source_hash: "84780e4d91343478c202ed708ae5e7475bbebb162cd442266662527f42fc9da0"
+  content_hash: "273510c9c41f866deaefedc7dd2456cec7d56baf4d345de4a0a2bf67d4d8b181"
+  source_hash: "cc965dc3c7176f2a4b086bb1f66ab4d30334a51b86da4d5f220cbb985a72ff32"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.FromTestLog"
   role: BINDING_ROLE_IMPLEMENTS
@@ -2565,4 +2565,24 @@ bindings {
   symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestScratchNamespaceBoundaryAndSymlinkEscapes"
   role: BINDING_ROLE_TESTS
   shape_hash: "92321c0579005e03ad56b12f438091f49640609e32a0cbaa7fd40f728177bcf2"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-exclusions"
+  content_hash: "273510c9c41f866deaefedc7dd2456cec7d56baf4d345de4a0a2bf67d4d8b181"
+  source_hash: "cc965dc3c7176f2a4b086bb1f66ab4d30334a51b86da4d5f220cbb985a72ff32"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPropertySourceResultFingerprintValidationAndExcludedEnvMetamorphic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "dc168b3fdf358725607388548f5e5cc6c13f3e29f3abbb62a40ce6ed0e386c7c"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-exclusions"
+  content_hash: "273510c9c41f866deaefedc7dd2456cec7d56baf4d345de4a0a2bf67d4d8b181"
+  source_hash: "cc965dc3c7176f2a4b086bb1f66ab4d30334a51b86da4d5f220cbb985a72ff32"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzValidateExcludedEnvAndSourceFingerprint"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8b8ca6bb6c5cfe2d26d76170dfa8521ad57204756a451a4cb78272de45c81e59"
 }

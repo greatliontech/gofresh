@@ -431,40 +431,46 @@ func TestFingerprintRecordIsTheFleetForm(t *testing.T) {
 	}
 }
 
-// genFingerprint draws a valid fingerprint: either kind, the proof
-// present or absent, every optional value empty or set.
+// genFingerprint draws a valid fingerprint: any of the three kinds, the
+// proof present or absent on execution kinds, every optional value empty
+// or set.
 func genFingerprint(r *rand.Rand) Fingerprint {
 	pick := func(vals ...string) string { return vals[r.Intn(len(vals))] }
 	f := Fingerprint{
-		MaximalClosure:           pick("m1", "m2"),
-		ToolchainContent:         pick("", "content-a", "content-b"),
-		AdmissionPolicy:          pick("", "policy-a", "policy-b"),
-		TestVariantClosure:       pick("", "v1", "v2"),
-		ObservationAssertion:     pick("", "caller assertion"),
-		PurityAssertion:          pick("", "caller assertion", "source directive"),
-		DynamicStateVouches:      pick("", "a.b", "a.b,c.d"),
-		SingleSubjectDischarges:  pick("", "a.s"),
-		PackageProcessDischarges: pick("", "a.p"),
-		DynamicStateStrategy:     pick("", DynamicStateStrategy, "old"),
-		ClosureStrategy:          pick("", ClosureStrategy),
-		RuntimeInputs:            pick("", "manifest"),
-		RuntimeDigest:            pick("", "d1"),
-		Guards:                   guard.Guards{Toolchain: pick("", "t"), BuildConfig: pick("", "b")},
+		MaximalClosure:     pick("m1", "m2"),
+		ToolchainContent:   pick("", "content-a", "content-b"),
+		AdmissionPolicy:    pick("", "policy-a", "policy-b"),
+		TestVariantClosure: pick("", "v1", "v2"),
+		ClosureStrategy:    pick("", ClosureStrategy),
+		Guards:             guard.Guards{Toolchain: pick("", "t"), BuildConfig: pick("", "b")},
 	}
-	if r.Intn(2) == 0 {
+	switch r.Intn(3) {
+	case 0:
 		f.ResultKind = CodeResult
-	} else {
+	case 1:
 		f.ResultKind = Measurement
 		f.Guards.Machine = pick("", "m")
 		f.Guards.RuntimeConfig = pick("", "r")
+	case 2:
+		f.ResultKind = SourceResult
 	}
-	if r.Intn(2) == 0 {
-		observable := r.Intn(2) == 0
-		reason := ""
-		if !observable {
-			reason = pick("", "reaches os.Getenv")
+	if f.ResultKind != SourceResult {
+		f.ObservationAssertion = pick("", "caller assertion")
+		f.PurityAssertion = pick("", "caller assertion", "source directive")
+		f.DynamicStateVouches = pick("", "a.b", "a.b,c.d")
+		f.SingleSubjectDischarges = pick("", "a.s")
+		f.PackageProcessDischarges = pick("", "a.p")
+		f.DynamicStateStrategy = pick("", DynamicStateStrategy, "old")
+		f.RuntimeInputs = pick("", "manifest")
+		f.RuntimeDigest = pick("", "d1")
+		if r.Intn(2) == 0 {
+			observable := r.Intn(2) == 0
+			reason := ""
+			if !observable {
+				reason = pick("", "reaches os.Getenv")
+			}
+			f.ObservationProof = ObservationProof{Strategy: pick(ObservationRTA, "s"), Subject: Subject{Package: pick("p", ""), Symbol: pick("s", "")}, Observable: observable, Reason: reason, Evidence: pick("", "e")}
 		}
-		f.ObservationProof = ObservationProof{Strategy: pick(ObservationRTA, "s"), Subject: Subject{Package: pick("p", ""), Symbol: pick("s", "")}, Observable: observable, Reason: reason, Evidence: pick("", "e")}
 	}
 	if r.Intn(2) == 0 {
 		f.InertTestVariantApplicability = InertTestVariantApplicability{pick(InertTestVariantExtension, "future", "a<&\u2028"), pick("v1", "v2", "b<&\u2029")}
@@ -561,9 +567,12 @@ func TestFingerprintRecordRefusals(t *testing.T) {
 		{`{` + base + `,"purityAssertion":"","resultKind":1}`, `not the form's own encoding`},
 		{`{` + base + `,"observationProof":{"strategy":"","package":"","symbol":"","observable":false,"evidence":""},"resultKind":1}`, `not the form's own encoding`},
 		{`{` + base + `}`, `invalid recorded result kind 0`},
-		{`{` + base + `,"resultKind":3}`, `invalid recorded result kind 3`},
+		{`{` + base + `,"resultKind":4}`, `invalid recorded result kind 4`},
 		{`{` + base + `,"resultKind":1,"machine":"m"}`, `code-result fingerprint carries measurement guards`},
 		{`{` + base + `,"resultKind":1,"runtimeConfig":"r"}`, `code-result fingerprint carries measurement guards`},
+		{`{` + base + `,"resultKind":3,"machine":"m"}`, `source-result fingerprint carries measurement guards`},
+		{`{` + base + `,"resultKind":3,"runtimeConfig":"r"}`, `source-result fingerprint carries measurement guards`},
+		{`{` + base + `,"resultKind":3,"purityAssertion":"source directive"}`, `source-result fingerprint carries runtime or dynamic-state fields`},
 		{`[]`, `not a JSON object`},
 	}
 	for _, c := range cases {
@@ -606,6 +615,10 @@ func TestFingerprintRecordRefusals(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{`+base+`,"machine":"m","runtimeConfig":"r","resultKind":2}`), &measured); err != nil || measured.Guards.Machine != "m" || measured.Guards.RuntimeConfig != "r" || measured.ResultKind != Measurement {
 		t.Fatalf("a measurement record with both guards: %+v, %v", measured, err)
 	}
+	var source Fingerprint
+	if err := json.Unmarshal([]byte(`{`+base+`,"resultKind":3}`), &source); err != nil || source.ResultKind != SourceResult {
+		t.Fatalf("a source-result record: %+v, %v", source, err)
+	}
 	// The encoder refuses what the decoder refuses, so an invalid
 	// record is never written.
 	for _, c := range []struct {
@@ -616,6 +629,9 @@ func TestFingerprintRecordRefusals(t *testing.T) {
 		{Fingerprint{MaximalClosure: "a", ResultKind: 7}, "gofresh: invalid recorded result kind 7"},
 		{Fingerprint{MaximalClosure: "a", ResultKind: CodeResult, Guards: guard.Guards{Machine: "m"}}, "gofresh: code-result fingerprint carries measurement guards"},
 		{Fingerprint{MaximalClosure: "a", ResultKind: CodeResult, Guards: guard.Guards{RuntimeConfig: "r"}}, "gofresh: code-result fingerprint carries measurement guards"},
+		{Fingerprint{MaximalClosure: "a", ResultKind: SourceResult, Guards: guard.Guards{Machine: "m"}}, "gofresh: source-result fingerprint carries measurement guards"},
+		{Fingerprint{MaximalClosure: "a", ResultKind: SourceResult, PurityAssertion: "source directive"}, "gofresh: source-result fingerprint carries runtime or dynamic-state fields"},
+		{Fingerprint{MaximalClosure: "a", ResultKind: SourceResult, PackageProcessDischarges: "pkg.V"}, "gofresh: source-result fingerprint carries runtime or dynamic-state fields"},
 	} {
 		if _, err := json.Marshal(c.f); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("encoding %+v: err = %v, want %q", c.f, err, c.want)
@@ -881,7 +897,7 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@99" {
+	if DynamicStateStrategy != "gofresh/dynamic-state@101" {
 		t.Fatalf("DynamicStateStrategy = %q, want the typed dynamic-state fact and summary derivation", DynamicStateStrategy)
 	}
 }

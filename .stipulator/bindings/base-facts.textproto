@@ -3,8 +3,8 @@
 
 bindings {
   requirement_id: "REQ-fresh-producer-view"
-  content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
-  source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
+  content_hash: "d5601921b4e23520224031c45346e9ef76bab3185bb07f1bba04c04fa8eba397"
+  source_hash: "9c8d193df29291c360f424998caf34e0cfcfc865af3662ba385dfd83bd290c01"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSubjectFactsHiddenObligations"
   role: BINDING_ROLE_TESTS
@@ -64,8 +64,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-producer-view"
-  content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
-  source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
+  content_hash: "d5601921b4e23520224031c45346e9ef76bab3185bb07f1bba04c04fa8eba397"
+  source_hash: "9c8d193df29291c360f424998caf34e0cfcfc865af3662ba385dfd83bd290c01"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/closure.TestMaximalFactsRetainHiddenBlockers"
   role: BINDING_ROLE_TESTS

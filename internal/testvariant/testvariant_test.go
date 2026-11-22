@@ -348,3 +348,146 @@ func TestDiffTestVariantLedgersDuplicatePairingPackageRehomingAndClone(t *testin
 		t.Fatalf("package-clause rename delta = %+v, want Inert=false, 3 Removed, 3 Added", deltaRename)
 	}
 }
+
+func TestInertForSubjectCoversStructFieldsAndInterfaceMethods(t *testing.T) {
+	before := TestVariantLedger{
+		BindingStrategy: BindingStrategy,
+		BaseFiles: []TestVariantFileHeader{
+			{
+				File: "base.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"BaseCfg", "Timeout", "BaseIface", "Apply"},
+				},
+			},
+			{
+				File: "promoted.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"PromotedCfg", "dep", "Embedded"},
+					Imports:    []TestVariantImport{{Name: "dep", Path: "example.com/dep"}},
+				},
+			},
+			{
+				File: "split_outer.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"SplitOuter", "SplitInner"},
+				},
+			},
+			{
+				File: "split_inner.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"SplitInner", "SplitField"},
+				},
+			},
+		},
+		FileHeaders: []TestVariantFileHeader{
+			{
+				File: "types_test.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"Inner", "Val", "Outer", "SpecIface", "Check", "TestUnrelated", "SelfOnly", "CrossOuter", "CrossMid"},
+				},
+			},
+			{
+				File: "cross_test.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"CrossMid", "dep", "Leaf"},
+					Imports:    []TestVariantImport{{Name: "dep", Path: "example.com/dep"}},
+				},
+			},
+		},
+		Declarations: []TestVariantDeclaration{
+			{File: "types_test.go", Package: "p", Kind: "type", Name: "Inner", Hash: "in1", References: []string{"Inner", "Val", "int"}},
+			{File: "types_test.go", Package: "p", Kind: "method", Receiver: "Inner", Name: "InnerMethod", Hash: "im1", References: []string{"Inner", "InnerMethod", "MethodBodyRef"}},
+			{File: "types_test.go", Package: "p", Kind: "type", Name: "Outer", Hash: "out1", References: []string{"Outer", "Inner"}},
+			{File: "types_test.go", Package: "p", Kind: "type", Name: "SpecIface", Hash: "if1", References: []string{"SpecIface", "Check", "error"}},
+			{File: "types_test.go", Package: "p", Kind: "type", Name: "SelfOnly", Hash: "so1", References: []string{"SelfOnly"}},
+			{File: "cross_test.go", Package: "p", Kind: "method", Receiver: "SelfOnly", Name: "Helper", Hash: "soh1", References: []string{"SelfOnly", "Helper", "dep", "Foo"}},
+			{File: "types_test.go", Package: "p", Kind: "type", Name: "CrossOuter", Hash: "co1", References: []string{"CrossOuter", "CrossMid"}},
+			{File: "cross_test.go", Package: "p", Kind: "type", Name: "CrossMid", Hash: "cm1", References: []string{"CrossMid", "Leaf", "dep"}},
+			{File: "types_test.go", Package: "p", Kind: "func", Name: "TestUnrelated", Hash: "tu1", References: []string{"TestUnrelated"}},
+		},
+	}
+
+	// Editing TestUnrelated leaves all base & test-compartment struct fields and interface methods inert,
+	// including promoted fields split across multiple base files or multiple _test.go files.
+	afterUnrelated := before.Clone()
+	for i := range afterUnrelated.Declarations {
+		if afterUnrelated.Declarations[i].Name == "TestUnrelated" {
+			afterUnrelated.Declarations[i].Hash = "tu2"
+		}
+	}
+	for _, subj := range []string{
+		"BaseCfg", "BaseCfg.Timeout", "BaseIface", "BaseIface.Apply",
+		"PromotedCfg.RemoteField", "SplitOuter.SplitField",
+		"Inner.Val", "Outer.Val", "Outer.InnerMethod", "SpecIface.Check", "CrossOuter.RemoteLeaf",
+	} {
+		if !InertForSubject(before, afterUnrelated, subj) {
+			t.Fatalf("InertForSubject(%q) = false after unrelated test edit, want true", subj)
+		}
+	}
+	// Nonexistent member on self-contained compartment type without imported embeds fails closed,
+	// even when that type has a method in a file with imports/body references ("dep", "Foo").
+	if !InertForSubject(before, afterUnrelated, "SelfOnly.Helper") {
+		t.Fatalf("InertForSubject(SelfOnly.Helper) = false after unrelated test edit, want true")
+	}
+	for _, missing := range []string{"SelfOnly.Missing", "SelfOnly.Foo", "Outer.MethodBodyRef"} {
+		if InertForSubject(before, afterUnrelated, missing) {
+			t.Fatalf("InertForSubject(%q) = true on nonexistent member, want false", missing)
+		}
+	}
+
+	// Also verify a self-contained base package without imports still rejects nonexistent members.
+	noImpBase := TestVariantLedger{
+		BindingStrategy: BindingStrategy,
+		BaseFiles: []TestVariantFileHeader{
+			{
+				File: "outer.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"Outer", "Inner"},
+				},
+			},
+			{
+				File: "inner.go",
+				Bindings: &TestVariantFileBindings{
+					Package:    "p",
+					References: []string{"Inner", "Val"},
+				},
+			},
+		},
+		FileHeaders: []TestVariantFileHeader{{
+			File:     "p_test.go",
+			Bindings: &TestVariantFileBindings{Package: "p", References: []string{"TestA"}},
+		}},
+		Declarations: []TestVariantDeclaration{
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "TestA", Hash: "a1", References: []string{"TestA"}},
+		},
+	}
+	noImpAfter := noImpBase.Clone()
+	noImpAfter.Declarations[0].Hash = "a2"
+	if !InertForSubject(noImpBase, noImpAfter, "Outer.Val") {
+		t.Fatal("multi-file base Outer.Val = false after unrelated test edit, want true")
+	}
+	if InertForSubject(noImpBase, noImpAfter, "Outer.Missing") {
+		t.Fatal("multi-file self-contained base Outer.Missing = true, want false")
+	}
+
+	// Editing embedded Inner defeats inertness for both Inner.Val and Outer.Val, while SpecIface.Check stays inert.
+	afterInnerEdit := afterUnrelated.Clone()
+	for i := range afterInnerEdit.Declarations {
+		if afterInnerEdit.Declarations[i].Name == "Inner" {
+			afterInnerEdit.Declarations[i].Hash = "in2"
+		}
+	}
+	if InertForSubject(before, afterInnerEdit, "Inner.Val") || InertForSubject(before, afterInnerEdit, "Outer.Val") {
+		t.Fatal("editing embedded Inner reported inert for Inner.Val or Outer.Val")
+	}
+	if !InertForSubject(before, afterInnerEdit, "SpecIface.Check") {
+		t.Fatal("editing Inner defeated inertness for unrelated SpecIface.Check")
+	}
+}

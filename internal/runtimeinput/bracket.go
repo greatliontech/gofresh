@@ -183,8 +183,13 @@ func (b Bracket) checkModuleView(moduleDir string) error {
 // capture, or interpreted under a different module view than its capture, is
 // refused rather than read as unchanged.
 func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, moved bool, reason string, err error) {
+	unchanged, moved, _, reason, err = b.revalidateWithMovers(ctx, moduleDir)
+	return unchanged, moved, reason, err
+}
+
+func (b Bracket) revalidateWithMovers(ctx context.Context, moduleDir string) (unchanged, moved bool, movers []string, reason string, err error) {
 	if ctx == nil {
-		return false, false, "", errors.New("runtimeinputs: nil context")
+		return false, false, nil, "", errors.New("runtimeinputs: nil context")
 	}
 	if trace.Enabled(ctx, trace.DomainRuntimeInput, b.moduleDir) {
 		start := time.Now()
@@ -200,17 +205,17 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, m
 		}()
 	}
 	if err := ctx.Err(); err != nil {
-		return false, false, "", err
+		return false, false, nil, "", err
 	}
 	if err := b.checkSealed(); err != nil {
-		return false, false, "", err
+		return false, false, nil, "", err
 	}
 	moduleDir, err = filepath.Abs(moduleDir)
 	if err != nil {
-		return false, false, "", fmt.Errorf("runtimeinputs: module dir: %w", err)
+		return false, false, nil, "", fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
 	if err := b.checkModuleView(moduleDir); err != nil {
-		return false, false, "", err
+		return false, false, nil, "", err
 	}
 	ids := make([]pathID, len(b.roots))
 	for i, root := range b.roots {
@@ -218,23 +223,35 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, m
 	}
 	current, err := fingerprintBracket(ctx, b.moduleDir, ids, b.exclusions)
 	if err != nil {
-		return false, false, "", err
+		return false, false, nil, "", err
 	}
-	i, err := movedBracketRoot(ctx, b.roots, current.roots, b.exclusions)
+	i, movedPaths, err := movedBracketRootWithPaths(ctx, b.moduleDir, b.roots, current.roots, b.exclusions)
 	if err != nil {
-		return false, false, "", err
+		return false, false, nil, "", err
 	}
 	if i >= 0 {
 		root := b.roots[i]
-		return false, true, movedBracketClauseForRoot(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
+		return false, true, movedPaths, movedBracketClauseForRoot(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
 	}
 	if b.reason != "" {
-		return false, false, b.reason, nil
+		return false, false, nil, b.reason, nil
 	}
 	if current.reason != "" {
-		return false, false, current.reason, nil
+		return false, false, nil, current.reason, nil
 	}
-	return true, false, "", nil
+	return true, false, nil, "", nil
+}
+
+// ValidateBracketOptions checks declared bracket roots and path exclusions
+// before execution when a pure unit omits pre-execution bracket capture.
+func ValidateBracketOptions(roots, excludedPaths []string) error {
+	for _, root := range roots {
+		if _, err := bracketRootID(root); err != nil {
+			return err
+		}
+	}
+	_, err := exclusionPatterns(excludedPaths)
+	return err
 }
 
 // bracketRootID normalizes one declared root to identity form: a

@@ -144,7 +144,8 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: env: %w", err)
 	}
-	return explainCulpritCtx(ctx, sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), v.session.executionModel.packageProcess(), modCache)
+	execModel := v.effectiveExecutionModel()
+	return explainCulpritCtx(ctx, sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, execModel.singleSubject(), execModel.packageProcess(), modCache)
 }
 
 func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject, packageProcess bool, modCache string) (Chain, error) {

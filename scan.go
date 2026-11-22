@@ -2,10 +2,8 @@ package gofresh
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"path/filepath"
-	"sort"
+	"maps"
 	"strings"
 	"time"
 
@@ -14,7 +12,6 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/observability"
 )
 
 // sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
@@ -46,18 +43,18 @@ func storeScanFacts(scope, key string, payload any) {
 // budget-bounded reachability discharges (REQ-fresh-coherent-view,
 // REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
 func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+	return scanViewSubjectsWithMode(ctx, hasher, scope, buildFlags, budget, useScanMemo, localFacts, false, execModelFromBools(scope.SingleSubject, scope.PackageProcess), pkgPaths...)
+}
+
+func scanViewSubjectsWithMode(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, sourceOnly bool, activeModel ExecutionModel, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	scope = hasher.SetAnalysisScope(scope)
-	factScope := scope.Facts()
-	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
-	vouches := make(map[string]bool, len(scope.Vouches))
-	for _, v := range scope.Vouches {
-		vouches[v] = true
-	}
-	// Packages with a valid persistent scan entry under (scanScope, key) serve
-	// whole without participating in the typed load or discharges (REQ-closure-scan-memo).
-	scanScope := scope.Scan()
-	if !useScanMemo || isScanMemoOffViewHook() {
-		scanScope = ""
+	var scanScope string
+	if useScanMemo && !isScanMemoOffViewHook() {
+		if sourceOnly {
+			scanScope = scope.SourceScan()
+		} else {
+			scanScope = scope.Scan()
+		}
 	}
 	served := map[string]packageScanEntry{}
 	keys := map[string]string{}
@@ -76,7 +73,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		misses = append(misses, pkgPath)
 	}
 	if len(misses) == 0 {
-		return scanFromEntries(served), nil, nil, nil
+		return scanFromEntriesForModel(served, activeModel), nil, nil, nil
 	}
 	pkgPaths = misses
 	meta, err := hasher.GraphMetadata(pkgPaths...)
@@ -92,6 +89,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 			return nil, nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
 		}
 	}
+
 	patterns := append([]string(nil), pkgPaths...)
 	seenPattern := make(map[string]bool, len(pkgPaths))
 	for _, pkgPath := range pkgPaths {
@@ -103,6 +101,47 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		}
 		seenPattern[node.PkgPath] = true
 		patterns = append(patterns, node.PkgPath)
+	}
+
+	if sourceOnly {
+		var preKeys map[string]string
+		var expectedFiles map[string]map[string]bool
+		if scanScope != "" {
+			preKeys, expectedFiles = hasher.MutableFactKeys(scanScope, meta, false, pkgPaths...)
+		}
+		var scanInputs closure.TreeDigestSnapshot
+		if scanScope != "" {
+			scanInputs = hasher.SnapshotScanInputs(pkgPaths...)
+		}
+		emitTypedLoadViewHook()
+		hasher.Unit("typecheck", "", 0, len(patterns))
+		load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		postLoadDiskUnchanged := scanScope != "" && scanInputs.MatchesDisk()
+		hasher.UseViewLoad(load)
+		drifted := verifySourceScanDrift(hasher, scanScope, load, meta, pkgPaths, preKeys, expectedFiles)
+		scan, err := scanSubjectsFromLoadedWith(hasher.SelectionAudited(), false, load.Packages(), nil, pkgPaths...)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		emitBeforeDischargeViewHook()
+		diskUnchanged := postLoadDiskUnchanged && scanInputs.MatchesDisk()
+		for _, pkgPath := range pkgPaths {
+			if key := keys[pkgPath]; key != "" && diskUnchanged && !drifted[pkgPath] && scan.loadErr[pkgPath] == "" {
+				storeScanFacts(scanScope, key, entryOf(scan, pkgPath))
+			}
+		}
+		mergeEntries(scan, served, activeModel)
+		return scan, load, nil, nil
+	}
+
+	factScope := scope.Facts()
+	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
+	vouches := make(map[string]bool, len(scope.Vouches))
+	for _, v := range scope.Vouches {
+		vouches[v] = true
 	}
 	var preFactKeys map[string]string
 	var expectedFiles map[string]map[string]bool
@@ -121,7 +160,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	}
 	postLoadDiskUnchanged := scanScope != "" && scanInputs.MatchesDisk()
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, meta, pkgPaths, vouches, singleSubject, scope.PackageProcess, localFacts, preFactKeys, expectedFiles)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, meta, pkgPaths, vouches, singleSubject, packageProcess, localFacts, preFactKeys, expectedFiles)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -131,60 +170,61 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	}
 	analysisCtx, cancelBudget := analysisBound(ctx, budget)
 	defer cancelBudget()
-	var cut map[Subject]bool
 	emitBeforeDischargeViewHook()
-	if singleSubject {
-		if cut, err = dischargeUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
-			return nil, nil, nil, err
-		}
-	} else if packageProcess {
-		if cut, err = dischargeBinaryUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
+	if singleSubject || packageProcess {
+		if err := dischargeTestBinaryCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
 			return nil, nil, nil, err
 		}
 	}
+	scan.activateModel(activeModel)
+	cut := scan.cutByModel[activeModel]
 	cutPackages := map[string]bool{}
-	for subject := range cut {
-		cutPackages[subject.Package] = true
+	for m := range scan.cutByModel {
+		for subject := range scan.cutByModel[m] {
+			cutPackages[subject.Package] = true
+		}
 	}
 	diskUnchanged := postLoadDiskUnchanged && scanInputs.MatchesDisk()
 	for _, pkgPath := range pkgPaths {
-		if key := keys[pkgPath]; key != "" && diskUnchanged && !cutPackages[pkgPath] && !state.drifted[pkgPath] {
+		if key := keys[pkgPath]; key != "" && diskUnchanged && !cutPackages[pkgPath] && !state.drifted[pkgPath] && scan.loadErr[pkgPath] == "" {
 			storeScanFacts(scanScope, key, entryOf(scan, pkgPath))
 		}
 	}
-	mergeEntries(scan, served)
+	mergeEntries(scan, served, activeModel)
 	return scan, load, cut, nil
 }
 
 // scanEntryVersion versions the persisted scan entry — its shape and the
-// text of every field it persists (a downgrade reason is scan output, so
-// a change to its composition bumps the version); a bump recomputes
-// rather than serving an older entry's text or misreading its shape.
-const scanEntryVersion = 8
+// text of every field it persists.
+const scanEntryVersion = 10
 
-// subjectScanEntry is one subject's scan outputs as persisted.
-type subjectScanEntry struct {
-	Pure bool `json:"pure,omitempty"`
-	// OpenWorld is the conferring term of an open-world subject — the
-	// type parameter, receiver, or parameter whose type carries
-	// dynamic reach — and empty for a closed one: one field, so an open
-	// subject without its term is unrepresentable
-	// (REQ-closure-refusal-channels).
-	OpenWorld                string  `json:"openWorld,omitempty"`
-	External                 bool    `json:"external,omitempty"`
+type modelSubjectScanEntry struct {
 	DowngradeReason          string  `json:"downgradeReason,omitempty"`
 	DowngradeCulprit         Subject `json:"downgradeCulprit,omitempty"`
 	VouchDischarges          string  `json:"vouchDischarges,omitempty"`
 	AttestationDischarges    string  `json:"attestationDischarges,omitempty"`
 	PackageProcessDischarges string  `json:"packageProcessDischarges,omitempty"`
-	Ambiguous                string  `json:"ambiguous,omitempty"`
+}
+
+// subjectScanEntry is one subject's scan outputs as persisted.
+type subjectScanEntry struct {
+	StaticDecl bool   `json:"staticDecl,omitempty"`
+	Pure       bool   `json:"pure,omitempty"`
+	OpenWorld  string `json:"openWorld,omitempty"`
+	External   bool   `json:"external,omitempty"`
+	Ambiguous  string `json:"ambiguous,omitempty"`
+	modelSubjectScanEntry
+	GeneralModel       *modelSubjectScanEntry `json:"generalModel,omitempty"`
+	PackageModel       *modelSubjectScanEntry `json:"packageModel,omitempty"`
+	SingleSubjectModel *modelSubjectScanEntry `json:"singleSubjectModel,omitempty"`
 }
 
 // packageScanEntry is one view package's scan outputs as persisted: every
 // subject the scan knew in the package, by symbol.
 type packageScanEntry struct {
-	Version  int                         `json:"version"`
-	Subjects map[string]subjectScanEntry `json:"subjects"`
+	Version   int                         `json:"version"`
+	HasModels [3]bool                     `json:"hasModels,omitempty"`
+	Subjects  map[string]subjectScanEntry `json:"subjects"`
 }
 
 // attestationDischarges holds the positive execution-model attestations'
@@ -196,31 +236,127 @@ type attestationDischarges struct {
 	packageProcess string
 }
 
+type modelScanState struct {
+	downgradeReason  map[Subject]string
+	downgradeCulprit map[Subject]Subject
+	vouchDischarges  map[Subject]string
+	discharges       map[Subject]attestationDischarges
+}
+
+func newModelScanState() *modelScanState {
+	return &modelScanState{
+		downgradeReason:  map[Subject]string{},
+		downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges:  map[Subject]string{},
+		discharges:       map[Subject]attestationDischarges{},
+	}
+}
+
+func encodeModelSubjectEntry(ms *modelScanState, s Subject) *modelSubjectScanEntry {
+	if ms == nil {
+		return nil
+	}
+	d := ms.discharges[s]
+	e := modelSubjectScanEntry{
+		DowngradeReason:          ms.downgradeReason[s],
+		DowngradeCulprit:         ms.downgradeCulprit[s],
+		VouchDischarges:          ms.vouchDischarges[s],
+		AttestationDischarges:    d.singleSubject,
+		PackageProcessDischarges: d.packageProcess,
+	}
+	if e == (modelSubjectScanEntry{}) {
+		return nil
+	}
+	return &e
+}
+
+func decodeModelSubjectEntry(ms *modelScanState, s Subject, e *modelSubjectScanEntry) {
+	if ms == nil || e == nil {
+		return
+	}
+	if e.DowngradeReason != "" {
+		ms.downgradeReason[s] = e.DowngradeReason
+	}
+	if e.DowngradeCulprit != (Subject{}) {
+		ms.downgradeCulprit[s] = e.DowngradeCulprit
+	}
+	if e.VouchDischarges != "" {
+		ms.vouchDischarges[s] = e.VouchDischarges
+	}
+	if e.AttestationDischarges != "" || e.PackageProcessDischarges != "" {
+		ms.discharges[s] = attestationDischarges{
+			singleSubject:  e.AttestationDischarges,
+			packageProcess: e.PackageProcessDischarges,
+		}
+	}
+}
+
 // entryOf projects the scan's outputs for one package into its entry.
 func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
-	entry := packageScanEntry{Version: scanEntryVersion, Subjects: map[string]subjectScanEntry{}}
+	entry := packageScanEntry{
+		Version:   scanEntryVersion,
+		HasModels: scan.hasModel,
+		Subjects:  map[string]subjectScanEntry{},
+	}
 	for subject := range scan.known {
 		if subject.Package != pkgPath {
 			continue
 		}
 		d := scan.discharges[subject]
-		entry.Subjects[subject.Symbol] = subjectScanEntry{
-			Pure: scan.pure[subject], OpenWorld: scan.openWorld[subject], External: scan.external[subject],
-			DowngradeReason: scan.downgradeReason[subject], DowngradeCulprit: scan.downgradeCulprit[subject],
-			VouchDischarges:       scan.vouchDischarges[subject],
-			AttestationDischarges: d.singleSubject, PackageProcessDischarges: d.packageProcess,
-			Ambiguous: scan.ambiguous[subject],
+		se := subjectScanEntry{
+			StaticDecl: scan.staticDecl[subject],
+			Pure:       scan.pure[subject],
+			OpenWorld:  scan.openWorld[subject],
+			External:   scan.external[subject],
+			Ambiguous:  scan.ambiguous[subject],
+			modelSubjectScanEntry: modelSubjectScanEntry{
+				DowngradeReason:          scan.downgradeReason[subject],
+				DowngradeCulprit:         scan.downgradeCulprit[subject],
+				VouchDischarges:          scan.vouchDischarges[subject],
+				AttestationDischarges:    d.singleSubject,
+				PackageProcessDischarges: d.packageProcess,
+			},
 		}
+		if scan.hasModel[GeneralExecution] {
+			se.GeneralModel = encodeModelSubjectEntry(scan.byModel[GeneralExecution], subject)
+		}
+		if scan.hasModel[PackageExecution] {
+			se.PackageModel = encodeModelSubjectEntry(scan.byModel[PackageExecution], subject)
+		}
+		if scan.hasModel[SingleSubjectExecution] {
+			se.SingleSubjectModel = encodeModelSubjectEntry(scan.byModel[SingleSubjectExecution], subject)
+		}
+		entry.Subjects[subject.Symbol] = se
 	}
 	return entry
 }
 
 // mergeEntries folds served packages' entries into a scan.
-func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
+func mergeEntries(scan *subjectScan, served map[string]packageScanEntry, activeModel ExecutionModel) {
+	if len(served) == 0 {
+		return
+	}
+	firstPkg := len(scan.known) == 0
 	for pkgPath, entry := range served {
+		if firstPkg {
+			scan.hasModel = entry.HasModels
+			firstPkg = false
+		} else {
+			for m := range scan.hasModel {
+				scan.hasModel[m] = scan.hasModel[m] && entry.HasModels[m]
+			}
+		}
+		for m := range entry.HasModels {
+			if entry.HasModels[m] && scan.byModel[m] == nil {
+				scan.byModel[m] = newModelScanState()
+			}
+		}
 		for symbol, e := range entry.Subjects {
 			subject := Subject{Package: pkgPath, Symbol: symbol}
 			scan.known[subject] = true
+			if e.StaticDecl {
+				scan.staticDecl[subject] = true
+			}
 			if e.Pure {
 				scan.pure[subject] = true
 			}
@@ -230,46 +366,77 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 			if e.External {
 				scan.external[subject] = true
 			}
-			if e.DowngradeReason != "" {
-				scan.downgradeReason[subject] = e.DowngradeReason
-			}
-			if e.DowngradeCulprit != (Subject{}) {
-				scan.downgradeCulprit[subject] = e.DowngradeCulprit
-			}
-			if e.VouchDischarges != "" {
-				scan.vouchDischarges[subject] = e.VouchDischarges
-			}
-			if e.AttestationDischarges != "" || e.PackageProcessDischarges != "" {
-				scan.discharges[subject] = attestationDischarges{
-					singleSubject:  e.AttestationDischarges,
-					packageProcess: e.PackageProcessDischarges,
-				}
-			}
 			if e.Ambiguous != "" {
 				scan.ambiguous[subject] = e.Ambiguous
 			}
+			if entry.HasModels[GeneralExecution] {
+				decodeModelSubjectEntry(scan.byModel[GeneralExecution], subject, e.GeneralModel)
+			}
+			if entry.HasModels[PackageExecution] {
+				decodeModelSubjectEntry(scan.byModel[PackageExecution], subject, e.PackageModel)
+			}
+			if entry.HasModels[SingleSubjectExecution] {
+				decodeModelSubjectEntry(scan.byModel[SingleSubjectExecution], subject, e.SingleSubjectModel)
+			}
+			if !entry.HasModels[activeModel] {
+				base := e.modelSubjectScanEntry
+				if base.DowngradeReason != "" {
+					scan.downgradeReason[subject] = base.DowngradeReason
+				}
+				if base.DowngradeCulprit != (Subject{}) {
+					scan.downgradeCulprit[subject] = base.DowngradeCulprit
+				}
+				if base.VouchDischarges != "" {
+					scan.vouchDischarges[subject] = base.VouchDischarges
+				}
+				if base.AttestationDischarges != "" || base.PackageProcessDischarges != "" {
+					scan.discharges[subject] = attestationDischarges{
+						singleSubject:  base.AttestationDischarges,
+						packageProcess: base.PackageProcessDischarges,
+					}
+				}
+			}
 		}
+	}
+	if scan.hasModel[activeModel] && scan.byModel[activeModel] != nil {
+		scan.activateModel(activeModel)
 	}
 }
 
 // scanFromEntries builds a scan entirely from served entries.
 func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
-	scan := &subjectScan{
-		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]string{}, external: map[Subject]bool{},
-		downgradeReason: map[Subject]string{}, downgradeCulprit: map[Subject]Subject{},
-		vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{},
-		ambiguous: map[Subject]string{},
-	}
-	mergeEntries(scan, served)
+	return scanFromEntriesForModel(served, GeneralExecution)
+}
+
+func scanFromEntriesForModel(served map[string]packageScanEntry, activeModel ExecutionModel) *subjectScan {
+	scan := newEmptySubjectScan()
+	mergeEntries(scan, served, activeModel)
 	return scan
 }
 
+func newEmptySubjectScan() *subjectScan {
+	return &subjectScan{
+		staticDecl:       map[Subject]bool{},
+		pure:             map[Subject]bool{},
+		known:            map[Subject]bool{},
+		openWorld:        map[Subject]string{},
+		external:         map[Subject]bool{},
+		downgradeReason:  map[Subject]string{},
+		downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges:  map[Subject]string{},
+		discharges:       map[Subject]attestationDischarges{},
+		ambiguous:        map[Subject]string{},
+		loadErr:          map[string]string{},
+	}
+}
+
 // subjectScan holds one observation pass's subject-walk outputs across
-// directive purity, open-world terms (REQ-closure-refusal-channels),
+// callability, directive purity, open-world terms (REQ-closure-refusal-channels),
 // shared-dynamic-state downgrades (REQ-closure-shared-dynamic-state-reason),
 // load-bearing vouches/attestations (REQ-vouch-recorded), and duplicate
 // variant declarations (REQ-purity-directive).
 type subjectScan struct {
+	staticDecl       map[Subject]bool
 	pure             map[Subject]bool
 	known            map[Subject]bool
 	openWorld        map[Subject]string
@@ -279,9 +446,24 @@ type subjectScan struct {
 	vouchDischarges  map[Subject]string
 	discharges       map[Subject]attestationDischarges
 	ambiguous        map[Subject]string
+	loadErr          map[string]string
+	byModel          [3]*modelScanState
+	hasModel         [3]bool
+	cutByModel       [3]map[Subject]bool
 }
 
 func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subject] }
+
+func (s *subjectScan) activateModel(m ExecutionModel) {
+	ms := s.byModel[m]
+	if ms == nil {
+		return
+	}
+	s.downgradeReason = maps.Clone(ms.downgradeReason)
+	s.downgradeCulprit = maps.Clone(ms.downgradeCulprit)
+	s.vouchDischarges = maps.Clone(ms.vouchDischarges)
+	s.discharges = maps.Clone(ms.discharges)
+}
 
 // scanSubjectsFromLoaded derives the subject walk — subject enumeration,
 // directives, per-subject dynamic-signature marks — from an observation
@@ -293,22 +475,34 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 }
 
 func scanSubjectsFromLoadedWith(audited, computeOpenWorld bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
-	scan := &subjectScan{
-		pure:             map[Subject]bool{},
-		known:            map[Subject]bool{},
-		openWorld:        map[Subject]string{},
-		external:         map[Subject]bool{},
-		downgradeReason:  map[Subject]string{},
-		downgradeCulprit: map[Subject]Subject{},
-		vouchDischarges:  map[Subject]string{},
-		discharges:       map[Subject]attestationDischarges{},
-		ambiguous:        map[Subject]string{},
-	}
+	scan := newEmptySubjectScan()
 	var cones map[string]map[string][]dynstate.Fact
 	if state != nil {
 		cones = state.cones
 	}
+	requestedPackages := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		requestedPackages[pkgPath] = true
+	}
+	for _, p := range pkgs {
+		if p == nil || gotool.IsGeneratedTestMainPackage(p) {
+			continue
+		}
+		viewPkg := p.PkgPath
+		if p.ForTest != "" && (p.PkgPath == p.ForTest || p.PkgPath == p.ForTest+"_test") {
+			viewPkg = p.ForTest
+		}
+		if !requestedPackages[viewPkg] || scan.loadErr[viewPkg] != "" {
+			continue
+		}
+		packages.Visit([]*packages.Package{p}, nil, func(imp *packages.Package) {
+			if scan.loadErr[viewPkg] == "" && imp != nil && len(imp.Errors) > 0 {
+				scan.loadErr[viewPkg] = imp.Errors[0].Error()
+			}
+		})
+	}
 	declarations := map[Subject]string{}
+	callableSeen := map[Subject]bool{}
 	err := dynstate.WalkLoadedSubjects(audited, computeOpenWorld, pkgs, cones, pkgPaths, func(s dynstate.ScannedSymbol) {
 		subject := Subject{Package: s.Package, Symbol: s.Symbol}
 		if previous := declarations[subject]; previous != "" && previous != s.Declaration {
@@ -317,617 +511,40 @@ func scanSubjectsFromLoadedWith(audited, computeOpenWorld bool, pkgs []*packages
 			declarations[subject] = s.Declaration
 			scan.known[subject] = true
 		}
+		if s.Callable {
+			callableSeen[subject] = true
+			delete(scan.staticDecl, subject)
+		} else if !callableSeen[subject] {
+			scan.staticDecl[subject] = true
+		}
 		if s.Pure {
 			scan.pure[subject] = true
 		}
 		if s.External {
 			scan.external[subject] = true
 		}
-		if s.OpenWorld != "" {
+		if s.Callable && s.OpenWorld != "" {
 			scan.openWorld[subject] = s.OpenWorld
 		}
 	})
 	if err != nil {
 		return nil, err
 	}
+	// Propagate enclosing-type ambiguity (for example, an aliased type declared
+	// in both pkg and pkg_test) onto member declarations <Type>.<Member>.
+	for subject := range scan.known {
+		if recv, _, ok := strings.Cut(subject.Symbol, "."); ok && !strings.HasPrefix(subject.Symbol, "init#") {
+			if detail := scan.ambiguous[Subject{Package: subject.Package, Symbol: recv}]; detail != "" && scan.ambiguous[subject] == "" {
+				scan.ambiguous[subject] = detail
+			}
+		}
+	}
 	for subject := range scan.ambiguous {
 		delete(scan.pure, subject)
 		delete(scan.external, subject)
 	}
 	if state != nil {
-		for subject := range scan.known {
-			if reason := state.downgraded[subject.Package]; reason != "" {
-				scan.downgradeReason[subject] = sharedDynamicStatePrefix + reason
-				if culprit := state.culprits[subject.Package]; culprit != (Subject{}) {
-					scan.downgradeCulprit[subject] = culprit
-				}
-			}
-			if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
-				scan.vouchDischarges[subject] = discharges
-			}
-			if attested := state.attestationDischarges[subject.Package]; attested != "" {
-				scan.discharges[subject] = attestationDischarges{singleSubject: attested}
-			}
-		}
+		populateSubjectScanModels(scan, state)
 	}
 	return scan, nil
-}
-
-const dynamicStateDirName = "dynamicstate"
-
-func loadDynamicStateFacts(scope, bucket string) map[string]json.RawMessage {
-	if scope == "" {
-		return nil
-	}
-	var facts map[string]json.RawMessage
-	if !cachefile.Load(dynamicStateDirName, scope, bucket, &facts) {
-		return nil
-	}
-	return facts
-}
-
-func storeDynamicStateFacts(scope, bucket string, facts map[string]json.RawMessage) {
-	if scope == "" {
-		return
-	}
-	cachefile.Merge(dynamicStateDirName, scope, bucket, facts)
-}
-
-// processFactCache serves version-pinned package facts within one process.
-// Keyed by (scope, bucket, package path) — the same complete identity the
-// persistent memo trusts, so a hit is sound wherever the persistent entry
-// would be.
-var processFactCache cachefile.SyncMemo[dynstate.Fact]
-
-// viewDynamicState is the per-pass dynamic-state derivation over one view's
-// metadata graph: fresh facts for every mutable-local node from the pass's
-// own typed load, memoized facts for version-pinned modules (persistent under
-// factScope, in-process always), standard-library nodes skipped — inert by
-// construction: their declaration side is excluded and toolchain source
-// cannot reach module variables (imports are acyclic).
-type viewDynamicState struct {
-	cones                 map[string]map[string][]dynstate.Fact
-	downgraded            map[string]string
-	culprits              map[string]Subject
-	vouchDischarges       map[string]string
-	attestationDischarges map[string]string
-	rootCulprits          map[string][]dynstate.Culprit
-	culpritSites          map[string]map[string]dynstate.CulpritSiteSet
-	drifted               map[string]bool
-}
-
-// dischargeUnreachableCulprits applies the single-subject reachability
-// scoping of the shared-dynamic-state judgment (REQ-closure-shared-dynamic-state).
-func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
-	var downgraded []Subject
-	for subject := range scan.known {
-		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
-			downgraded = append(downgraded, subject)
-		}
-	}
-	if len(downgraded) == 0 {
-		return nil, nil
-	}
-	requests := make([]closure.Subject, len(downgraded))
-	for i, subject := range downgraded {
-		requests[i] = closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-	}
-	rooted, err := observability.NewProver(hasher).ComputeRootedFunctions(analysisCtx, requests)
-	if err != nil {
-		return dischargeCut(ctx, analysisCtx, downgraded, err)
-	}
-	for i, subject := range downgraded {
-		proof := rooted[requests[i]]
-		if !proof.Complete {
-			continue
-		}
-		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
-		applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, true)
-	}
-	return nil, nil
-}
-
-// dischargeCut classifies a reachability analysis's failure
-// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
-func dischargeCut(ctx, analysisCtx context.Context, downgraded []Subject, err error) (map[Subject]bool, error) {
-	if ctx.Err() != nil {
-		return nil, fmt.Errorf("gofresh: dynamic-state discharge cancelled: %w", ctx.Err())
-	}
-	if analysisCtx.Err() != nil {
-		cut := make(map[Subject]bool, len(downgraded))
-		for _, subject := range downgraded {
-			cut[subject] = true
-		}
-		return cut, nil
-	}
-	return nil, err
-}
-
-// dischargeBinaryUnreachableCulprits applies the BINARY-scoped
-// reachability judgment of the shared-dynamic-state invariant
-// (REQ-closure-shared-dynamic-state).
-func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
-	packageSubjects := map[string][]Subject{}
-	var downgraded []Subject
-	for subject := range scan.known {
-		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
-			packageSubjects[subject.Package] = append(packageSubjects[subject.Package], subject)
-			downgraded = append(downgraded, subject)
-		}
-	}
-	if len(packageSubjects) == 0 {
-		return nil, nil
-	}
-	paths := make([]string, 0, len(packageSubjects))
-	for path := range packageSubjects {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	inventories, err := observability.NewProver(hasher).ComputeBinaryRootedFunctions(analysisCtx, paths)
-	if err != nil {
-		return dischargeCut(ctx, analysisCtx, downgraded, err)
-	}
-	for _, path := range paths {
-		proof := inventories[path]
-		if !proof.Complete {
-			continue
-		}
-		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, path)
-		for _, subject := range packageSubjects[path] {
-			applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, false)
-		}
-	}
-	return nil, nil
-}
-
-func applyRootedCulpritDischarge(scan *subjectScan, subject Subject, surviving string, culprit Subject, dischargedKeys map[string]bool, singleSubject bool) {
-	if surviving == "" {
-		delete(scan.downgradeReason, subject)
-		delete(scan.downgradeCulprit, subject)
-	} else {
-		scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
-		scan.downgradeCulprit[subject] = culprit
-	}
-	if len(dischargedKeys) == 0 {
-		return
-	}
-	d := scan.discharges[subject]
-	if singleSubject {
-		d.singleSubject = mergeDischargedKeys(d.singleSubject, dischargedKeys)
-	} else {
-		d.packageProcess = joinDischargedKeys(dischargedKeys)
-	}
-	scan.discharges[subject] = d
-}
-
-func mergeDischargedKeys(existing string, added map[string]bool) string {
-	if existing == "" {
-		return joinDischargedKeys(added)
-	}
-	merged := make(map[string]bool, len(added)+4)
-	for key := range added {
-		merged[key] = true
-	}
-	for _, key := range strings.Split(existing, ",") {
-		if key != "" {
-			merged[key] = true
-		}
-	}
-	return joinDischargedKeys(merged)
-}
-
-// dischargeCulprits walks one package's root culprits against a
-// complete rooted-flow inventory (REQ-closure-shared-dynamic-state).
-func dischargeCulprits(proof observability.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, culpritSubj Subject, discharged map[string]bool) {
-	discharged = map[string]bool{}
-	for _, culprit := range state.rootCulprits[pkgPath] {
-		sites := state.culpritSites[pkgPath][culprit.Key]
-		if sites.Unattributed {
-			pkg, sym := culprit.SubjectParts()
-			return culprit.ReasonBody(), Subject{Package: pkg, Symbol: sym}, discharged
-		}
-		for fn := range sites.Fns {
-			if proof.Fns[fn] {
-				pkg, sym := culprit.SubjectParts()
-				return culprit.ReasonBody(), Subject{Package: pkg, Symbol: sym}, discharged
-			}
-		}
-		discharged[culprit.Key] = true
-	}
-	return "", Subject{}, discharged
-}
-
-func joinDischargedKeys(discharged map[string]bool) string {
-	keys := make([]string, 0, len(discharged))
-	for key := range discharged {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return strings.Join(keys, ",")
-}
-
-func loadedPackageMatchesFiles(pkg *packages.Package, expected map[string]bool) bool {
-	if pkg == nil || len(pkg.Errors) > 0 {
-		return false
-	}
-	seen := make(map[string]bool, len(expected))
-	for _, list := range [][]string{pkg.GoFiles, pkg.CompiledGoFiles, pkg.OtherFiles, pkg.EmbedFiles} {
-		for _, path := range list {
-			clean := filepath.Clean(path)
-			if !expected[clean] {
-				return false
-			}
-			seen[clean] = true
-		}
-	}
-	return len(seen) == len(expected)
-}
-
-func loadedPackageMatchesImports(hasher *closure.Hasher, pkg *packages.Package, node closure.GraphPackage, nodesByListing map[string]closure.GraphPackage) bool {
-	if pkg == nil {
-		return false
-	}
-	expectedPaths := make(map[string]bool, len(node.Imports))
-	for _, imp := range node.Imports {
-		if imp == "C" || imp == "unsafe" {
-			continue
-		}
-		impNode, exists := nodesByListing[imp]
-		if !exists {
-			return false
-		}
-		expectedPaths[impNode.PkgPath] = true
-		impPkg := pkg.Imports[impNode.PkgPath]
-		if impPkg == nil {
-			return false
-		}
-		pkgDir, modDir := closure.LoadedPackageDirs(impPkg)
-		gotClass, gotPin := hasher.ClassifyLoadedPackage(impPkg)
-		if gotClass != impNode.Class {
-			return false
-		}
-		switch impNode.Class {
-		case closure.PinnedPackage:
-			if modDir == "" || pkgDir == "" || gotPin != impNode.Pin {
-				return false
-			}
-		case closure.MutableLocalPackage:
-			if pkgDir == "" {
-				return false
-			}
-		}
-	}
-	for impPath := range pkg.Imports {
-		if impPath != "C" && impPath != "unsafe" && !expectedPaths[impPath] {
-			return false
-		}
-	}
-	return true
-}
-
-func coneLocalFilesMatch(hasher *closure.Hasher, listing string, pkg *packages.Package, loaded map[string]*packages.Package, nodesByListing map[string]closure.GraphPackage, expectedFiles map[string]map[string]bool) bool {
-	if !loadedPackageMatchesFiles(pkg, expectedFiles[listing]) || !loadedPackageMatchesImports(hasher, pkg, nodesByListing[listing], nodesByListing) {
-		return false
-	}
-	visited := map[string]bool{listing: true}
-	ok := true
-	var walk func(string)
-	walk = func(cur string) {
-		if !ok {
-			return
-		}
-		for _, imp := range nodesByListing[cur].Imports {
-			if visited[imp] {
-				continue
-			}
-			visited[imp] = true
-			node, exists := nodesByListing[imp]
-			if !exists {
-				continue
-			}
-			if node.Class == closure.MutableLocalPackage && !node.TestMain {
-				impPkg := loaded[imp]
-				if !loadedPackageMatchesFiles(impPkg, expectedFiles[imp]) || !loadedPackageMatchesImports(hasher, impPkg, node, nodesByListing) {
-					ok = false
-					return
-				}
-			}
-			walk(imp)
-		}
-	}
-	walk(listing)
-	return ok
-}
-
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, meta []closure.GraphPackage, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool, localFacts *localFactMemo, preFactKeys map[string]string, expectedFiles map[string]map[string]bool) (*viewDynamicState, error) {
-	state := &viewDynamicState{downgraded: map[string]string{}, culprits: map[string]Subject{}, cones: map[string]map[string][]dynstate.Fact{}}
-	factsByListing := map[string]dynstate.Fact{}
-	record := func(listing, _ string, fact dynstate.Fact) {
-		factsByListing[listing] = fact
-	}
-	var postFactKeys map[string]string
-	if len(preFactKeys) > 0 {
-		postFactKeys, _ = hasher.MutableFactKeys(factScope, meta, true, viewPackages...)
-	}
-	nodesByListing := make(map[string]closure.GraphPackage, len(meta))
-	for _, node := range meta {
-		nodesByListing[node.ImportPath] = node
-	}
-	driftedListings := map[string]bool{}
-	driftedForTest := map[string]bool{}
-	allViewPackagesDrifted := false
-	deriveLocalFact := func(listing string, pkg *packages.Package, verifiedKeys map[string]string, loaded map[string]*packages.Package) dynstate.Fact {
-		key := preFactKeys[listing]
-		verified := key != "" && !allViewPackagesDrifted && !driftedForTest[pkg.PkgPath] && key == verifiedKeys[listing] && coneLocalFilesMatch(hasher, listing, pkg, loaded, nodesByListing, expectedFiles)
-		if (key != "" && !verified) || !loadedPackageMatchesImports(hasher, pkg, nodesByListing[listing], nodesByListing) {
-			driftedListings[listing] = true
-		}
-		if localFacts != nil && verified {
-			if cached, ok := localFacts.load(key); ok {
-				emitLocalFactLoadViewHook(listing, true)
-				hasher.Served("dynamic-state facts", pkg.PkgPath)
-				return cached
-			}
-			emitLocalFactLoadViewHook(listing, false)
-			fact := dynstate.FactOf(hasher.SelectionAudited(), pkg)
-			localFacts.store(key, fact)
-			return fact
-		}
-		emitLocalFactLoadViewHook(listing, false)
-		return dynstate.FactOf(hasher.SelectionAudited(), pkg)
-	}
-
-	requestedViewPkg := make(map[string]bool, len(viewPackages))
-	for _, vp := range viewPackages {
-		requestedViewPkg[vp] = true
-	}
-	extraVariantFacts := map[string][]*packages.Package{}
-	loadedLocal := map[string]*packages.Package{}
-	type localPkgEntry struct {
-		listing string
-		pkg     *packages.Package
-	}
-	var rootLocals []localPkgEntry
-	matched := map[string]bool{}
-	for _, pkg := range load.Packages() {
-		if gotool.IsGeneratedTestMainPackage(pkg) {
-			continue
-		}
-		listing := gotool.LoadedListingID(pkg)
-		node, ok := nodesByListing[listing]
-		if !ok {
-			if pkg.ForTest != "" {
-				if requestedViewPkg[pkg.ForTest] {
-					driftedForTest[pkg.ForTest] = true
-					extraVariantFacts[pkg.ForTest] = append(extraVariantFacts[pkg.ForTest], pkg)
-				}
-			} else if pkg.Module != nil {
-				allViewPackagesDrifted = true
-			}
-			continue
-		}
-		if node.Class != closure.MutableLocalPackage || node.TestMain {
-			continue
-		}
-		matched[listing] = true
-		loadedLocal[listing] = pkg
-		rootLocals = append(rootLocals, localPkgEntry{listing: listing, pkg: pkg})
-	}
-	for _, entry := range rootLocals {
-		record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, postFactKeys, loadedLocal))
-	}
-	var testedWithIntermediates []string
-	seenTested := map[string]bool{}
-	for _, node := range meta {
-		if node.Class == closure.StandardPackage || matched[node.ImportPath] || node.TestMain || node.ForTest == "" {
-			continue
-		}
-		if node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test" {
-			continue
-		}
-		if !seenTested[node.ForTest] {
-			seenTested[node.ForTest] = true
-			testedWithIntermediates = append(testedWithIntermediates, node.ForTest)
-		}
-	}
-	if len(testedWithIntermediates) > 0 {
-		sort.Strings(testedWithIntermediates)
-		hasher.Unit("typecheck", "", 0, len(testedWithIntermediates))
-		graphLoad, err := closure.LoadViewGraph(ctx, hasher.PassReader(), buildFlags, testedWithIntermediates...)
-		if err != nil {
-			return nil, err
-		}
-		var interPostKeys map[string]string
-		if len(preFactKeys) > 0 {
-			interPostKeys, _ = hasher.MutableFactKeys(factScope, meta, true, viewPackages...)
-		}
-		graphLoaded := make(map[string]*packages.Package, len(loadedLocal))
-		for k, v := range loadedLocal {
-			graphLoaded[k] = v
-		}
-		var interEntries []localPkgEntry
-		packages.Visit(graphLoad.Packages(), nil, func(pkg *packages.Package) {
-			if gotool.IsGeneratedTestMainPackage(pkg) {
-				return
-			}
-			listing := gotool.LoadedListingID(pkg)
-			node, ok := nodesByListing[listing]
-			if !ok {
-				if pkg.ForTest != "" && seenTested[pkg.ForTest] && pkg.Module != nil {
-					driftedForTest[pkg.ForTest] = true
-					extraVariantFacts[pkg.ForTest] = append(extraVariantFacts[pkg.ForTest], pkg)
-				}
-				return
-			}
-			if node.Class == closure.MutableLocalPackage && !node.TestMain {
-				graphLoaded[listing] = pkg
-			}
-			if pkg.ForTest == "" || node.Class == closure.StandardPackage || matched[listing] {
-				return
-			}
-			matched[listing] = true
-			interEntries = append(interEntries, localPkgEntry{listing: listing, pkg: pkg})
-		})
-		for _, entry := range interEntries {
-			if nodesByListing[entry.listing].Class == closure.MutableLocalPackage {
-				record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, interPostKeys, graphLoaded))
-			} else {
-				record(entry.listing, entry.pkg.PkgPath, dynstate.FactOf(hasher.SelectionAudited(), entry.pkg))
-			}
-		}
-	}
-	for _, node := range meta {
-		if node.TestMain || node.Class == closure.StandardPackage || matched[node.ImportPath] {
-			continue
-		}
-		if node.Class == closure.PinnedPackage && node.ForTest == "" {
-			continue
-		}
-		return nil, fmt.Errorf("gofresh: dynamic-state scan did not cover package %s", node.ImportPath)
-	}
-
-	buckets, unkeyable := dynstate.PinnedBuckets(meta)
-	var missing []closure.GraphPackage
-	persisted := map[string]map[string]json.RawMessage{}
-	for _, node := range meta {
-		if node.Class != closure.PinnedPackage || node.ForTest != "" || node.TestMain {
-			continue
-		}
-		if factScope == "" || unkeyable[node.Pin] {
-			missing = append(missing, node)
-			continue
-		}
-		bucket := buckets[node.Pin]
-		cacheKey := factScope + "\x00" + bucket + "\x00" + node.PkgPath
-		if cached, ok := processFactCache.Load(cacheKey); ok {
-			record(node.ImportPath, node.PkgPath, cached)
-			continue
-		}
-		if persisted[bucket] == nil {
-			if facts := loadDynamicStateFacts(factScope, bucket); facts != nil {
-				persisted[bucket] = facts
-			} else {
-				persisted[bucket] = map[string]json.RawMessage{}
-			}
-		}
-		if raw, ok := persisted[bucket][node.PkgPath]; ok {
-			var fact dynstate.Fact
-			if json.Unmarshal(raw, &fact) == nil {
-				hasher.Served("dynamic-state facts", node.PkgPath)
-				processFactCache.Store(cacheKey, fact)
-				record(node.ImportPath, node.PkgPath, fact)
-				continue
-			}
-		}
-		missing = append(missing, node)
-	}
-	if len(missing) > 0 {
-		patterns := make([]string, 0, len(missing))
-		for _, node := range missing {
-			patterns = append(patterns, node.PkgPath)
-		}
-		sort.Strings(patterns)
-		emitDynamicStateMissLoadViewHook(patterns)
-		hasher.Unit("typecheck", "", 0, len(patterns))
-		missLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
-		if err != nil {
-			return nil, err
-		}
-		derived := map[string]dynstate.Fact{}
-		for _, pkg := range missLoad.Packages() {
-			if pkg.ForTest != "" || pkg.Name == "main" {
-				continue
-			}
-			for _, loadErr := range pkg.Errors {
-				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
-			}
-			derived[pkg.PkgPath] = dynstate.FactOf(hasher.SelectionAudited(), pkg)
-		}
-		store := map[string]map[string]json.RawMessage{}
-		for _, node := range missing {
-			fact, ok := derived[node.PkgPath]
-			if !ok {
-				return nil, fmt.Errorf("gofresh: dynamic-state scan did not load pinned package %s", node.PkgPath)
-			}
-			record(node.ImportPath, node.PkgPath, fact)
-			if factScope == "" || unkeyable[node.Pin] {
-				continue
-			}
-			bucket := buckets[node.Pin]
-			processFactCache.Store(factScope+"\x00"+bucket+"\x00"+node.PkgPath, fact)
-			if raw, err := json.Marshal(fact); err == nil {
-				if store[bucket] == nil {
-					store[bucket] = map[string]json.RawMessage{}
-				}
-				store[bucket][node.PkgPath] = raw
-			}
-		}
-		for bucket, facts := range store {
-			storeDynamicStateFacts(factScope, bucket, facts)
-		}
-	}
-
-	for _, viewPackage := range viewPackages {
-		coneMeta, coneFacts := dynstate.Cone(meta, nodesByListing, factsByListing, viewPackage)
-		if extra := extraVariantFacts[viewPackage]; len(extra) > 0 {
-			seenExtra := map[string]bool{}
-			for _, node := range coneMeta {
-				seenExtra[node.PkgPath] = true
-			}
-			for _, pkg := range extra {
-				coneFacts[pkg.PkgPath] = append(coneFacts[pkg.PkgPath], dynstate.FactOf(hasher.SelectionAudited(), pkg))
-				if !seenExtra[pkg.PkgPath] {
-					seenExtra[pkg.PkgPath] = true
-					coneMeta = append(coneMeta, closure.GraphPackage{
-						ImportPath: pkg.PkgPath,
-						PkgPath:    pkg.PkgPath,
-						ForTest:    pkg.ForTest,
-						Class:      closure.MutableLocalPackage,
-					})
-				}
-			}
-		}
-		drifted := allViewPackagesDrifted || driftedForTest[viewPackage]
-		if !drifted {
-			for _, node := range coneMeta {
-				if driftedListings[node.ImportPath] {
-					drifted = true
-					break
-				}
-			}
-		}
-		if drifted {
-			if state.drifted == nil {
-				state.drifted = map[string]bool{}
-			}
-			state.drifted[viewPackage] = true
-		}
-		state.cones[viewPackage] = coneFacts
-		composed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
-		if composed.Downgraded != "" {
-			state.downgraded[viewPackage] = composed.Downgraded
-			state.culprits[viewPackage] = Subject{Package: composed.CulpritPkg, Symbol: composed.CulpritSym}
-		}
-		if composed.VouchDischarges != "" {
-			if state.vouchDischarges == nil {
-				state.vouchDischarges = map[string]string{}
-			}
-			state.vouchDischarges[viewPackage] = composed.VouchDischarges
-		}
-		if composed.AttestationDischarges != "" {
-			if state.attestationDischarges == nil {
-				state.attestationDischarges = map[string]string{}
-			}
-			state.attestationDischarges[viewPackage] = composed.AttestationDischarges
-		}
-		if len(composed.RootCulprits) > 0 {
-			if state.rootCulprits == nil {
-				state.rootCulprits = map[string][]dynstate.Culprit{}
-				state.culpritSites = map[string]map[string]dynstate.CulpritSiteSet{}
-			}
-			state.rootCulprits[viewPackage] = composed.RootCulprits
-			state.culpritSites[viewPackage] = composed.CulpritSites
-		}
-	}
-	return state, nil
 }

@@ -130,7 +130,7 @@ func (f Fingerprint) recognizedApplicability() bool {
 	return a == (InertTestVariantApplicability{}) || (a.Strategy == InertTestVariantExtension && a.TestVariantClosure != "" && f.TestVariantClosure != "")
 }
 
-func validKind(kind Kind) bool { return kind == CodeResult || kind == Measurement }
+func validKind(kind Kind) bool { return guard.ValidKind(kind) }
 
 func validateRecordedKind(recorded Fingerprint) error {
 	if !validKind(recorded.ResultKind) {
@@ -138,6 +138,18 @@ func validateRecordedKind(recorded Fingerprint) error {
 	}
 	if recorded.ResultKind == CodeResult && (recorded.Guards.Machine != "" || recorded.Guards.RuntimeConfig != "") {
 		return errors.New("gofresh: code-result fingerprint carries measurement guards")
+	}
+	if recorded.ResultKind == SourceResult {
+		if recorded.Guards.Machine != "" || recorded.Guards.RuntimeConfig != "" {
+			return errors.New("gofresh: source-result fingerprint carries measurement guards")
+		}
+		if recorded.RuntimeInputs != "" || recorded.RuntimeDigest != "" ||
+			recorded.ObservationAssertion != "" || recorded.ObservationProof != (ObservationProof{}) ||
+			recorded.PurityAssertion != "" || recorded.DynamicStateVouches != "" ||
+			recorded.SingleSubjectDischarges != "" || recorded.PackageProcessDischarges != "" ||
+			recorded.DynamicStateStrategy != "" {
+			return errors.New("gofresh: source-result fingerprint carries runtime or dynamic-state fields")
+		}
 	}
 	return nil
 }

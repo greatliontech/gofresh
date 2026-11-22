@@ -154,6 +154,11 @@ func (f *pathFacts) seal(h hash.Hash) {
 // non-excluded listing absence. Followed-object stats supply no namespace claim.
 // Conflicts within an endpoint are retained too.
 func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusions []pathID) (int, error) {
+	idx, _, err := movedBracketRootWithPaths(ctx, "", before, after, exclusions)
+	return idx, err
+}
+
+func movedBracketRootWithPaths(ctx context.Context, moduleDir string, before, after []bracketRoot, exclusions []pathID) (int, []string, error) {
 	type scalarObservation struct {
 		root  int
 		value string
@@ -170,21 +175,22 @@ func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusio
 	listings := map[string][]listingObservation{}
 	presences := map[string][]presenceObservation{}
 	moved := make([]bool, len(before))
+	movedRawPaths := map[string]bool{}
 	for _, roots := range [][]bracketRoot{before, after} {
 		for i, root := range roots {
 			if err := ctx.Err(); err != nil {
-				return -1, err
+				return -1, nil, err
 			}
 			if root.facts == nil {
 				continue
 			}
 			for key, observed := range root.facts.values {
 				if err := ctx.Err(); err != nil {
-					return -1, err
+					return -1, nil, err
 				}
 				for _, value := range observed {
 					if err := ctx.Err(); err != nil {
-						return -1, err
+						return -1, nil, err
 					}
 					values[key] = append(values[key], scalarObservation{i, value})
 					if key.kind == namespaceFact && value != "missing" {
@@ -197,13 +203,13 @@ func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusio
 			}
 			for directory, observed := range root.facts.listings {
 				if err := ctx.Err(); err != nil {
-					return -1, err
+					return -1, nil, err
 				}
 				for _, listing := range observed {
 					listings[directory] = append(listings[directory], listingObservation{i, listing})
 					for _, name := range listing.names {
 						if err := ctx.Err(); err != nil {
-							return -1, err
+							return -1, nil, err
 						}
 						presences[directory] = append(presences[directory], presenceObservation{i, name})
 					}
@@ -211,23 +217,26 @@ func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusio
 			}
 		}
 	}
-	for _, observations := range values {
+	for key, observations := range values {
 		if err := ctx.Err(); err != nil {
-			return -1, err
+			return -1, nil, err
 		}
 		conflict := false
 		for _, observed := range observations {
 			if err := ctx.Err(); err != nil {
-				return -1, err
+				return -1, nil, err
 			}
 			if observed.value != observations[0].value {
 				conflict = true
 			}
 		}
 		if conflict {
+			if key.path != "" {
+				movedRawPaths[key.path] = true
+			}
 			for _, observed := range observations {
 				if err := ctx.Err(); err != nil {
-					return -1, err
+					return -1, nil, err
 				}
 				moved[observed.root] = true
 			}
@@ -238,28 +247,30 @@ func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusio
 		// coexist with its present dangling link and is a different fact.
 		for _, presence := range names {
 			if err := ctx.Err(); err != nil {
-				return -1, err
+				return -1, nil, err
 			}
-			key := pathFact{filepath.Join(directory, presence.name), namespaceFact}
+			joined := filepath.Join(directory, presence.name)
+			key := pathFact{joined, namespaceFact}
 			for _, absence := range values[key] {
 				if err := ctx.Err(); err != nil {
-					return -1, err
+					return -1, nil, err
 				}
 				if absence.value == "missing" {
 					moved[absence.root], moved[presence.root] = true, true
+					movedRawPaths[joined] = true
 				}
 			}
 		}
 		for _, absence := range listings[directory] {
 			if err := ctx.Err(); err != nil {
-				return -1, err
+				return -1, nil, err
 			}
 			if !absence.listing.complete {
 				continue
 			}
 			for _, presence := range names {
 				if err := ctx.Err(); err != nil {
-					return -1, err
+					return -1, nil, err
 				}
 				if _, found := slices.BinarySearch(absence.listing.names, presence.name); found {
 					continue
@@ -269,14 +280,40 @@ func movedBracketRoot(ctx context.Context, before, after []bracketRoot, exclusio
 					continue
 				}
 				moved[absence.root], moved[presence.root] = true, true
+				movedRawPaths[filepath.Join(directory, presence.name)] = true
 			}
 		}
 	}
 	// Canonical root order, rather than map iteration order, chooses attribution.
+	firstMoved := -1
 	for i, conflict := range moved {
 		if conflict {
-			return i, nil
+			firstMoved = i
+			break
 		}
 	}
-	return -1, ctx.Err()
+	if firstMoved < 0 {
+		return -1, nil, ctx.Err()
+	}
+	var formatted []string
+	if moduleDir != "" {
+		moduleRoot := resolveModuleRoot(moduleDir)
+		seen := make(map[string]bool, len(movedRawPaths))
+		for raw := range movedRawPaths {
+			label := "path " + raw
+			if rel, ok := relUnder(moduleDir, raw); ok {
+				label = "path " + filepath.ToSlash(rel)
+			} else if moduleRoot != "" && moduleRoot != moduleDir {
+				if rel, ok := relUnder(moduleRoot, raw); ok {
+					label = "path " + filepath.ToSlash(rel)
+				}
+			}
+			if !seen[label] {
+				seen[label] = true
+				formatted = append(formatted, label)
+			}
+		}
+		sort.Strings(formatted)
+	}
+	return firstMoved, formatted, ctx.Err()
 }

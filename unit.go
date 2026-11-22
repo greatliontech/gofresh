@@ -36,6 +36,7 @@ type ProcessDescription struct {
 	Capture           string
 	BracketPaths      []string
 	ExcludedPaths     []string
+	ExcludedEnv       []string
 	ScratchRoot       string
 	ScratchNamespaces []ScratchNamespace
 }
@@ -161,22 +162,42 @@ func (s *RuntimeBinding) BeginPackage(subjects []Subject) (*Unit, error) {
 	return s.begin(subjects, false)
 }
 
+func validateUnitView(v *Snapshot) error {
+	if v.kind == SourceResult {
+		return errors.New("gofresh: source-result snapshot cannot produce execution units")
+	}
+	if len(v.packages) != 1 {
+		return errors.New("gofresh: a producing execution must belong to one package")
+	}
+	for _, subject := range v.subjects {
+		if v.facts.maximal[subject].staticDecl {
+			if trace.AnyEnabled() {
+				trace.Emit(nil, trace.DomainSession, "unit.begin.refused", subject.Package+"."+subject.Symbol,
+					trace.String("reason", "non_callable_declaration"),
+				)
+			}
+			return fmt.Errorf("gofresh: non-callable declaration %s.%s cannot be executed", subject.Package, subject.Symbol)
+		}
+	}
+	if len(v.subjects) > 1 && v.effectiveExecutionModel().singleSubject() {
+		return errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
+	}
+	return nil
+}
+
 func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*Unit, error) {
 	v, err := s.newView(subjects)
 	if err != nil {
 		return nil, err
 	}
-	if len(v.packages) != 1 {
-		return nil, errors.New("gofresh: a producing execution must belong to one package")
-	}
-	if len(v.subjects) > 1 && v.session.executionModel.singleSubject() {
-		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
+	if err := validateUnitView(v); err != nil {
+		return nil, err
 	}
 	return &Unit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil
 }
 
 // Register prepares the complete producing obligation before execution. Build
-// must belong to the same snapshot and package. Expensive preparation holds no
+// must belong to the same snapshot generation and package. Expensive preparation holds no
 // unit mutex: concurrent close freezes the roster and cancels that preparation.
 func (u *Unit) Register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
 	if ctx == nil {
@@ -188,7 +209,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	if u == nil || u.snapshot == nil {
 		return Contribution{}, errors.New("gofresh: uninitialized unit")
 	}
-	if build.snapshot != u.snapshot || build.pkg != u.view.subjects[0].Package || build.identity == "" {
+	if build.snapshot == nil || build.snapshot != rootSnapshotGeneration(u.snapshot) || build.pkg != u.view.subjects[0].Package || build.identity == "" {
 		return Contribution{}, errors.New("gofresh: built artifact belongs to another snapshot or package")
 	}
 	dir := u.view.runtime.dir
@@ -200,7 +221,14 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 		}
 	}
 	process.BracketPaths, process.ExcludedPaths = slices.Clone(process.BracketPaths), slices.Clone(process.ExcludedPaths)
+	process.ExcludedEnv = slices.Clone(process.ExcludedEnv)
 	process.ScratchNamespaces = slices.Clone(process.ScratchNamespaces)
+	if err := runtimeinput.ValidateBracketOptions(process.BracketPaths, process.ExcludedPaths); err != nil {
+		return Contribution{}, err
+	}
+	if err := runtimeinput.ValidateExcludedEnv(process.ExcludedEnv); err != nil {
+		return Contribution{}, err
+	}
 	for _, namespace := range process.ScratchNamespaces {
 		if err := runtimeinput.ValidateScratchNamespace(namespace.Dir, namespace.Pattern); err != nil {
 			return Contribution{}, err
@@ -227,21 +255,37 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	}
 	u.execution = x
 	u.mu.Unlock()
-	frame := runtimeinput.CaptureProducerFrame(preparing, sess.evidenceRootFor(sess.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
-	var support runtimeinput.OutcomeSupport
-	var trackedChdir runtimeinput.TrackedChdirSupport
+
 	fingerprints, err := u.view.CaptureBatch(preparing)
 	observed := make(map[Subject]bool)
 	if err == nil && !u.identityOnly {
 		// Selection uses the ordinary evidence ladder over this immutable
 		// snapshot, not a second set of purity or closure admission rules.
+		u.view.mu.RLock()
 		for _, subject := range u.view.subjects {
-			fp := fingerprints[subject]
-			if decide(fp, u.view.facts.closure(subject), u.view.guards(), runtimeinput.State{}, u.view.kind, u.view.purityMatches(fp, subject)).Status != Valid {
+			if u.view.subjectNeedsObservationLocked(subject, fingerprints[subject]) {
 				observed[subject] = true
 			}
 		}
+		u.view.mu.RUnlock()
 	}
+	needObservationPrep := len(observed) != 0 || u.identityOnly || process.Capture != ""
+	var frame runtimeinput.ProducerFrame
+	if err == nil {
+		root := sess.evidenceRootFor(sess.dir)
+		if needObservationPrep {
+			frame = runtimeinput.CaptureProducerFrame(preparing, root, dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
+		} else {
+			frame = runtimeinput.ResolveProducerFrame(root, dir)
+			if trace.Enabled(preparing, trace.DomainSession, process.Identity) {
+				trace.Emit(preparing, trace.DomainSession, "unit.register.pure_fastpath", process.Identity,
+					trace.Int("subjects", len(u.view.subjects)),
+				)
+			}
+		}
+	}
+	var support runtimeinput.OutcomeSupport
+	var trackedChdir runtimeinput.TrackedChdirSupport
 	if err == nil && len(observed) != 0 {
 		// Even a source-supported or asserted-pure contributor can affect an
 		// observing sibling's environment. Preserve the entire process roster
@@ -254,7 +298,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 			}
 		}
 	}
-	if err == nil && (len(observed) != 0 || u.identityOnly || process.Capture != "") {
+	if err == nil && needObservationPrep {
 		trackedChdir, err = u.view.prepareTrackedChdirSupport(preparing, frame, build.pkg)
 	}
 	if preparing.Err() != nil {
@@ -483,7 +527,7 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 			return Finalized{}, err
 		}
 		s := u.snapshot.session
-		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, TrackedChdir: x.trackedChdir, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
+		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, TrackedChdir: x.trackedChdir, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ExcludedEnv: x.process.ExcludedEnv, ScratchNamespaces: x.process.ScratchNamespaces}
 		var observationReason string
 		if x.outcomeReason == "" {
 			observation, observationReason, err = x.frame.Observe(ctx, x.process.Capture, in)
@@ -518,7 +562,10 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 	// Source/view drift retains its established precedence. A missing optional
 	// proof cannot obscure demonstrated runtime movement or authorize reuse.
 	if observation.BracketMoved {
-		return Finalized{}, &RuntimeInputSpanError{Reason: observation.Reason}
+		return Finalized{}, &RuntimeInputSpanError{
+			Reason:      observation.Reason,
+			MovedInputs: slices.Clone(observation.MovedInputs),
+		}
 	}
 	if validationErr != nil {
 		return Finalized{}, validationErr
@@ -548,7 +595,8 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 // runtime-input movement. The unit's Account retains the observation and terminal
 // facts, but no reusable evidence escapes. Purity cannot discharge this failure.
 type RuntimeInputSpanError struct {
-	Reason string
+	Reason      string
+	MovedInputs []string
 }
 
 func (e *RuntimeInputSpanError) Error() string {

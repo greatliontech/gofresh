@@ -89,6 +89,33 @@ type FrameOptions struct {
 	ExcludedPaths []string
 }
 
+// ResolveProducerFrame resolves symlinked root and package-directory execution
+// coordinates and allocates a unique execution span without walking the
+// filesystem to capture an observation bracket. Pure units with omitted capture
+// use this lightweight frame so normal completion pays zero directory-walk cost
+// while abnormal completion still synthesizes canonical incomplete evidence.
+func ResolveProducerFrame(treeRoot, pkgDir string) ProducerFrame {
+	root, err := filepath.EvalSymlinks(treeRoot)
+	if err != nil {
+		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
+	}
+	resolvedPkgDir, err := filepath.EvalSymlinks(pkgDir)
+	if err != nil {
+		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
+	}
+	rel, ok := relUnder(root, resolvedPkgDir)
+	if !ok {
+		return ProducerFrame{reason: fmt.Sprintf("package directory %s lies outside the tree; no observation bracket can cover it", pkgDir)}
+	}
+	return ProducerFrame{
+		Root:   root,
+		PkgDir: resolvedPkgDir,
+		PkgRel: filepath.ToSlash(rel),
+		reason: "no observation bracket was captured",
+		span:   new(outcome.Span),
+	}
+}
+
 // CaptureProducerFrame captures the pre-spawn frame every producer
 // shares: both directories symlink-resolved before the containment
 // check and before framing (go list reports resolved directories, so a
@@ -158,6 +185,7 @@ type ProducerIngest struct {
 	// listing, so its identity moves under unrelated tooling) and the
 	// VCS tree ".git" - with the producer's tool-bookkeeping surfaces.
 	ExcludedPaths     []string
+	ExcludedEnv       []string
 	ScratchNamespaces []ScratchNamespace
 }
 
@@ -494,7 +522,7 @@ func (f ProducerFrame) captureStream(ctx context.Context, br *bufio.Reader, in P
 			cfg.requireEnvOnly = requireOutcomes
 		},
 	}
-	opts = append(opts, producerClassificationOptions(roots, f.Root, in.ScratchRoot, in.ExcludedPaths, in.ScratchNamespaces)...)
+	opts = append(opts, producerClassificationOptionsWithEnv(roots, f.Root, in.ScratchRoot, in.ExcludedPaths, in.ExcludedEnv, in.ScratchNamespaces)...)
 	observation, err := fromTestLogStream(ctx, br, f.Root, f.PkgDir, normalized, opts...)
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
@@ -515,7 +543,14 @@ func (f ProducerFrame) captureStream(ctx context.Context, br *bufio.Reader, in P
 // producerClassificationOptions is the single assembly of the facade's implicit
 // roots and caller declarations. Preflight and ingest read the same policy.
 func producerClassificationOptions(roots resolvedRoots, treeRoot, scratchRoot string, excluded []string, namespaces []ScratchNamespace) []TestLogOption {
+	return producerClassificationOptionsWithEnv(roots, treeRoot, scratchRoot, excluded, nil, namespaces)
+}
+
+func producerClassificationOptionsWithEnv(roots resolvedRoots, treeRoot, scratchRoot string, excluded, excludedEnv []string, namespaces []ScratchNamespace) []TestLogOption {
 	opts := []TestLogOption{WithExcludedPaths(append([]string{".", ".git"}, excluded...)...)}
+	if len(excludedEnv) > 0 {
+		opts = append(opts, WithExcludedEnv(excludedEnv...))
+	}
 	if roots.toolchain != "" {
 		opts = append(opts, withToolchainRoot(roots.toolchain))
 	}

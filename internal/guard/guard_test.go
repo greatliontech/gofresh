@@ -673,3 +673,37 @@ func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string
 	}
 	return buildConfigDigestFromValues(func(k string) string { return env[k] }, processEnv, buildInputs), nil
 }
+
+func TestSourceResultGuardCaptureAndCompare(t *testing.T) {
+	if !ValidKind(SourceResult) || !ValidKind(CodeResult) || !ValidKind(Measurement) || ValidKind(0) || ValidKind(99) {
+		t.Fatalf("ValidKind classification unexpected")
+	}
+	// SourceResult skips machine/runtime probes just like CodeResult.
+	g, err := captureFor(context.Background(), gotool.NewEnvReader(gotool.Runner{}, t.TempDir(), os.Environ()), SourceResult, []string{"classifier=v1"},
+		func() (MachineFacts, error) {
+			t.Fatal("SourceResult capture must not probe machine facts")
+			return MachineFacts{}, nil
+		},
+		func() string {
+			t.Fatal("SourceResult capture must not compute runtime config")
+			return ""
+		},
+	)
+	if err != nil {
+		t.Fatalf("SourceResult captureFor: %v", err)
+	}
+	if g.Toolchain == "" || g.BuildConfig == "" || g.Machine != "" || g.RuntimeConfig != "" {
+		t.Fatalf("SourceResult guards = %+v, want code guards only", g)
+	}
+	rt, err := CaptureRuntime(context.Background(), os.Environ(), SourceResult)
+	if err != nil || rt != (RuntimeGuards{}) {
+		t.Fatalf("CaptureRuntime(SourceResult) = (%+v, %v), want empty RuntimeGuards", rt, err)
+	}
+	cur := Guards{Toolchain: g.Toolchain, BuildConfig: g.BuildConfig, Machine: "changed-machine", RuntimeConfig: "changed-rc"}
+	if m := CompareFacts(g, cur, SourceResult); m != (Mismatch{}) {
+		t.Fatalf("CompareFacts(SourceResult) with drifted measurement fields = %+v, want agreement", m)
+	}
+	if m := CompareFacts(g, Guards{Toolchain: "other", BuildConfig: g.BuildConfig}, SourceResult); m != (Mismatch{Axis: ToolchainAxis}) {
+		t.Fatalf("CompareFacts(SourceResult) with toolchain drift = %+v, want ToolchainAxis", m)
+	}
+}

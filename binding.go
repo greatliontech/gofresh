@@ -153,6 +153,13 @@ type BuildBinding struct {
 	identity string
 }
 
+func rootSnapshotGeneration(s *Snapshot) *Snapshot {
+	if s != nil && s.parent != nil {
+		return s.parent
+	}
+	return s
+}
+
 // BindBuilt binds the executor's nonempty artifact identity to this snapshot.
 // The executor keeps the artifact and its dependencies protected through use.
 func (s *Snapshot) BindBuilt(pkg, identity string) (BuildBinding, error) {
@@ -162,7 +169,38 @@ func (s *Snapshot) BindBuilt(pkg, identity string) (BuildBinding, error) {
 	if identity == "" {
 		return BuildBinding{}, errors.New("gofresh: empty built-artifact identity")
 	}
-	return BuildBinding{snapshot: s, pkg: pkg, identity: identity}, nil
+	return BuildBinding{snapshot: rootSnapshotGeneration(s), pkg: pkg, identity: identity}, nil
+}
+
+func (v *Snapshot) subjectNeedsObservationLocked(subject Subject, fp Fingerprint) bool {
+	return decide(fp, v.facts.closure(subject), v.guards(), runtimeinput.State{}, v.kind, v.purityMatches(fp, subject)).Status != Valid
+}
+
+// NeedsObservation reports whether preparing an ordinary producing Unit for
+// subjects under this runtime binding requires runtime observation capture
+// (-test.testlogfile). It applies the exact preparation checks of BeginPackage
+// (refusing empty, unknown, cross-package, source-result, or non-callable
+// declaration subjects, as well as multi-subject sets under
+// SingleSubjectExecution) and evaluates the ordinary evidence ladder without
+// walking directories or spawning processes.
+func (b *RuntimeBinding) NeedsObservation(subjects []Subject) (bool, error) {
+	v, err := b.newView(subjects)
+	if err != nil {
+		return false, err
+	}
+	if err := validateUnitView(v); err != nil {
+		return false, err
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	for _, subject := range v.subjects {
+		cl := v.facts.closure(subject)
+		fp := v.fingerprintLocked(subject, cl)
+		if v.subjectNeedsObservationLocked(subject, fp) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Check automatically selects admissible established native evidence and closes
@@ -245,7 +283,7 @@ func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput
 	}
 	var subjects []string
 	reason := ""
-	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
+	singleSubject := v.effectiveExecutionModel().singleSubject()
 	for _, subject := range v.subjects {
 		proof := v.observable[subject]
 		if (proof.OutcomeMethod != outcome.Method || (proof.RequiresSingleSubject && !singleSubject)) && reason == "" {

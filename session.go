@@ -45,8 +45,9 @@ import (
 type Kind = guard.Kind
 
 const (
-	CodeResult  = guard.CodeResult
-	Measurement = guard.Measurement
+	CodeResult   = guard.CodeResult
+	Measurement  = guard.Measurement
+	SourceResult = guard.SourceResult
 )
 
 // Guards holds the environment guard digests for a fingerprint.
@@ -147,7 +148,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@99"
+const DynamicStateStrategy = "gofresh/dynamic-state@101"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

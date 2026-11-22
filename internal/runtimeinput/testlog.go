@@ -23,8 +23,9 @@ import (
 type TestLogOption func(*testLogConfig)
 
 type testLogConfig struct {
-	excluded   []pathID
-	guardRoots []guardRootDecl
+	excluded    []pathID
+	excludedEnv []string
+	guardRoots  []guardRootDecl
 	// ephemeralRoots are declared temp roots whose own identity records
 	// nothing (REQ-inputs-ephemeral-root).
 	ephemeralRoots []string
@@ -181,7 +182,8 @@ func guardRootOption(root, excludeSub string) TestLogOption {
 // excluding both the subtree and every recorded ancestor listing whose
 // digest observes it. Patterns that can name no identity — a relative
 // path escaping the module, an absolute path inside it — exclude
-// nothing. Environment identities are never excluded.
+// nothing. Environment identities are excluded via WithExcludedEnv,
+// not path patterns.
 func WithExcludedPaths(patterns ...string) TestLogOption {
 	return func(c *testLogConfig) {
 		excluded, err := exclusionPatterns(patterns)
@@ -191,6 +193,45 @@ func WithExcludedPaths(patterns ...string) TestLogOption {
 		}
 		c.excluded = append(c.excluded, excluded...)
 	}
+}
+
+// ValidateExcludedEnv checks caller-declared environment-variable exclusions
+// (REQ-inputs-exclusions): each entry must be a non-empty valid UTF-8 variable
+// name containing no '=', NUL, CR, or LF, and PWD is never excludable.
+func ValidateExcludedEnv(names []string) error {
+	for _, name := range names {
+		if name == "" {
+			return errors.New("runtimeinputs: empty excluded environment variable name")
+		}
+		if !utf8.ValidString(name) || strings.ContainsAny(name, "=\x00\r\n") {
+			return fmt.Errorf("runtimeinputs: invalid excluded environment variable name %q", name)
+		}
+		if gotool.EqualEnvKey(name, "PWD") {
+			return errors.New("runtimeinputs: PWD cannot be excluded from runtime-input observation")
+		}
+	}
+	return nil
+}
+
+// WithExcludedEnv declares environment-variable exclusions for testlog getenv
+// observations (REQ-inputs-exclusions). PWD cannot be excluded.
+func WithExcludedEnv(names ...string) TestLogOption {
+	return func(c *testLogConfig) {
+		if err := ValidateExcludedEnv(names); err != nil {
+			c.err = err
+			return
+		}
+		c.excludedEnv = append(c.excludedEnv, names...)
+	}
+}
+
+func (c *testLogConfig) excludesEnv(name string) bool {
+	for _, excl := range c.excludedEnv {
+		if gotool.EqualEnvKey(excl, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // exclusionPatterns normalizes exclusion patterns to identity form: a non-empty
@@ -583,7 +624,7 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 				continue
 			}
 			nameCheck := string(nameBytes)
-			if gotool.IsTraceEnvKey(nameCheck) {
+			if gotool.IsTraceEnvKey(nameCheck) || cfg.excludesEnv(nameCheck) {
 				continue
 			}
 			if gotool.EqualEnvKey(nameCheck, "PWD") {
@@ -730,7 +771,7 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 	// The bracket is revalidated strictly after the manifest digest's last
 	// input read (REQ-inputs-value-binding). Demonstrated movement is retained
 	// separately from unknown binding, so purity cannot waive a failed guard.
-	unchanged, moved, reason, err := cfg.bracket.revalidate(ctx, moduleDir)
+	unchanged, moved, bracketMovers, reason, err := cfg.bracket.revalidateWithMovers(ctx, moduleDir)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -767,6 +808,9 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 	// first clause of the sorted manifest; a reason the hashing pass
 	// raised carries its own attribution, in the reason itself.
 	observation.Attribution = attributions[st.Reason]
+	if moved {
+		observation.MovedInputs = bracketMovers
+	}
 	if traced {
 		trace.Emit(ctx, trace.DomainRuntimeInput, "testlog.extract.done", packageDir,
 			trace.Bool("unverifiable", observation.State.Unverifiable),

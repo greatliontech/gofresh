@@ -127,6 +127,11 @@ func WithExcludedPaths(patterns ...string) TestLogOption {
 	return runtimeinput.WithExcludedPaths(patterns...)
 }
 
+// WithExcludedEnv excludes non-PWD environment variable names from FromTestLog ingestion.
+func WithExcludedEnv(names ...string) TestLogOption {
+	return runtimeinput.WithExcludedEnv(names...)
+}
+
 // WithScratchNamespace declares a scratch namespace for FromTestLog ingestion.
 func WithScratchNamespace(dir, pattern string) TestLogOption {
 	return runtimeinput.WithScratchNamespace(dir, pattern)
