@@ -85,3 +85,13 @@ Deliver the unified consumer-boundary capabilities on `gofresh` so `stipulator`,
    - Add coverage for all `SourceResult` cause/condition branches and `SourceResult` inert extension, cover `PackageProcessDischarges` (`0..10`), assert `goSpawns` stability and `UnknownObservation` on pure `Unit`, and strengthen `FuzzValidateExcludedEnvAndSourceFingerprint` + add regression tests for Findings 1–5.
 7. **[NIT] Duplicate pre-execution observation-selection predicate (`binding.go`, `unit.go`)** — **Confirmed, introduced -> Fixed**:
    - Extract `(*Snapshot).subjectNeedsObservationLocked` and call it from both `NeedsObservation` and `Unit.Register`.
+
+## Adversarial Review Round 2 Dispositions (`dc7b8a3e-43a2-4d9f-a797-7c2042c5f9e6`)
+1. **[HIGH] `FuzzValidateExcludedEnvAndSourceFingerprint` fails on `"pwd"` on Linux (`consumer_capabilities_test.go:1186`)** — **Confirmed, introduced -> Fixed**:
+   - Align the fuzz error oracle with `gotool.EqualEnvKey(cand, "PWD")` (case-sensitive on Unix, case-insensitive on Windows) and verify `-run '^FuzzValidateExcludedEnvAndSourceFingerprint$'`.
+2. **[HIGH] `CodeResult` admits `StaticDecl: true` when an imported package in the cone has `pkg.Errors` (`view.go:316-320, 1216`)** — **Confirmed, introduced -> Fixed**:
+   - Refuse `CodeResult` / `Measurement` snapshots when `(!known[s] || scan.staticDecl[s]) && scan.loadErr[s.Package] != ""`, and guard `subjectFacts.closure()` (`if (f.sourceOnly || f.staticDecl) && c.Hash != ""`) so unavailable `MaximalFacts` (`c.Hash == ""`) never clears `Unverifiable`.
+3. **[MEDIUM] `TestWithExecutionSecondaryModelCutAndStageADischargePreservation` cut Pass 1 too and left `pool` attributed (`consumer_capabilities_test.go:1089-1169`)** — **Confirmed, introduced -> Fixed**:
+   - Touch `pool` inside `func init()` so `pool` is `Unattributed` under `PackageExecution` (`pkgDowngraded` empty -> `base.cut` and `current.cut` stay `false`) while `SingleSubjectExecution` Stage-A discharges `pool` and puts `TestPureCalc` into `soloDowngraded`, use deterministic `viewTestHookSet.analysisBound` (`time.Minute` on Pass 1, already-expired deadline on Pass >= 2, zero `time.Sleep`), and verify via `gomutant ephemeral` that deleting `execution_projection.go:175-177` is killed.
+4. **[LOW] `recvTypeCanResolveMember` in `testvariant.InertForSubject` enqueued `method` declarations (`internal/testvariant/testvariant.go:500-512`)** — **Confirmed, introduced -> Fixed**:
+   - Match `other.Kind == "method"` by its own method name (`other.Name == name`) and enqueue only `other.Kind == "type"` declarations for transitive `References` / embedded-type traversal.
