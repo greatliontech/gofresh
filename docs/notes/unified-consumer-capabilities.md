@@ -51,3 +51,37 @@ Deliver the unified consumer-boundary capabilities on `gofresh` so `stipulator`,
   - `Verdict` remains `==` value-comparable (`judgment.go`).
   - `recordResult` retains `movedInputs []string` captured directly from the deciding `runtimeEndpoint` (`before` or `after`) during `checkRecordsWithEndpoints` and `CheckingUnit.closeSlots` (preserving movers across ABA revert intervals without post-window TOCTOU filesystem re-reads, uncapped and cloned for caller ownership).
   - `RuntimeInputSpanError` populates `MovedInputs` from the bracket revalidation attribution on `BracketMoved`.
+
+## Verification Evidence
+- **Dual-Toolchain Full Race Suites**:
+  - `godst` (`go1.27.4-dst.17`): `go test -short -race -failfast ./...` — PASS across all 26 packages (`0` failures).
+  - Vanilla Go (`go1.27.4`): `go test -short -race -failfast ./...` — PASS across all 26 packages (`0` failures).
+- **Targeted `gomutant ephemeral` Probes (`7 / 7` Killed, `0` Survivors)**:
+  - `internal/testvariant/testvariant.go` (`decl.Kind == "type" && decl.Name == recv` reachability) -> killed by `TestInertForSubjectCoversStructFieldsAndInterfaceMethods`.
+  - `internal/runtimeinput/testlog.go` (`ValidateExcludedEnv` `PWD` non-excludability) -> killed by `TestExcludedEnvValidationAndElision`.
+  - `fingerprint.go` (`SourceResult` measurement-guard refusal) -> killed by `TestFingerprintRecordRefusals`.
+  - `execution_projection.go` (`WithExecution` unprojected-model refusal) -> killed by `TestWithExecutionProjectionEquivalenceAndZeroSpawns`.
+  - `execution_projection.go` (`checkStaticDeclsForMeasurement` non-callable refusal) -> killed by `TestStaticDeclarationSubjectsAndSourceResultMatrix`.
+  - `binding.go` (`NeedsObservation` evidence-ladder evaluation) -> killed by `TestZeroOverheadPureUnitNeedsObservationExcludedEnvAndMovedInputs`.
+  - `unit.go` (`needObservationPrep` zero-overhead pure `Unit` fastpath) -> killed by `TestZeroOverheadPureUnitNeedsObservationExcludedEnvAndMovedInputs`.
+  - `checking.go` (`closeSlots` ABA `MovedInputs` preservation) -> killed by `TestZeroOverheadPureUnitNeedsObservationExcludedEnvAndMovedInputs`.
+- **Static `stipulator` Verification**:
+  - `stipulator compile`: `ok: 7 documents, 168 requirements, 35 terms, 3 notes, 46 annotations, 497 edges`.
+  - `stipulator verify --no-test --view bindings`: `965 / 965` rows `current` and `resolved` (`0` stale, rehash-pending, unpinned, moved, or unresolved rows).
+
+## Adversarial Review Round 1 Dispositions (`dc7b8a3e-43a2-4d9f-a797-7c2042c5f9e6`)
+1. **[HIGH] Member directive blindspots (`internal/dynstate/directives.go`, `internal/dynstate/facts_codec.go`)** — **Confirmed, introduced -> Fixed**:
+   - Unify AST member-directive scanning via `collectASTMemberDirectives` (resolving embedded struct fields' `*ast.Ident` in `p.TypesInfo.Defs` when `len(fld.Names) == 0`, unwrapping parens, and walking nested struct/interface literals).
+   - Project `localDirs[orig]` across every `TypeName` in `p.Types.Scope()` inside `recordPackageMethodDirectives` (recording both `PureMethods` and `ExternalMethods` so cross-package conflict checks fire too), and resolve foreign `orig` directives in `WalkLoadedSubjects` against `orig.Pkg().Scope()` via `LookupFieldOrMethod(...).Origin() == orig`, covering defined types over foreign types, embedded foreign derived types, generic types, and concrete structs embedding foreign interfaces.
+2. **[HIGH] `SourceResult` scan path omits `pkg.Errors` and `meta` file/import/variant drift checks (`scan.go`, `view.go`)** — **Confirmed, introduced -> Fixed**:
+   - Verify `MutableFactKeys`, `loadedPackageMatchesFiles`, `loadedPackageMatchesImports`, unexpected `ForTest`/module variants, and `pkg.Errors` on `sourceOnly == true` before `storeScanFacts`, refusing `SourceResult` snapshots when a view package cone has `pkg.Errors` and reporting `scan.loadErr[pkg]` ahead of `*UnknownSubjectsError` when a missing subject's package failed to load.
+3. **[MEDIUM] Construction-time `compareObservations` and `takeModelCut` ignore non-primary `modelProjections` and erase Stage-A discharges (`validate.go`, `execution_projection.go`, `view.go`)** — **Confirmed, introduced -> Fixed**:
+   - Compare `hasProjection` and every projected model `m` (`sharedState`, `discharges` modulo `cutM`, and `vouchDischarges`) during construction, adopt per-model cuts independently via `takeModelCutForModel`, and copy `other`'s Stage-A `discharges[subject]` instead of deleting the entry.
+4. **[MEDIUM] `testvariant.InertForSubject` falsely rejects promoted members split across multiple base or `_test.go` files (`internal/testvariant/testvariant.go`)** — **Confirmed, introduced -> Fixed**:
+   - Evaluate base-file rooting at package granularity (`baseRefsByPkg[pkg]` + `basePkgHasImportedRef[pkg]` using `base.Bindings` directly) and compartment `matchedRecvTypes` rooting across reachable package declarations (`reachablePkgHasImportedRef[pkg]`) while keeping nonexistent members on self-contained types fail-closed.
+5. **[LOW] Symlinked `moduleDir` in `movedBracketRootWithPaths` and map-order iteration in `dischargeTestBinaryCulprits` (`internal/runtimeinput/pathfacts.go`, `scan_dynstate.go`)** — **Confirmed, introduced -> Fixed**:
+   - Fall back to `relUnder(resolveModuleRoot(moduleDir), raw)` in `movedBracketRootWithPaths` and sort `soloDowngraded` and `packageSubjects[path]` deterministically by `(Package, Symbol)`.
+6. **[LOW] Missing tests for `AdmissionPolicyCause` / `SourceResult` branches, surviving `PackageProcessDischarges` mutant, write-only `goSpawns`, and incomplete fuzz target (`consumer_capabilities_test.go`, `verdict_algebra_test.go`)** — **Confirmed, introduced -> Fixed**:
+   - Add coverage for all `SourceResult` cause/condition branches and `SourceResult` inert extension, cover `PackageProcessDischarges` (`0..10`), assert `goSpawns` stability and `UnknownObservation` on pure `Unit`, and strengthen `FuzzValidateExcludedEnvAndSourceFingerprint` + add regression tests for Findings 1–5.
+7. **[NIT] Duplicate pre-execution observation-selection predicate (`binding.go`, `unit.go`)** — **Confirmed, introduced -> Fixed**:
+   - Extract `(*Snapshot).subjectNeedsObservationLocked` and call it from both `NeedsObservation` and `Unit.Register`.
