@@ -743,3 +743,267 @@ func TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution(t *testing.
 		t.Errorf("SharedDynamicStateCause culprit %s.%s (e.g. %s)", culprit.Package, culprit.Symbol, sample)
 	}
 }
+
+func TestLeafCaptureGuardsSelectionAndFileEligibility(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/leaf\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package leaf\n\nfunc F() int { return 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rawFile := filepath.Join(dir, "fixture.bin")
+	if err := os.WriteFile(rawFile, []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	excludedFile := filepath.Join(dir, "excluded.bin")
+	if err := os.WriteFile(excludedFile, []byte("skip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	canonDir, err := gotool.CanonicalDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawFile = filepath.Join(canonDir, "fixture.bin")
+	excludedFile = filepath.Join(canonDir, "excluded.bin")
+	buildEnv, err := gotool.EnvForPackages(os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildEnv, err = gotool.EnvForCommand(buildEnv, canonDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildEnv = gotool.SetEnv(buildEnv, "GOGC", "123")
+	snap, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, canonDir, buildEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primed := snap.Values()
+
+	build := BuildDescription{
+		Directory:   canonDir,
+		Environment: buildEnv,
+		Flags:       []string{"-tags=leafguard"},
+		Inputs:      []string{"pgo=sha256:deadbeef"},
+	}
+	runEnv := gotool.SetEnv(buildEnv, "GOMAXPROCS", "3")
+
+	sess, err := NewSession(ctx, build, SessionPolicy{EvidenceRoot: canonDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subj := Subject{Package: "example.com/leaf", Symbol: "F"}
+
+	for _, kind := range []Kind{SourceResult, CodeResult, Measurement} {
+		view, err := sess.Snapshot(ctx, []Subject{subj}, kind)
+		if err != nil {
+			t.Fatalf("Snapshot(%v): %v", kind, err)
+		}
+		binding, err := view.BindRuntime(ctx, RuntimeDescription{Directory: canonDir, Environment: runEnv})
+		if err != nil {
+			t.Fatalf("BindRuntime(%v): %v", kind, err)
+		}
+		fp, err := binding.CurrentFacts(ctx, subj)
+		if err != nil {
+			t.Fatalf("CurrentFacts(%v): %v", kind, err)
+		}
+
+		totalSpawns := 0
+		gotGuards, err := CaptureGuards(ctx, build, primed, runEnv, kind,
+			func(*exec.Cmd) { totalSpawns++ },
+		)
+		if err != nil {
+			t.Fatalf("CaptureGuards(%v): %v", kind, err)
+		}
+		if totalSpawns != 0 {
+			t.Fatalf("CaptureGuards(%v) with primed goEnv spawned %d commands, want 0", kind, totalSpawns)
+		}
+		if gotGuards != fp.Guards {
+			t.Fatalf("CaptureGuards(%v) = %+v, want %+v", kind, gotGuards, fp.Guards)
+		}
+	}
+
+	// Nil goEnv queries `go env` once through composed PrepareCommand hooks;
+	// nil runtimeEnv inherits build's normalized environment (including GOGC=123
+	// under Measurement, matching BindRuntime with nil Environment and differing
+	// from an explicit empty runtimeEnv).
+	hookA, hookB := 0, 0
+	inheritedGuards, err := CaptureGuards(ctx, build, nil, nil, Measurement,
+		func(*exec.Cmd) { hookA++ },
+		func(*exec.Cmd) { hookB++ },
+	)
+	if err != nil || inheritedGuards.BuildConfig == "" || inheritedGuards.Machine == "" || inheritedGuards.RuntimeConfig == "" || hookA != 1 || hookB != 1 {
+		t.Fatalf("CaptureGuards(nil goEnv, nil runtimeEnv, Measurement) = %+v, %v (hooks %d/%d)", inheritedGuards, err, hookA, hookB)
+	}
+	mView, err := sess.Snapshot(ctx, []Subject{subj}, Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mBinding, err := mView.BindRuntime(ctx, RuntimeDescription{Directory: canonDir, Environment: nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mFP, err := mBinding.CurrentFacts(ctx, subj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inheritedGuards != mFP.Guards {
+		t.Fatalf("CaptureGuards(nil runtimeEnv, Measurement) = %+v, want %+v", inheritedGuards, mFP.Guards)
+	}
+	emptyRunGuards, err := CaptureGuards(ctx, build, primed, []string{}, Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if emptyRunGuards.RuntimeConfig == inheritedGuards.RuntimeConfig {
+		t.Fatalf("CaptureGuards([]string{}, Measurement) RuntimeConfig = %q, matched GOGC=123 inherited %q", emptyRunGuards.RuntimeConfig, inheritedGuards.RuntimeConfig)
+	}
+
+	// Symlinked build.Directory canonicalizes identically to Session.
+	symDir := filepath.Join(t.TempDir(), "sym-leaf")
+	if err := os.Symlink(canonDir, symDir); err == nil {
+		symBuild := build
+		symBuild.Directory = symDir
+		symGuards, err := CaptureGuards(ctx, symBuild, nil, runEnv, Measurement)
+		if err != nil {
+			t.Fatalf("CaptureGuards(symlink dir): %v", err)
+		}
+		symSess, err := NewSession(ctx, symBuild, SessionPolicy{EvidenceRoot: symDir})
+		if err != nil {
+			t.Fatalf("NewSession(symlink dir): %v", err)
+		}
+		symSnap, err := symSess.Snapshot(ctx, []Subject{subj}, Measurement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		symBind, err := symSnap.BindRuntime(ctx, RuntimeDescription{Directory: symDir, Environment: runEnv})
+		if err != nil {
+			t.Fatal(err)
+		}
+		symFP, err := symBind.CurrentFacts(ctx, subj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if symGuards != symFP.Guards {
+			t.Fatalf("CaptureGuards(symlink) = %+v, want %+v", symGuards, symFP.Guards)
+		}
+	}
+
+	// CaptureGuards validation and cancellation refusals.
+	if _, err := CaptureGuards(nil, build, primed, nil, CodeResult); err == nil {
+		t.Fatal("CaptureGuards(nil ctx) succeeded")
+	}
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := CaptureGuards(cancelledCtx, build, primed, nil, CodeResult); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CaptureGuards(cancelled) = %v, want context.Canceled", err)
+	}
+	if _, err := CaptureGuards(ctx, build, primed, nil, Kind(99)); err == nil {
+		t.Fatal("CaptureGuards(invalid kind) succeeded")
+	}
+	if _, err := CaptureGuards(ctx, BuildDescription{Directory: canonDir, Environment: buildEnv}, primed, nil, CodeResult); err == nil {
+		t.Fatal("CaptureGuards(nil Inputs) succeeded")
+	}
+	if _, err := CaptureGuards(ctx, build, map[string]string{}, nil, CodeResult); err == nil {
+		t.Fatal("CaptureGuards(empty goEnv) succeeded")
+	}
+	if _, err := CaptureGuards(ctx, build, primed, []string{"MALFORMED"}, CodeResult); err == nil {
+		t.Fatal("CaptureGuards(malformed runtimeEnv) succeeded")
+	}
+
+	// ResolveToolchainSelection reuses primed goEnv with zero `go env` spawns and
+	// does not gate on frontend ToolchainSkew.
+	envSpawns := 0
+	gotSel, err := ResolveToolchainSelection(ctx, build, primed, func(cmd *exec.Cmd) {
+		if len(cmd.Args) > 1 && cmd.Args[1] == "env" {
+			envSpawns++
+		}
+	})
+	if err != nil {
+		t.Fatalf("ResolveToolchainSelection: %v", err)
+	}
+	if envSpawns != 0 {
+		t.Fatalf("ResolveToolchainSelection with primed goEnv spawned %d go env commands, want 0", envSpawns)
+	}
+	wantSel, err := sess.ToolchainSelection(ctx)
+	if err != nil {
+		t.Fatalf("Session.ToolchainSelection: %v", err)
+	}
+	if gotSel != wantSel {
+		t.Fatalf("ResolveToolchainSelection = %+v, want %+v", gotSel, wantSel)
+	}
+	skewedEnv := make(map[string]string, len(primed))
+	for k, v := range primed {
+		skewedEnv[k] = v
+	}
+	skewedEnv["GOVERSION"] = "devel go1.99-custom"
+	if _, err := ResolveToolchainSelection(ctx, build, skewedEnv); err != nil {
+		var provErr *ToolchainProvenanceError
+		if errors.As(err, &provErr) {
+			t.Fatalf("ResolveToolchainSelection gated on ToolchainProvenanceError: %v", err)
+		}
+		t.Fatalf("ResolveToolchainSelection(devel GOVERSION): %v", err)
+	}
+	if _, err := ResolveToolchainSelection(nil, build, primed); err == nil {
+		t.Fatal("ResolveToolchainSelection(nil ctx) succeeded")
+	}
+	if _, err := ResolveToolchainSelection(cancelledCtx, build, primed); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ResolveToolchainSelection(cancelled) = %v, want context.Canceled", err)
+	}
+	if _, err := ResolveToolchainSelection(ctx, build, map[string]string{}); err == nil {
+		t.Fatal("ResolveToolchainSelection(empty goEnv) succeeded")
+	}
+	overlayBuild := build
+	overlayBuild.Flags = []string{"-overlay=overlay.json"}
+	if _, err := ResolveToolchainSelection(ctx, overlayBuild, primed); err == nil {
+		t.Fatal("ResolveToolchainSelection(-overlay) succeeded")
+	}
+	midCancelCtx, midCancel := context.WithCancel(ctx)
+	cancelSess, err := NewSession(ctx, build, SessionPolicy{
+		PrepareCommand: func(*exec.Cmd) { midCancel() },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cancelSess.ToolchainSelection(midCancelCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Session.ToolchainSelection(mid-call cancel) = %v, want context.Canceled", err)
+	}
+
+	// Standalone CheckFileInputEligibility matches Session.CheckFileInputEligibility
+	// and memoizes root probes across calls via FileInputRoots.
+	roots := &FileInputRoots{}
+	rootEnvSpawns := 0
+	opts := FileInputOptions{
+		Env: buildEnv,
+		PrepareCommand: func(cmd *exec.Cmd) {
+			if len(cmd.Args) > 1 && cmd.Args[1] == "env" {
+				rootEnvSpawns++
+			}
+		},
+		Roots:         roots,
+		ExcludedPaths: []string{"excluded.bin"},
+	}
+	for range 3 {
+		reason, err := CheckFileInputEligibility(ctx, canonDir, canonDir, rawFile, opts)
+		if err != nil || reason != "" {
+			t.Fatalf("CheckFileInputEligibility(rawFile) = (%q, %v), want eligible", reason, err)
+		}
+	}
+	if rootEnvSpawns != 1 {
+		t.Fatalf("CheckFileInputEligibility spawned %d go env commands across 3 memoized calls, want 1", rootEnvSpawns)
+	}
+	gotExcl, err := CheckFileInputEligibility(ctx, canonDir, canonDir, excludedFile, opts)
+	if err != nil || gotExcl == "" {
+		t.Fatalf("CheckFileInputEligibility(excludedFile) = (%q, %v), want refusal reason", gotExcl, err)
+	}
+	wantExcl, err := sess.CheckFileInputEligibility(ctx, canonDir, excludedFile, buildEnv, "", "excluded.bin")
+	if err != nil || gotExcl != wantExcl {
+		t.Fatalf("standalone reason = %q, session reason = %q (err=%v)", gotExcl, wantExcl, err)
+	}
+	// Nil Roots resolves unmemoized without error.
+	if reason, err := CheckFileInputEligibility(ctx, canonDir, canonDir, rawFile, FileInputOptions{Env: buildEnv}); err != nil || reason != "" {
+		t.Fatalf("CheckFileInputEligibility(nil Roots) = (%q, %v), want eligible", reason, err)
+	}
+}

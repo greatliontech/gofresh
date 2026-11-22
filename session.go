@@ -263,6 +263,95 @@ func (m *localFactMemo) store(key string, fact dynstate.Fact) {
 	m.entries[key] = fact
 }
 
+func admitBuildDescription(ctx context.Context, build BuildDescription) (buildDir string, buildEnv, flags, inputs []string, err error) {
+	if err := ctx.Err(); err != nil {
+		return "", nil, nil, nil, err
+	}
+	if build.Directory == "" || build.Package != "" {
+		return "", nil, nil, nil, errors.New("gofresh: build description requires a module directory and no pre-selected package")
+	}
+	if build.Environment == nil || build.Inputs == nil {
+		return "", nil, nil, nil, errors.New("gofresh: build description requires a complete build environment and an explicitly present additional-input declaration")
+	}
+	for _, input := range build.Inputs {
+		if strings.HasPrefix(strings.TrimSpace(input), "-") {
+			return "", nil, nil, nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use BuildFlags", input)
+		}
+	}
+	buildDir, err = gotool.CanonicalDir(build.Directory)
+	if err != nil {
+		return "", nil, nil, nil, fmt.Errorf("gofresh: build directory: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, nil, nil, err
+	}
+	buildEnv, err = gotool.EnvForPackages(build.Environment)
+	if err != nil {
+		return "", nil, nil, nil, fmt.Errorf("gofresh: %w", err)
+	}
+	buildEnv, err = gotool.EnvForCommand(buildEnv, buildDir)
+	if err != nil {
+		return "", nil, nil, nil, fmt.Errorf("gofresh: build environment: %w", err)
+	}
+	return buildDir, buildEnv, slices.Clone(build.Flags), append([]string{}, build.Inputs...), nil
+}
+
+// CaptureGuards computes the environment guards applicable to kind for build
+// and runtimeEnv (nil runtimeEnv inherits build's normalized environment)
+// without constructing an AST analysis Session (REQ-guard-explicit-build,
+// REQ-guard-selective-capture). When goEnv is non-nil, it primes the pass's
+// `go env -json` snapshot to avoid a duplicate `go env` subprocess.
+func CaptureGuards(ctx context.Context, build BuildDescription, goEnv map[string]string, runtimeEnv []string, kind Kind, prepare ...func(*exec.Cmd)) (guards Guards, err error) {
+	refreshTraceFromEnv()
+	if ctx == nil {
+		return Guards{}, errors.New("gofresh: nil guard capture context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			guards, err = Guards{}, cause
+		}
+	}()
+	if !validKind(kind) {
+		return Guards{}, fmt.Errorf("gofresh: invalid result kind %d", kind)
+	}
+	buildDir, buildEnv, flags, buildInputs, err := admitBuildDescription(ctx, build)
+	if err != nil {
+		return Guards{}, err
+	}
+	evalRuntimeEnv := buildEnv
+	if runtimeEnv != nil {
+		evalRuntimeEnv, err = gotool.NormalizeEnv(runtimeEnv)
+		if err != nil {
+			return Guards{}, fmt.Errorf("gofresh: runtime environment: %w", err)
+		}
+	}
+	runner := gotool.Runner{Prepare: composePrepare(prepare)}
+	reader, err := gotool.PrimedEnvReaderFromValues(runner, buildDir, buildEnv, goEnv)
+	if err != nil {
+		return Guards{}, fmt.Errorf("gofresh: %w", err)
+	}
+	snapshot, err := reader.Snapshot(ctx)
+	if err != nil {
+		return Guards{}, err
+	}
+	if err := gotool.ValidateBuildFlags(ctx, reader, flags); err != nil {
+		return Guards{}, err
+	}
+	inputs := make([]string, 0, len(flags)+len(buildInputs)+1)
+	for _, flag := range flags {
+		inputs = append(inputs, "flag="+flag)
+	}
+	for _, input := range buildInputs {
+		inputs = append(inputs, "input="+input)
+	}
+	identity, err := guard.CompleteBuildEnvironment(ctx, snapshot, buildDir, buildEnv)
+	if err != nil {
+		return Guards{}, err
+	}
+	inputs = append(inputs, "gofresh/build-description@2="+identity)
+	return guard.Capture(ctx, gotool.PrimedEnvReader(runner, observedGuardDir(reader.Dir), buildEnv, snapshot), evalRuntimeEnv, kind, inputs...)
+}
+
 // NewSession admits a complete compilation description and analysis policy.
 // Snapshots observe source/build generations; BindRuntime separately admits the
 // environment of executions using a retained artifact. Construction honors ctx.
@@ -279,29 +368,12 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if build.Directory == "" || build.Package != "" {
-		return nil, errors.New("gofresh: session requires a build directory; the snapshot selects the package")
-	}
-	if build.Environment == nil || build.Inputs == nil {
-		return nil, errors.New("gofresh: session requires a complete build environment and an explicitly present additional-input declaration")
-	}
 	if policy.Execution > SingleSubjectExecution || policy.AnalysisBudget < 0 {
 		return nil, errors.New("gofresh: invalid session execution model or analysis budget")
 	}
-	buildDir, err := gotool.CanonicalDir(build.Directory)
+	buildDir, buildEnv, flags, inputs, err := admitBuildDescription(ctx, build)
 	if err != nil {
-		return nil, fmt.Errorf("gofresh: build directory: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	buildEnv, err := gotool.EnvForPackages(build.Environment)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: %w", err)
-	}
-	buildEnv, err = gotool.EnvForCommand(buildEnv, buildDir)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: build environment: %w", err)
 	}
 	vouches, err := canonicalSessionVouches(policy.Vouches)
 	if err != nil {
@@ -328,13 +400,6 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 			return nil, fmt.Errorf("gofresh: evidence root %s does not contain the module directory %s; relative identities recorded under it could not name the module's inputs", evidenceRoot, buildDir)
 		}
 	}
-	for _, input := range build.Inputs {
-		if strings.HasPrefix(strings.TrimSpace(input), "-") {
-			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use BuildFlags", input)
-		}
-	}
-	flags := slices.Clone(build.Flags)
-	inputs := append([]string{}, build.Inputs...)
 	owned := BuildDescription{
 		Directory:   buildDir,
 		Environment: slices.Clone(buildEnv),

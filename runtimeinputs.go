@@ -3,7 +3,9 @@ package gofresh
 import (
 	"context"
 	"errors"
+	"os/exec"
 
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
@@ -51,6 +53,52 @@ func ModuleRelRuntimeInputPaths(encoded string) ([]string, error) {
 	return runtimeinput.ModuleRelPaths(encoded)
 }
 
+// FileInputRoots memoizes classification-root snapshots across
+// CheckFileInputEligibility calls within one operation (REQ-inputs-file-eligibility).
+// Its zero value is ready for use; a nil pointer resolves unmemoized.
+type FileInputRoots struct {
+	roots runtimeinput.Roots
+}
+
+// FileInputOptions configures standalone CheckFileInputEligibility queries.
+type FileInputOptions struct {
+	Env            []string
+	PrepareCommand func(*exec.Cmd)
+	Roots          *FileInputRoots
+	ScratchRoot    string
+	ExcludedPaths  []string
+}
+
+func checkFileInputEligibility(ctx context.Context, treeRoot, pkgDir, file string, fc runtimeinput.FileInputContext) (string, error) {
+	refreshTraceFromEnv()
+	res, err := runtimeinput.FileInputEligibility(ctx, treeRoot, pkgDir, file, fc)
+	if err != nil {
+		return "", err
+	}
+	if res.Kind != runtimeinput.RawFileInput {
+		return res.Reason, nil
+	}
+	return "", nil
+}
+
+// CheckFileInputEligibility judges whether file is eligible for raw-byte
+// observation under absolute treeRoot, absolute pkgDir, clean absolute file,
+// and opts (REQ-inputs-file-eligibility). It returns a non-empty reason string
+// when file is not raw-byte eligible.
+func CheckFileInputEligibility(ctx context.Context, treeRoot, pkgDir, file string, opts FileInputOptions) (string, error) {
+	var roots *runtimeinput.Roots
+	if opts.Roots != nil {
+		roots = &opts.Roots.roots
+	}
+	return checkFileInputEligibility(ctx, treeRoot, pkgDir, file, runtimeinput.FileInputContext{
+		Env:           opts.Env,
+		Runner:        gotool.Runner{Prepare: opts.PrepareCommand},
+		Roots:         roots,
+		ScratchRoot:   opts.ScratchRoot,
+		ExcludedPaths: opts.ExcludedPaths,
+	})
+}
+
 // CheckFileInputEligibility judges whether file is eligible for raw-byte
 // observation under the session's evidence root, command preparation hook, and
 // operation-scoped roots memo (REQ-inputs-file-eligibility). It returns a
@@ -59,18 +107,11 @@ func (s *Session) CheckFileInputEligibility(ctx context.Context, pkgDir, file st
 	if s == nil || s.dir == "" {
 		return "", errors.New("gofresh: uninitialized session")
 	}
-	res, err := runtimeinput.FileInputEligibility(ctx, s.evidenceRootFor(s.dir), pkgDir, file, runtimeinput.FileInputContext{
+	return checkFileInputEligibility(ctx, s.evidenceRootFor(s.dir), pkgDir, file, runtimeinput.FileInputContext{
 		Env:           env,
 		Runner:        s.runner,
 		Roots:         &s.roots,
 		ScratchRoot:   scratchRoot,
 		ExcludedPaths: excludedPaths,
 	})
-	if err != nil {
-		return "", err
-	}
-	if res.Kind != runtimeinput.RawFileInput {
-		return res.Reason, nil
-	}
-	return "", nil
 }

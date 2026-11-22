@@ -774,12 +774,12 @@ scratch disciplines no sound flow analysis can follow.
 explicit existing regular file MUST judge eligibility for raw-byte observation
 under these obligations:
 
-- **producing-context** — The session's preflight query uses the session's and unit producer frame's effective-root
-  resolution, exclusions and path-value classifications. It distinguishes
+- **producing-context** — Both standalone preflight queries and session-scoped preflight queries use the effective-root
+  resolution, exclusions and path-value classifications of unit producer frames. Each distinguishes
   raw-byte-eligible, recordless, projected and unverifiable paths; every non-raw
-  result names its reason, and an absent result grants nothing. The session supplies
+  result names its reason, and an absent result grants nothing. Standalone preflight accepts an explicit evidence tree root, optional command-preparation hook, and optional operation-scoped classification-root memo, while session-scoped preflight supplies
   its configured evidence root, command-preparation hook, and classification-root
-  memo while the caller supplies the same package directory, complete process
+  memo; in both forms the caller supplies the same package directory, complete process
   environment with matching PWD, exclusions
   and minted scratch root as the actual producer. A build or analysis environment
   cannot substitute for a different process environment.

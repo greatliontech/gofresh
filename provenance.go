@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/version"
+	"os/exec"
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -94,16 +95,44 @@ type ToolchainSelection struct {
 	SelectionNotice  string
 }
 
-func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {
+func composePrepare(prepare []func(*exec.Cmd)) func(*exec.Cmd) {
+	var active []func(*exec.Cmd)
+	for _, fn := range prepare {
+		if fn != nil {
+			active = append(active, fn)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	if len(active) == 1 {
+		return active[0]
+	}
+	return func(cmd *exec.Cmd) {
+		for _, fn := range active {
+			fn(cmd)
+		}
+	}
+}
+
+func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (selection ToolchainSelection, err error) {
 	refreshTraceFromEnv()
 	if ctx == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
 	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			selection, err = ToolchainSelection{}, cause
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return ToolchainSelection{}, err
 	}
 	if reader == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil environment reader")
+	}
+	if err := gotool.ValidateBuildFlags(ctx, reader, buildFlags); err != nil {
+		return ToolchainSelection{}, err
 	}
 	content, policy, notice, err := toolchain.ResolveToolchainSelection(ctx, reader, buildFlags)
 	if err != nil {
@@ -114,6 +143,32 @@ func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, bu
 		AdmissionPolicy:  policy,
 		SelectionNotice:  notice,
 	}, nil
+}
+
+// ResolveToolchainSelection resolves the toolchain content, admission policy,
+// and selection-audit notice for build without requiring an AST analysis Session.
+// When goEnv is non-nil, it primes the pass's `go env -json` snapshot to avoid
+// a duplicate `go env` subprocess.
+func ResolveToolchainSelection(ctx context.Context, build BuildDescription, goEnv map[string]string, prepare ...func(*exec.Cmd)) (selection ToolchainSelection, err error) {
+	refreshTraceFromEnv()
+	if ctx == nil {
+		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			selection, err = ToolchainSelection{}, cause
+		}
+	}()
+	buildDir, buildEnv, flags, _, err := admitBuildDescription(ctx, build)
+	if err != nil {
+		return ToolchainSelection{}, err
+	}
+	runner := gotool.Runner{Prepare: composePrepare(prepare)}
+	reader, err := gotool.PrimedEnvReaderFromValues(runner, buildDir, buildEnv, goEnv)
+	if err != nil {
+		return ToolchainSelection{}, fmt.Errorf("gofresh: %w", err)
+	}
+	return resolveToolchainSelection(ctx, reader, flags...)
 }
 
 // ToolchainSelection resolves the toolchain content, admission policy, and

@@ -82,11 +82,11 @@ guard digest under this clause.
 > result. A code-determining input must be a code guard, or it is a false-valid hole
 > for exactly the consumers that drop measurement guards.
 
-**REQ-guard-explicit-build** (behavior): A session's producing
+**REQ-guard-explicit-build** (behavior): A session's or standalone guard capture's producing
 build description MUST retain its complete normalized compilation environment separately
 from the runtime environment of its retained artifact. The ordinary package
 driver is pinned and the command directory supplies PWD before that description
-is used by analysis or compilation. The session's build guard includes
+is used by analysis or compilation. The build guard includes
 the build-determining compilation-environment variables (`CGO_*FLAGS_ALLOW`,
 `CGO_*FLAGS_DISALLOW`, `PKG_CONFIG_PATH`, `PKG_CONFIG_LIBDIR`,
 `PKG_CONFIG_SYSROOT_DIR`, `SOURCE_DATE_EPOCH`), the build-determining resolved
@@ -208,11 +208,11 @@ required to evaluate a guard that applies to its result MUST be treated as stale
 valid — validity requires proof, so an unevaluable guard is absence of proof, and a
 recording written before a guard existed re-measures rather than being trusted.
 
-**REQ-guard-selective-capture** (behavior): A snapshot and its runtime bindings MUST capture exactly the
-guards applicable to the snapshot's caller-declared result kind. Source-result and code-result
-snapshots and bindings capture the code guards and leave machine and runtime-configuration values
+**REQ-guard-selective-capture** (behavior): Guard capture — across snapshots, runtime bindings, and standalone guard queries — MUST capture exactly the
+guards applicable to the caller-declared result kind. Source-result and code-result
+captures record the code guards and leave machine and runtime-configuration values
 absent without probing machine support; a measurement snapshot requires callable
-subjects and its runtime binding additionally captures both measurement guards. The source/build generation captures the
+subjects and measurement guard capture additionally records both measurement guards. The source/build generation captures the
 source/build guards and its runtime binding captures the applicable measurement
 guards; neither another binding nor a later generation overwrites either set.
 Observed runtime-input evidence belongs to its producing unit and retained
