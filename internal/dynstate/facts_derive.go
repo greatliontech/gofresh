@@ -61,6 +61,10 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	tracing := trace.Enabled(ctx, trace.DomainDynstate, target)
 	if tracing {
 		start = time.Now()
+		trace.Emit(ctx, trace.DomainDynstate, "dynstate.factof.start", target,
+			trace.Bool("audited", audited),
+			trace.Int("files", len(p.Syntax)),
+		)
 	}
 	var idx *refconfine.PkgIndex
 	var callIdx *refconfine.CallSiteIndex

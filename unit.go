@@ -170,7 +170,7 @@ func validateUnitView(v *Snapshot) error {
 		return errors.New("gofresh: a producing execution must belong to one package")
 	}
 	for _, subject := range v.subjects {
-		if v.facts.maximal[subject].staticDecl {
+		if v.facts.subjects[subject].maximal.staticDecl {
 			if trace.AnyEnabled() {
 				trace.Emit(nil, trace.DomainSession, "unit.begin.refused", subject.Package+"."+subject.Symbol,
 					trace.String("reason", "non_callable_declaration"),
@@ -551,11 +551,11 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 		}
 		fingerprints[subject] = fp
 	}
-	verdicts, err := u.view.checkMap(ctx, fingerprints, true, true)
+	verdicts, err := u.view.checkMap(ctx, fingerprints)
 	if err != nil {
 		return Finalized{}, err
 	}
-	validationErr := u.view.Validate(ctx)
+	validationErr := u.view.validate(ctx)
 	if validationErr != nil && !errors.Is(validationErr, ErrAnalysisUnavailable) {
 		return Finalized{}, validationErr
 	}

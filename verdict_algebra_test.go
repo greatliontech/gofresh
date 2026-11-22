@@ -11,7 +11,6 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/observability"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -46,22 +45,21 @@ func FuzzSiblingCutProjection(f *testing.F) {
 			data = data[:32]
 		}
 		parent := &Snapshot{facts: &observationFacts{
-			maximal: map[Subject]subjectFacts{},
-			cut:     map[Subject]bool{},
+			subjects: map[Subject]subjectEntry{},
 		}}
 		var selected []Subject
 		for i, b := range data {
 			s := Subject{Package: "example.com/property", Symbol: fmt.Sprintf("F%d", i)}
 			parent.subjects = append(parent.subjects, s)
-			parent.facts.maximal[s] = testSubjectFacts(closure.Closure{Hash: fmt.Sprintf("hash%d", i), Unverifiable: true, Refusal: closure.SharedDynamicStateRefusal, Reason: "refusal"})
-			if b&1 != 0 {
-				parent.facts.cut[s] = true
+			parent.facts.subjects[s] = subjectEntry{
+				maximal: testSubjectFacts(closure.Closure{Hash: fmt.Sprintf("hash%d", i), Unverifiable: true, Refusal: closure.SharedDynamicStateRefusal, Reason: "refusal"}),
+				cut:     b&1 != 0,
 			}
 			if i == 0 || b&2 != 0 {
 				selected = append(selected, s)
 			}
 		}
-		child, err := parent.Sibling(selected)
+		child, err := parent.sibling(selected)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,22 +68,22 @@ func FuzzSiblingCutProjection(f *testing.F) {
 			for _, chosen := range selected {
 				included = included || chosen == s
 			}
-			if got, want := child.facts.cut[s], included && parent.facts.cut[s]; got != want {
+			if got, want := child.facts.subjects[s].cut, included && parent.facts.subjects[s].cut; got != want {
 				t.Fatalf("cut provenance for %v: got %t want %t", s, got, want)
 			}
 		}
-		nested, err := child.Sibling([]Subject{selected[0], selected[0]})
+		nested, err := child.sibling([]Subject{selected[0], selected[0]})
 		if err != nil {
 			t.Fatal(err)
 		}
 		s := selected[0]
 		current := *nested.facts
-		cl := current.maximal[s]
-		cl.sharedState = nil
-		current.maximal = map[Subject]subjectFacts{s: cl}
-		current.cut = nil
+		entry := current.subjects[s]
+		entry.maximal.sharedState = nil
+		entry.cut = false
+		current.subjects = map[Subject]subjectEntry{s: entry}
 		err = nested.compareObservationContext(context.Background(), current)
-		if parent.facts.cut[s] {
+		if parent.facts.subjects[s].cut {
 			if !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
 				t.Fatalf("cut-only difference: %v", err)
 			}
@@ -94,8 +92,8 @@ func FuzzSiblingCutProjection(f *testing.F) {
 			// a cut is a real difference, not a licensed neutralization.
 			t.Fatal("uncut difference was neutralized")
 		}
-		cl.source.Identity.Hash = "moved"
-		current.maximal[s] = cl
+		entry.maximal.source.Identity.Hash = "moved"
+		current.subjects[s] = entry
 		if err := nested.compareObservationContext(context.Background(), current); !errors.Is(err, ErrViewChanged) {
 			t.Fatalf("hash movement: %v", err)
 		}
@@ -1159,11 +1157,11 @@ func FuzzGuardRelevanceAndViewLifetime(f *testing.F) {
 			packages: []string{"example.com/p"},
 			kind:     Measurement,
 			facts: &observationFacts{
-				guards:  codeGuards,
-				maximal: map[Subject]subjectFacts{s1: {}, s2: {}},
+				guards:   codeGuards,
+				subjects: map[Subject]subjectEntry{s1: {}, s2: {}},
 			},
 		}
-		sib, err := parent.Sibling([]Subject{s1})
+		sib, err := parent.sibling([]Subject{s1})
 		if err != nil {
 			t.Fatalf("Sibling: %v", err)
 		}
@@ -1316,7 +1314,7 @@ func FuzzFreshnessVerdictAndObservationInvariants(f *testing.F) {
 			Version  int      `json:"v"`
 			Outcome  string   `json:"outcome"`
 			Subjects []string `json:"subjects"`
-		}{4, outcome.Method, []string{outcomeSubject(rec, subj)}})
+		}{4, runtimeinput.OutcomeMethod, []string{outcomeSubject(rec, subj)}})
 		if err != nil {
 			t.Fatalf("Marshal manifest: %v", err)
 		}
@@ -1357,7 +1355,7 @@ func FuzzFreshnessVerdictAndObservationInvariants(f *testing.F) {
 		// (REQ-fresh-observation-conjunction, REQ-purity-observation-separation).
 		obsAuth := ObservationAuthority{}
 		if observable {
-			obsAuth = ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: ObservationRTA, OutcomeMethod: outcome.Method}
+			obsAuth = ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: ObservationRTA, OutcomeMethod: runtimeinput.OutcomeMethod}
 		}
 		vObs := decideAfterClosureObserved(rec, cl, guards, rt, CodeResult, PurityAuthority{}, obsAuth)
 		wantLift := observable && !rtUnver && !sharedDyn
@@ -1402,12 +1400,12 @@ func FuzzFreshnessVerdictAndObservationInvariants(f *testing.F) {
 			kind:      CodeResult,
 			facts: &observationFacts{
 				guards:             guards,
-				maximal:            map[Subject]subjectFacts{subj: {source: curMaxFacts}},
+				subjects:           map[Subject]subjectEntry{subj: {maximal: subjectFacts{source: curMaxFacts}}},
 				testVariantLedgers: map[string]testvariant.TestVariantLedger{subj.Package: ledger},
 			},
-			observable:           map[Subject]observability.Observability{subj: {Observable: observable, Reason: reason}},
-			capturedObserved:     map[Subject]bool{},
-			attachedObservations: map[Subject]runtimeinput.State{},
+			txState: map[Subject]subjectTxState{
+				subj: {observable: observability.Observability{Observable: observable, Reason: reason}, hasObservable: true},
+			},
 		}
 		staticFP := view.fingerprintLocked(subj, curCl)
 		if staticFP.ToolchainContent != curCl.ToolchainContent || staticFP.AdmissionPolicy != curCl.AdmissionPolicy {
@@ -1492,11 +1490,10 @@ func FuzzPreparationAndUnitCoherence(f *testing.F) {
 			packages: []string{pkg},
 			kind:     Measurement,
 			facts: &observationFacts{
-				guards:               guard.Guards{Toolchain: "tc", BuildConfig: "bc"},
-				maximal:              map[Subject]subjectFacts{sKnown: {}},
-				sourceFiles:          []string{"a.go"},
-				sourceFilesBySubject: map[Subject][]string{sKnown: {"a.go"}},
-				fileDigests:          map[string]string{"a.go": "h1"},
+				guards:      guard.Guards{Toolchain: "tc", BuildConfig: "bc"},
+				subjects:    map[Subject]subjectEntry{sKnown: {sourceFiles: []string{"a.go"}}},
+				sourceFiles: []string{"a.go"},
+				fileDigests: map[string]string{"a.go": "h1"},
 			},
 		}
 		goodFP := Fingerprint{
@@ -1612,7 +1609,7 @@ func FuzzJudgmentDiagnosticIndependence(f *testing.F) {
 				state := runtimeinput.State{OK: true, Digest: "digest", Unverifiable: mask&1 != 0, BracketMoved: mask&8 != 0, Reason: "original runtime diagnostic"}
 				var observation ObservationAuthority
 				if mask&2 != 0 {
-					observation = ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: outcome.Method}
+					observation = ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: runtimeinput.OutcomeMethod}
 				}
 				purity := testPurityAuthority(mask&4 != 0)
 				before := decideAfterClosureObserved(recorded, cl, guards, state, CodeResult, purity, observation)
@@ -1654,7 +1651,7 @@ func judgmentFixture(t *testing.T) (*Snapshot, Subject, Fingerprint, runtimeinpu
 		Version  int      `json:"v"`
 		Outcome  string   `json:"outcome"`
 		Subjects []string `json:"subjects"`
-	}{4, outcome.Method, []string{outcomeSubject(fp, subject)}})
+	}{4, runtimeinput.OutcomeMethod, []string{outcomeSubject(fp, subject)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1666,11 +1663,19 @@ func judgmentFixture(t *testing.T) (*Snapshot, Subject, Fingerprint, runtimeinpu
 	fp.RuntimeDigest = state.Digest
 	cl := closure.Closure{Hash: fp.MaximalClosure, TestVariants: fp.TestVariantClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, Unverifiable: true, Reason: "diagnostic only"}
 	v := &Snapshot{
-		session: &engine{deferredCheckClose: true, executionModel: SingleSubjectExecution},
+		session: &engine{executionModel: SingleSubjectExecution},
 		kind:    CodeResult, subjects: []Subject{subject},
-		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
-			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
-			discharges: map[Subject]attestationDischarges{subject: {singleSubject: "dependency.Single", packageProcess: "dependency.Package"}}},
+		facts: &observationFacts{
+			guards: fp.Guards,
+			subjects: map[Subject]subjectEntry{
+				subject: {
+					maximal:         testSubjectFacts(cl),
+					vouchDischarges: "dependency.Current",
+					discharges:      attestationDischarges{singleSubject: "dependency.Single", packageProcess: "dependency.Package"},
+				},
+			},
+		},
+		txState:        map[Subject]subjectTxState{},
 		runtimeCurrent: func(context.Context, string, string) (runtimeinput.State, error) { return state, nil },
 	}
 	return v, subject, fp, state
@@ -1688,7 +1693,9 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 		{name: "observation conjunction", status: Valid, observed: true},
 		{name: "purity is independent of invalid proof", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			f.PurityAssertion = "caller assertion"
-			v.facts.purity[s] = "source directive"
+			entry := v.facts.subjects[s]
+			entry.purity = "source directive"
+			v.facts.subjects[s] = entry
 			f.ObservationProof.Evidence = "invalid"
 		}, status: Valid, purity: PurityAuthority{Recorded: CallerPurity, Current: SourcePurity}},
 		{name: "invalid proof", change: func(_ *Snapshot, _ Subject, f *Fingerprint) { f.ObservationProof.Evidence = "invalid" }, status: Unverifiable, cause: ClosureDependenceCause},
@@ -1703,26 +1710,34 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 		{name: "policy movement", change: func(v *Snapshot, s Subject, _ *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.AdmissionPolicy = "new"
-			v.facts.maximal[s] = testSubjectFacts(cl)
+			entry := v.facts.subjects[s]
+			entry.maximal = testSubjectFacts(cl)
+			v.facts.subjects[s] = entry
 		}, status: Unverifiable, cause: ClosureDependenceCause},
 		{name: "external dominates assertions", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.External = true
-			v.facts.maximal[s] = testSubjectFacts(cl)
+			entry := v.facts.subjects[s]
+			entry.maximal = testSubjectFacts(cl)
+			entry.purity = "caller assertion"
+			v.facts.subjects[s] = entry
 			f.PurityAssertion = "caller assertion"
-			v.facts.purity[s] = "caller assertion"
 		}, status: Unverifiable, cause: ExternalDirectiveCause},
 		{name: "guard drift dominates external", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.External = true
-			v.facts.maximal[s] = testSubjectFacts(cl)
+			entry := v.facts.subjects[s]
+			entry.maximal = testSubjectFacts(cl)
+			v.facts.subjects[s] = entry
 			f.Guards.BuildConfig = "moved"
 		}, status: Stale, cause: BuildConfigCause},
 		{name: "source mismatch skips all authority", change: func(_ *Snapshot, _ Subject, f *Fingerprint) { f.MaximalClosure = "moved" }, status: Stale, cause: ClosureCause},
 		{name: "ordinary proof needs no observation", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.Unverifiable = false
-			v.facts.maximal[s] = testSubjectFacts(cl)
+			entry := v.facts.subjects[s]
+			entry.maximal = testSubjectFacts(cl)
+			v.facts.subjects[s] = entry
 			f.RuntimeInputs, f.RuntimeDigest = "", ""
 		}, status: Valid},
 	} {
@@ -1738,10 +1753,11 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := v.CheckObserved(t.Context(), fp, subject)
+			verdicts, err := v.checkMap(t.Context(), map[Subject]Fingerprint{subject: fp})
 			if err != nil {
 				t.Fatal(err)
 			}
+			got := verdicts[subject]
 			if got.Status != tc.status || got.Ground.Cause.Kind != tc.cause {
 				t.Fatalf("judgment = %+v", got)
 			}
@@ -1753,7 +1769,7 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 			if a.Purity != tc.purity || a.Observation.accepted() != tc.observed {
 				t.Fatalf("authority = %+v", a)
 			}
-			if tc.observed && a.Observation != (ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: outcome.Method}) {
+			if tc.observed && a.Observation != (ObservationAuthority{Assertion: "caller assertion", ProofStrategy: ObservationRTA, OutcomeMethod: runtimeinput.OutcomeMethod}) {
 				t.Fatalf("observation conjunction = %+v", a.Observation)
 			}
 			if got.Status == Stale || tc.cause == ExternalDirectiveCause {
@@ -1796,12 +1812,15 @@ func TestJudgmentDoesNotReadDiagnosticAuthority(t *testing.T) {
 		if shared.Status != Unverifiable || shared.Ground.Cause != wantCause || shared.Ground.Accepted.Observation.accepted() {
 			t.Fatalf("diagnostic lifted shared state or altered culprit: %+v, want %+v", shared, wantCause)
 		}
-		v.facts.cut = map[Subject]bool{subject: true}
+		entry := v.facts.subjects[subject]
+		entry.cut = true
+		v.facts.subjects[subject] = entry
 		cutVerdict := v.judgmentFor(subject, shared)
 		if cutVerdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
 			t.Fatalf("budget cut retained unjudged culprit: %+v", cutVerdict.Ground.Cause)
 		}
-		v.facts.cut = nil
+		entry.cut = false
+		v.facts.subjects[subject] = entry
 		cl.Culprit = closure.Subject{}
 	}
 	cl.Refusal, cl.Reason = closure.DependenceRefusal, "same text"
@@ -1889,22 +1908,24 @@ func TestJudgmentBatchEqualsSingleAndSibling(t *testing.T) {
 	v, subject, fp, _ := judgmentFixture(t)
 	other := Subject{Package: subject.Package, Symbol: "G"}
 	v.subjects = append(v.subjects, other)
-	v.facts.maximal[other] = v.facts.maximal[subject]
+	v.facts.subjects[other] = v.facts.subjects[subject]
 	recorded := map[Subject]Fingerprint{subject: fp, other: fp}
-	batch, err := v.CheckObservedBatch(t.Context(), recorded)
+	batch, err := v.checkMap(t.Context(), recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for s, rec := range recorded {
-		single, err := v.CheckObserved(t.Context(), rec, s)
+		singleMap, err := v.checkMap(t.Context(), map[Subject]Fingerprint{s: rec})
+		single := singleMap[s]
 		if err != nil || single != batch[s] {
 			t.Fatalf("single/batch disagree: %+v / %+v: %v", single, batch[s], err)
 		}
-		sibling, err := v.Sibling([]Subject{s, s})
+		sibling, err := v.sibling([]Subject{s, s})
 		if err != nil {
 			t.Fatal(err)
 		}
-		projected, err := sibling.CheckObserved(t.Context(), rec, s)
+		projMap, err := sibling.checkMap(t.Context(), map[Subject]Fingerprint{s: rec})
+		projected := projMap[s]
 		if err != nil || projected != single {
 			t.Fatalf("sibling lost ground: %+v / %+v: %v", projected, single, err)
 		}
@@ -1921,16 +1942,16 @@ func TestJudgmentApplicabilityNeedsCurrentProofAndOriginalSupport(t *testing.T) 
 		original string
 		valid    bool
 	}{
-		{"current derivation", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "supported", true},
+		{"current derivation", observability.Observability{Observable: true, OutcomeMethod: runtimeinput.OutcomeMethod}, "supported", true},
 		{"no current outcome inventory", observability.Observability{Observable: true}, "supported", false},
 		{"current proof refused", observability.Observability{Reason: "opaque refusal"}, "supported", false},
-		{"current proof cannot supply original support", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "identity-only", false},
-		{"current proof cannot supply missing capture", observability.Observability{Observable: true, OutcomeMethod: outcome.Method}, "absent", false},
+		{"current proof cannot supply original support", observability.Observability{Observable: true, OutcomeMethod: runtimeinput.OutcomeMethod}, "identity-only", false},
+		{"current proof cannot supply missing capture", observability.Observability{Observable: true, OutcomeMethod: runtimeinput.OutcomeMethod}, "absent", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v, subject, fp, _ := judgmentFixture(t)
 			fp.InertTestVariantApplicability = InertTestVariantApplicability{Strategy: InertTestVariantExtension, TestVariantClosure: fp.TestVariantClosure}
-			v.observable = map[Subject]observability.Observability{subject: tc.current}
+			v.txState = map[Subject]subjectTxState{subject: {observable: tc.current, hasObservable: true}}
 			if tc.original == "absent" {
 				fp.RuntimeInputs, fp.RuntimeDigest = "", ""
 			} else if tc.original == "identity-only" {
@@ -1945,20 +1966,22 @@ func TestJudgmentApplicabilityNeedsCurrentProofAndOriginalSupport(t *testing.T) 
 				fp.RuntimeDigest = state.Digest
 				v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) { return state, nil }
 			}
-			got, err := v.CheckObserved(t.Context(), fp, subject)
+			cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+			checked, err := cu.CheckBatch(t.Context(), []Candidate{{Subject: subject, Recorded: fp}})
 			if err != nil {
 				t.Fatal(err)
 			}
+			got := checked[0].Verdict
 			a := got.Ground.Accepted
 			if (got.Status == Valid) != tc.valid || a.Observation.CurrentApplicability != tc.valid {
 				t.Fatalf("applicability authority = %+v", got)
 			}
 			if tc.valid {
-				if len(v.applicabilityChecks) != 1 || a.Applicability != fp.InertTestVariantApplicability || a.Observation.ProofStrategy != fp.ObservationProof.Strategy {
-					t.Fatalf("lost producing or current obligations: %+v %+v", got, v.applicabilityChecks)
+				if !cu.slots[0].result.selected || a.Applicability != fp.InertTestVariantApplicability || a.Observation.ProofStrategy != fp.ObservationProof.Strategy {
+					t.Fatalf("lost producing or current obligations: %+v slot=%+v", got, cu.slots[0])
 				}
-			} else if a.Observation != (ObservationAuthority{}) || a.Applicability != (InertTestVariantApplicability{}) || len(v.applicabilityChecks) != 0 {
-				t.Fatalf("refused extension gained authority: %+v %+v", got, v.applicabilityChecks)
+			} else if a.Observation != (ObservationAuthority{}) || a.Applicability != (InertTestVariantApplicability{}) || cu.slots[0].result.selected {
+				t.Fatalf("refused extension gained authority: %+v slot=%+v", got, cu.slots[0])
 			}
 		})
 	}
@@ -1967,12 +1990,12 @@ func TestJudgmentApplicabilityNeedsCurrentProofAndOriginalSupport(t *testing.T) 
 func TestMembershipRefusalsCollectOrderedSubjectsAndScope(t *testing.T) {
 	known := Subject{Package: "p", Symbol: "Known"}
 	a, b := Subject{Package: "p", Symbol: "A"}, Subject{Package: "p", Symbol: "B"}
-	v := &Snapshot{subjects: []Subject{known}, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
+	v := &Snapshot{subjects: []Subject{known}, facts: &observationFacts{subjects: map[Subject]subjectEntry{known: {}}}}
 	for _, tc := range []struct{ request, want []Subject }{
 		{[]Subject{b, known, a, b, a}, []Subject{b, a}},
 		{[]Subject{a, a, known, b, known}, []Subject{a, b}},
 	} {
-		child, err := v.Sibling(tc.request)
+		child, err := v.sibling(tc.request)
 		var unknown *UnknownSubjectsError
 		if child != nil || !errors.As(err, &unknown) || unknown.Scope != ParentView || !slices.Equal(unknown.Subjects, tc.want) {
 			t.Fatalf("sibling refusal = %+v %v, want %+v", child, err, tc.want)
@@ -1985,11 +2008,11 @@ func TestMembershipRefusalsCollectOrderedSubjectsAndScope(t *testing.T) {
 			t.Fatalf("source refusal = %v", err)
 		}
 	}
-	child, err := v.Sibling([]Subject{known, known})
+	child, err := v.sibling([]Subject{known, known})
 	if err != nil || !slices.Equal(child.subjects, []Subject{known}) {
 		t.Fatalf("known duplicate selection = %+v %v", child, err)
 	}
-	if child, err := v.Sibling(nil); err == nil || child != nil {
+	if child, err := v.sibling(nil); err == nil || child != nil {
 		t.Fatal("empty sibling accepted")
 	}
 }
@@ -2005,7 +2028,7 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 	good := Fingerprint{ResultKind: CodeResult}
 	wrongKind := Fingerprint{ResultKind: Measurement}
 	malformed := Fingerprint{ResultKind: Kind(99)}
-	v := &Snapshot{session: &engine{}, kind: CodeResult, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
+	v := &Snapshot{session: &engine{}, kind: CodeResult, facts: &observationFacts{subjects: map[Subject]subjectEntry{known: {}}}}
 	work := 0
 	v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
 		work++
@@ -2018,7 +2041,21 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 		for _, check := range []struct {
 			name string
 			call func(context.Context, map[Subject]Fingerprint) (map[Subject]Verdict, error)
-		}{{"ordinary", v.CheckBatch}, {"observed", v.CheckObservedBatch}} {
+		}{
+			{"checkMap", v.checkMap},
+			{"checkingUnit", func(ctx context.Context, rec map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+				cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+				checked, err := cu.CheckBatch(ctx, orderedCandidates(rec))
+				if err != nil {
+					return nil, err
+				}
+				out := make(map[Subject]Verdict, len(checked))
+				for _, c := range checked {
+					out[c.Subject] = c.Verdict
+				}
+				return out, nil
+			}},
+		} {
 			for _, order := range [][]Subject{{known, a, b, c, d}, {d, c, b, a, known}, {b, known, d, a, c}} {
 				for tier := 0; tier < 3; tier++ {
 					t.Run(check.name+"/"+string(rune('0'+tier)), func(t *testing.T) {
@@ -2066,7 +2103,7 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 			}
 		}
 		// Empty maps retain the successful empty-batch behavior.
-		prepared, err := v.CheckBatch(t.Context(), nil)
+		prepared, err := v.checkMap(t.Context(), nil)
 		if err != nil || !reflect.DeepEqual(prepared, map[Subject]Verdict{}) {
 			t.Fatalf("empty preparation = %+v %v", prepared, err)
 		}
@@ -2388,23 +2425,21 @@ func TestBatchRuntimeMoverDeduplicationAndEndpointIsolation(t *testing.T) {
 
 	const batchSize = 12
 	subjects := make([]Subject, batchSize)
-	maximal := make(map[Subject]subjectFacts, batchSize)
+	entries := make(map[Subject]subjectEntry, batchSize)
 	cl := closure.Closure{Hash: "core-hash", TestVariants: "tv-hash", ToolchainContent: "tc-content", AdmissionPolicy: "audit"}
 	baseGuards := guard.Guards{Toolchain: "go1.27 linux/amd64", BuildConfig: "bc"}
 	for i := range subjects {
 		subjects[i] = Subject{Package: "example.com/batch", Symbol: fmt.Sprintf("TestSubj%d", i)}
-		maximal[subjects[i]] = testSubjectFacts(cl)
+		entries[subjects[i]] = subjectEntry{maximal: testSubjectFacts(cl)}
 	}
 	newView := func() *Snapshot {
 		return &Snapshot{
-			session:              &Session{dir: dir, env: env, deferredCheckClose: true},
-			subjects:             subjects,
-			moduleDir:            dir,
-			kind:                 CodeResult,
-			facts:                &observationFacts{maximal: maximal, guards: baseGuards, purity: map[Subject]string{}, vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{}},
-			observable:           map[Subject]observability.Observability{},
-			capturedObserved:     map[Subject]bool{},
-			attachedObservations: map[Subject]runtimeinput.State{},
+			session:   &Session{dir: dir, env: env},
+			subjects:  subjects,
+			moduleDir: dir,
+			kind:      CodeResult,
+			facts:     &observationFacts{subjects: entries, guards: baseGuards},
+			txState:   map[Subject]subjectTxState{},
 		}
 	}
 
@@ -2427,7 +2462,7 @@ func TestBatchRuntimeMoverDeduplicationAndEndpointIsolation(t *testing.T) {
 	}
 	rec := trace.NewRecorder()
 	ctx := trace.WithSink(t.Context(), rec)
-	results, err := v.checkRecords(ctx, records, true, false)
+	results, err := v.checkRecords(ctx, records)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2478,7 +2513,7 @@ func TestBatchRuntimeMoverDeduplicationAndEndpointIsolation(t *testing.T) {
 		return st, nil
 	}
 	rec.Reset()
-	hookResults, err := vHook.checkRecords(ctx, records[:8], true, false)
+	hookResults, err := vHook.checkRecords(ctx, records[:8])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2530,25 +2565,22 @@ func TestCheckingUnitCloseFastPathProperty(t *testing.T) {
 		currentDigests := map[string]string{}
 		preciseCalls := 0
 		current := &Snapshot{
-			session:   &Session{deferredCheckClose: true},
+			session:   &Session{},
 			subjects:  subjects,
 			requests:  requests,
 			packages:  []string{obsSubj.Package},
 			moduleDir: "/virtual",
 			kind:      CodeResult,
 			facts: &observationFacts{
-				maximal: map[Subject]subjectFacts{
-					obsSubj:  testSubjectFacts(cl),
-					pureSubj: testSubjectFacts(cl),
-					liveSubj: testSubjectFacts(cl),
+				subjects: map[Subject]subjectEntry{
+					obsSubj:  {maximal: testSubjectFacts(cl)},
+					pureSubj: {maximal: testSubjectFacts(cl), purity: "caller assertion"},
+					liveSubj: {maximal: testSubjectFacts(cl)},
 				},
-				guards:          baseGuards,
-				purity:          map[Subject]string{pureSubj: "caller assertion"},
-				vouchDischarges: map[Subject]string{},
-				discharges:      map[Subject]attestationDischarges{},
+				guards: baseGuards,
 			},
-			observable: map[Subject]observability.Observability{
-				liveSubj: {Observable: true, EffectFree: true},
+			txState: map[Subject]subjectTxState{
+				liveSubj: {observable: observability.Observability{Observable: true, EffectFree: true}, hasObservable: true},
 			},
 			runtimeCurrent: func(_ context.Context, manifest, _ string) (runtimeinput.State, error) {
 				reads[manifest]++
@@ -2841,20 +2873,7 @@ func TestOutcomeSupportMemoizationAndRootConsolidationHelpers(t *testing.T) {
 		t.Fatalf("mutating scope.Vouches aliased Session.sortedVouches: %v", sess.sortedVouches)
 	}
 
-	// 3. primedBuildReader refuses empty GoEnv maps consistently across CaptureGuards and ResolveToolchainSelection.
-	emptyBuild := BuildDescription{
-		Directory:   t.TempDir(),
-		Environment: []string{"PATH=/bin"},
-		GoEnv:       map[string]string{},
-	}
-	if _, err := CaptureGuards(t.Context(), emptyBuild, nil, CodeResult); err == nil {
-		t.Fatal("CaptureGuards accepted empty GoEnv map")
-	}
-	if _, err := ResolveToolchainSelection(t.Context(), emptyBuild); err == nil {
-		t.Fatal("ResolveToolchainSelection accepted empty GoEnv map")
-	}
-
-	// 4. Unit.account caches decoded OutcomeSupportSet across repeated Account() reads.
+	// 3. Unit.account caches decoded OutcomeSupportSet across repeated Account() reads.
 	u := &Unit{
 		execution: &unitExecution{
 			process:      ProcessDescription{Identity: "worker"},

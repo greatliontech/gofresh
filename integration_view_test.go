@@ -120,8 +120,8 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		if symbol == shared.Symbol {
 			subject = shared
 		}
-		facts, ok := view.facts.maximal[subject]
-		cl := facts.closure()
+		entry, ok := view.facts.subjects[subject]
+		cl := entry.maximal.closure()
 		if !ok || !cl.Unverifiable {
 			t.Fatalf("%s = %+v, want an unverifiable maximal closure", symbol, cl)
 		}
@@ -156,8 +156,8 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for symbol, facts := range plain.facts.maximal {
-		cl := facts.closure()
+	for symbol, entry := range plain.facts.subjects {
+		cl := entry.maximal.closure()
 		if strings.Contains(cl.Reason, "judged under") {
 			t.Fatalf("audited selection attributed %s: %q", symbol.Symbol, cl.Reason)
 		}
@@ -325,7 +325,7 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+		controlVerdict, err := bindViewForTest(t, ctx, controlView).Check(ctx, subject, controlFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -348,7 +348,7 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 		if fingerprint.DynamicStateVouches != ghost {
 			t.Fatalf("fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -393,7 +393,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+		controlVerdict, err := bindViewForTest(t, ctx, controlView).Check(ctx, subject, controlFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -423,7 +423,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		if fingerprint.SingleSubjectDischarges != "" {
 			t.Fatalf("attested evidence recorded %q, want nothing - the mapping discharge is not an attestation", fingerprint.SingleSubjectDischarges)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -459,7 +459,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		poisonedVerdict, err := poisonedView.Check(ctx, poisonedFP, subject)
+		poisonedVerdict, err := bindViewForTest(t, ctx, poisonedView).Check(ctx, subject, poisonedFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -478,7 +478,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		attestedGhostVerdict, err := attestedGhostView.Check(ctx, attestedGhostFP, subject)
+		attestedGhostVerdict, err := bindViewForTest(t, ctx, attestedGhostView).Check(ctx, subject, attestedGhostFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -555,7 +555,7 @@ func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -614,7 +614,7 @@ func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -885,7 +885,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fingerprint, err := producer.captureObserved(ctx, subject)
+			fingerprint, err := captureObservedForTest(ctx, producer, subject)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -898,7 +898,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+			fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -912,7 +912,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 			t.Fatal(err)
 		}
 		plainView, plainFP := observe(plain)
-		verdict, err := plainView.CheckObserved(ctx, plainFP, subject)
+		verdict, err := bindViewForTest(t, ctx, plainView).Check(ctx, subject, plainFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -930,7 +930,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 		if fingerprint.DynamicStateVouches != ghost {
 			t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
 		}
-		served, err := vouchedView.CheckObserved(ctx, fingerprint, subject)
+		served, err := bindViewForTest(t, ctx, vouchedView).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -945,7 +945,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err = current.CheckObserved(ctx, fingerprint, subject)
+		verdict, err = bindViewForTest(t, ctx, current).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1077,7 +1077,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := producer.captureObserved(ctx, subject)
+		fingerprint, err := captureObservedForTest(ctx, producer, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1085,7 +1085,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+		fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1101,7 +1101,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := current.CheckObserved(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, current).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1226,8 +1226,8 @@ func TestExplainStraddlesALaterEdit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "reg", "reg.go"), []byte(after), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after the edit = %v, want ErrViewChanged (the edit is real drift)", err)
+	if err := view.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after the edit = %v, want ErrViewChanged (the edit is real drift)", err)
 	}
 	chain, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry")
 	if err != nil {
@@ -1260,25 +1260,26 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	boundedPrint, err := view.captureObserved(context.Background(), bounded)
+	boundedPrint, err := captureObservedForTest(context.Background(), view, bounded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !boundedPrint.ObservationProof.Observable || strings.Contains(boundedPrint.ObservationProof.Reason, "caller-supplied dynamic") {
 		t.Fatalf("bounded generic read open at the view tier: %+v", boundedPrint.ObservationProof)
 	}
-	verdict, err := view.CheckObserved(context.Background(), boundedPrint, bounded)
+	rb := bindViewForTest(t, context.Background(), view)
+	verdict, err := rb.Check(context.Background(), bounded, boundedPrint)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Valid {
 		t.Fatalf("bounded generic verdict = %+v, want valid", verdict)
 	}
-	unboundedPrint, err := view.captureObserved(context.Background(), unbounded)
+	unboundedPrint, err := captureObservedForTest(context.Background(), view, unbounded)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unboundedVerdict, err := view.CheckObserved(context.Background(), unboundedPrint, unbounded)
+	unboundedVerdict, err := rb.Check(context.Background(), unbounded, unboundedPrint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1570,7 +1571,7 @@ func F(callback func()) { callback(); Hook(); _ = os.Getenv("INPUT"); _, _ = net
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := v.facts.maximal[s]
+	f := v.facts.subjects[s].maximal
 	if !f.external || f.openWorld == nil || f.sharedState == nil {
 		t.Fatalf("consumer-tier obligations were overwritten: %+v", f)
 	}
@@ -1586,11 +1587,11 @@ func F(callback func()) { callback(); Hook(); _ = os.Getenv("INPUT"); _, _ = net
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := v.Check(t.Context(), fp, s)
+	verdict, err := bindViewForTest(t, t.Context(), v).Check(t.Context(), s, fp)
 	if err != nil || verdict.Status != Unverifiable || verdict.Ground.Cause.Kind != ExternalDirectiveCause {
 		t.Fatalf("ordinary external projection changed: %+v, %v", verdict, err)
 	}
-	if err := v.Validate(t.Context()); err != nil {
+	if err := v.validate(t.Context()); err != nil {
 		t.Fatalf("unchanged complete base did not close: %v", err)
 	}
 }
@@ -1632,7 +1633,7 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1797,7 +1798,7 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(ctx, fingerprint, subject)
+		verdict, err := bindViewForTest(t, ctx, view).Check(ctx, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1936,7 +1937,7 @@ func TestForeignCodePackageKeepsTypeLevelDowngrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2128,7 +2129,7 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2240,7 +2241,7 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 		t.Fatalf("shared helper name made the package unmeasurable: %v", err)
 	}
 	for _, subject := range subjects {
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatalf("capture %s: %v", subject.Symbol, err)
 		}
@@ -2269,7 +2270,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ambiguous subject request failed view construction: %v", err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), ambiguous)
+	fingerprint, err := captureObservedForTest(context.Background(), view, ambiguous)
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -2281,7 +2282,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if !strings.Contains(reason, "ambiguous") {
 		t.Fatalf("refused capture does not name the collision: %q", reason)
 	}
-	verdict, err := view.CheckObserved(context.Background(), fingerprint, ambiguous)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), ambiguous, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2295,7 +2296,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if fingerprint.PurityAssertion != "" {
 		t.Fatalf("collapsed identity carries a purity attribution: %q", fingerprint.PurityAssertion)
 	}
-	sibling, err := view.captureObserved(context.Background(), Subject{Package: pkg, Symbol: "Compute"})
+	sibling, err := captureObservedForTest(context.Background(), view, Subject{Package: pkg, Symbol: "Compute"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2404,7 +2405,7 @@ func TestAmbiguousSubjectExternalDirectiveConfersNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), mustCapture(t, view, ambiguous), ambiguous)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), ambiguous, mustCapture(t, view, ambiguous))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2474,16 +2475,16 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if passes != 2 || !parent.facts.cut[cut] || parent.facts.cut[pure] {
-			t.Fatalf("construction premise: passes=%d cut=%v", passes, parent.facts.cut)
+		if passes != 2 || !parent.facts.subjects[cut].cut || parent.facts.subjects[pure].cut {
+			t.Fatalf("construction premise: passes=%d subjects=%v", passes, parent.facts.subjects)
 		}
-		if err := parent.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
+		if err := parent.validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
 			t.Fatalf("parent on unchanged tree: %v, want cut unavailability", err)
 		}
 		sibling := func(t *testing.T, from *Snapshot, subjects ...Subject) *Snapshot {
 			t.Helper()
 			before := passes
-			v, err := from.Sibling(subjects)
+			v, err := from.sibling(subjects)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2494,7 +2495,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 		}
 		assertCut := func(t *testing.T, v *Snapshot) {
 			t.Helper()
-			if err := v.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
+			if err := v.validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
 				t.Fatalf("sibling on unchanged tree: %v, want cut unavailability", err)
 			}
 		}
@@ -2505,7 +2506,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := v.AttachObservation(cut, fp, observation); err != nil {
+			if _, err := attachObservedForTest(v, cut, fp, observation); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -2518,7 +2519,8 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			verdict, err := first.Check(t.Context(), fp, cut)
+			verdictMap, err := first.checkMap(t.Context(), map[Subject]Fingerprint{cut: fp})
+			verdict := verdictMap[cut]
 			if err != nil || verdict.Status != Unverifiable || verdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
 				t.Fatalf("cut was reported as established dependence: %+v %v", verdict, err)
 			}
@@ -2526,14 +2528,14 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			assertCut(t, sibling(t, first, cut))
 		})
 		t.Run("unaffected subset", func(t *testing.T) {
-			if err := sibling(t, parent, pure).Validate(context.Background()); err != nil {
+			if err := sibling(t, parent, pure).validate(context.Background()); err != nil {
 				t.Fatalf("uncut subject borrowed another subject's cut: %v", err)
 			}
 		})
 		for _, inherited := range []bool{false, true} {
 			t.Run(fmt.Sprintf("observed inherited=%t", inherited), func(t *testing.T) {
 				v := sibling(t, parent, cut)
-				fp, err := v.captureObserved(context.Background(), cut)
+				fp, err := captureObservedForTest(context.Background(), v, cut)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2550,13 +2552,13 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 		t.Run("cancellation", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
-			if err := sibling(t, parent, cut).Validate(ctx); !errors.Is(err, context.Canceled) {
+			if err := sibling(t, parent, cut).validate(ctx); !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancelled sibling: %v", err)
 			}
 		})
 		t.Run("runtime movement", func(t *testing.T) {
 			v := sibling(t, parent, cut)
-			fp, err := v.captureObserved(context.Background(), cut)
+			fp, err := captureObservedForTest(context.Background(), v, cut)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2564,7 +2566,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("moved"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			err = v.Validate(context.Background())
+			err = v.validate(context.Background())
 			if !errors.Is(err, ErrViewChanged) || !strings.Contains(err.Error(), "runtime inputs") || errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("runtime drift behind a cut: %v", err)
 			}
@@ -2574,7 +2576,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte(strings.Replace(source, "return gen.Size()", "return gen.Size() + 1", 1)), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			err := v.Validate(context.Background())
+			err := v.validate(context.Background())
 			if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("source drift behind a cut: %v", err)
 			}
@@ -2767,11 +2769,11 @@ func TestEveryCaptureStampsTheClosureStrategy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, err := view.CaptureObservedBatch(context.Background())
+	observed, err := view.captureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, fps := range map[string]map[Subject]Fingerprint{"CaptureBatch": batch, "CaptureObservedBatch": observed} {
+	for name, fps := range map[string]map[Subject]Fingerprint{"CaptureBatch": batch, "captureObservedBatch": observed} {
 		if len(fps) != len(scanMemoSubjects) {
 			t.Fatalf("%s returned %d fingerprints for %d subjects", name, len(fps), len(scanMemoSubjects))
 		}
@@ -3299,15 +3301,24 @@ func TestMalformedRecordRefusesTheBatchBeforeAnyWindow(t *testing.T) {
 	bad := good
 	bad.ResultKind = Kind(99)
 	opened := 0
+	rb := bindViewForTest(t, context.Background(), view)
 	withViewTestHooks(viewTestHookSet{
 		runtimeWindow: func() { opened++ },
 	}, func() {
 		for name, check := range map[string]func(map[Subject]Fingerprint) (map[Subject]Verdict, error){
-			"CheckBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-				return view.CheckBatch(context.Background(), r)
+			"checkMap": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+				return view.checkMap(context.Background(), r)
 			},
-			"CheckObservedBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-				return view.CheckObservedBatch(context.Background(), r)
+			"CheckBatchWithLedgers": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+				checked, err := rb.CheckBatchWithLedgers(context.Background(), orderedCandidates(r), nil)
+				if err != nil {
+					return nil, err
+				}
+				out := make(map[Subject]Verdict, len(checked))
+				for _, c := range checked {
+					out[c.Subject] = c.Verdict
+				}
+				return out, nil
 			},
 		} {
 			verdicts, err := check(map[Subject]Fingerprint{f: good, g: bad})
@@ -3340,14 +3351,14 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.captureObserved(context.Background(), subject); err != nil {
+	if _, err := captureObservedForTest(context.Background(), view, subject); err != nil {
 		t.Fatal(err)
 	}
 	observed := 0
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observed++ },
 	}, func() {
-		err = view.Validate(context.Background())
+		err = view.validate(context.Background())
 	})
 	if err == nil || !strings.Contains(err.Error(), "no attached completed observation") {
 		t.Fatalf("validation without an attachment = %v, want the attachment refusal", err)
@@ -3534,16 +3545,17 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	if verdict.Status != Stale || verdict.Reason != "test variants" {
 		t.Fatalf("pre-partition recording = %+v, want fail-closed {stale \"test variants\"}", verdict)
 	}
-	// Both check surfaces share one evidence ladder: the observed surface
-	// fails a pre-partition recording closed identically.
+	// Both check surfaces share one evidence ladder: internal checkMap and
+	// RuntimeBinding.Check fail a pre-partition recording closed identically.
 	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	observed, err := view.CheckObserved(context.Background(), prePartition, subject)
+	obsMap, err := view.checkMap(context.Background(), map[Subject]Fingerprint{subject: prePartition})
 	if err != nil {
 		t.Fatal(err)
 	}
+	observed := obsMap[subject]
 	if observed.Status != Stale || observed.Reason != "test variants" {
 		t.Fatalf("observed pre-partition recording = %+v, want fail-closed {stale \"test variants\"}", observed)
 	}
@@ -3557,10 +3569,9 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 }
 
 // Compartment drift is decided from recorded evidence alone: with the core
-// equal, a drifted compartment is stale "test variants" on both check
-// surfaces and no precise analysis runs; with both equal, the verdict is
-// valid, equally without analysis (REQ-closure-test-variant-identity,
-// REQ-fresh-hierarchical-check).
+// equal, a drifted compartment is stale "test variants" and no precise
+// analysis runs; with both equal, the verdict is valid, equally without
+// analysis (REQ-closure-test-variant-identity, REQ-fresh-hierarchical-check).
 func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -3591,7 +3602,7 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	}
 	analyses := 0
 	unchanged.beforePreciseAnalysis = func() { analyses++ }
-	verdict, err := unchanged.Check(context.Background(), recorded, subject)
+	verdict, err := bindViewForTest(t, context.Background(), unchanged).Check(context.Background(), subject, recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3609,19 +3620,13 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	}
 	analyses = 0
 	drifted.beforePreciseAnalysis = func() { analyses++ }
-	verdict, err = drifted.Check(context.Background(), recorded, subject)
+	driftedBind := bindViewForTest(t, context.Background(), drifted)
+	verdict, err = driftedBind.Check(context.Background(), subject, recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "test variants" || analyses != 0 {
 		t.Fatalf("compartment-drift check = %+v with %d analyses, want {stale \"test variants\"} without analysis", verdict, analyses)
-	}
-	observed, err := drifted.CheckObserved(context.Background(), recorded, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.Status != Stale || observed.Reason != "test variants" || analyses != 0 {
-		t.Fatalf("compartment-drift observed check = %+v with %d analyses, want {stale \"test variants\"} without analysis", observed, analyses)
 	}
 }
 
@@ -3664,19 +3669,12 @@ func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := drifted.Check(context.Background(), recorded, subject)
+	verdict, err := bindViewForTest(t, context.Background(), drifted).Check(context.Background(), subject, recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "closure" {
 		t.Fatalf("mixed-drift check = %+v, want {stale \"closure\"}", verdict)
-	}
-	observed, err := drifted.CheckObserved(context.Background(), recorded, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observed.Status != Stale || observed.Reason != "closure" {
-		t.Fatalf("mixed-drift observed check = %+v, want {stale \"closure\"}", observed)
 	}
 }
 
@@ -3827,15 +3825,12 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 			}
 			capture := func(v *Snapshot) (Fingerprint, error) {
 				if tc.observed {
-					return v.captureObserved(ctx, subject)
+					return captureObservedForTest(ctx, v, subject)
 				}
 				return v.Capture(ctx, subject)
 			}
 			check := func(v *Snapshot, f Fingerprint) (Verdict, error) {
-				if tc.observed {
-					return v.CheckObserved(ctx, f, subject)
-				}
-				return v.Check(ctx, f, subject)
+				return bindViewForTest(t, ctx, v).Check(ctx, subject, f)
 			}
 			producer := newView()
 			record, err := capture(producer)
@@ -3846,14 +3841,14 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				if !record.ObservationProof.Observable {
 					t.Fatalf("initial proof: %+v", record.ObservationProof)
 				}
-				record, err = producer.AttachObservation(subject, record, supportedObservation(t, producer, dir, dir, "execution", ""))
+				record, err = attachObservedForTest(producer, subject, record, supportedObservation(t, producer, dir, dir, "execution", ""))
 				if err != nil {
 					t.Fatal(err)
 				}
 			} else if record.PurityAssertion == "" {
 				t.Fatal("missing explicit-purity control")
 			}
-			if err := producer.Validate(ctx); err != nil {
+			if err := producer.validate(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if verdict, err := check(newView(), record); err != nil || verdict.Status != Valid {
@@ -3866,7 +3861,7 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.observed {
-				_, err = pending.AttachObservation(subject, pendingRecord, supportedObservation(t, pending, dir, dir, "pending", ""))
+				_, err = attachObservedForTest(pending, subject, pendingRecord, supportedObservation(t, pending, dir, dir, "pending", ""))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -3887,13 +3882,16 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				t.Fatal(err)
 			}
 			runValue(tc.after)
-			if err := pending.Validate(ctx); !errors.Is(err, ErrViewChanged) {
+			if err := pending.validate(ctx); !errors.Is(err, ErrViewChanged) {
 				t.Fatalf("closing accepted changed selected source: %v", err)
 			}
 			if !tc.observed {
-				sel, err := ResolveToolchainSelection(ctx, BuildDescription{Directory: dir, Environment: os.Environ()})
-				if err != nil || sel.SelectionNotice != "" {
-					t.Fatalf("outside-audit control changed admission: %s %v", sel.SelectionNotice, err)
+				sess, err := NewSession(ctx, BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if sel, err := sess.ToolchainSelection(ctx); err != nil || sel.SelectionNotice != "" {
+					t.Fatalf("outside-audit control changed admission: %+v %v", sel, err)
 				}
 			}
 			var warm Fingerprint
@@ -3955,7 +3953,7 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := producer.captureObserved(t.Context(), subject)
+	control, err := captureObservedForTest(t.Context(), producer, subject)
 	if err != nil || !control.ObservationProof.Observable {
 		t.Fatalf("control: %+v %v", control, err)
 	}
@@ -3966,13 +3964,15 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 		t.Fatal("current policy missing")
 	}
 	cl.AdmissionPolicy = "historical-" + cl.AdmissionPolicy
-	producer.facts.maximal[subject] = testSubjectFacts(cl)
-	recorded, err := producer.captureObserved(t.Context(), subject)
+	entry := producer.facts.subjects[subject]
+	entry.maximal = testSubjectFacts(cl)
+	producer.facts.subjects[subject] = entry
+	recorded, err := captureObservedForTest(t.Context(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observation := supportedObservation(t, producer, dir, dir, "historical", "getenv OUTCOME_VALUE\n")
-	recorded, err = producer.AttachObservation(subject, recorded, observation)
+	recorded, err = attachObservedForTest(producer, subject, recorded, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3983,7 +3983,7 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict, err := current.CheckObserved(t.Context(), recorded, subject); err != nil || verdict.Status != Unverifiable {
+	if verdict, err := bindViewForTest(t, t.Context(), current).Check(t.Context(), subject, recorded); err != nil || verdict.Status != Unverifiable {
 		t.Fatalf("policy mismatch lifted the closure refusal: %+v %v", verdict, err)
 	}
 }
@@ -4052,14 +4052,14 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("observation proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
-	oracleFingerprint, err := producer.captureObserved(context.Background(), oracle)
+	oracleFingerprint, err := captureObservedForTest(context.Background(), producer, oracle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4070,21 +4070,21 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.AttachObservation(oracle, oracleFingerprint, observation); err != nil {
+	if _, err := attachObservedForTest(producer, oracle, oracleFingerprint, observation); err != nil {
 		t.Fatal(err)
 	}
-	if err := producer.Validate(context.Background()); err != nil {
+	if err := producer.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	current, err := engine.newView(context.Background(), []Subject{subject, oracle}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), current).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4097,7 +4097,7 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := batchProducer.CaptureObservedBatch(context.Background())
+	batch, err := batchProducer.captureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4123,7 +4123,7 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4139,19 +4139,19 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 	// evidence binds only to the exact captured record.
 	tampered := fingerprint
 	tampered.PurityAssertion = "caller assertion"
-	if _, err := producer.AttachObservation(subject, tampered, observation); err == nil {
+	if _, err := attachObservedForTest(producer, subject, tampered, observation); err == nil {
 		t.Fatal("tampered fingerprint accepted a runtime observation attachment")
 	}
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.AttachObservation(subject, producer.observedFingerprintLocked(subject), observation); err == nil {
+	if _, err := attachObservedForTest(producer, subject, producer.observedFingerprintLocked(subject), observation); err == nil {
 		t.Fatal("second runtime observation attachment was accepted")
 	}
-	// One Validate: the view revalidates whatever it captured with no
+	// One validate: the view revalidates whatever it captured with no
 	// routing sentinel for the caller to interpret.
-	if err := producer.Validate(context.Background()); err != nil {
+	if err := producer.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	sourcePath := filepath.Join(dir, "observed.go")
@@ -4169,7 +4169,7 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 	// Core drift stales the recording on the closure even under the
 	// observed policy: the observation lift rescues unverifiability, never
 	// a drifted core.
-	verdict, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), current).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4195,7 +4195,7 @@ func TestCheckObservedPropagatesCancellationMidCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4211,9 +4211,10 @@ func TestCheckObservedPropagatesCancellationMidCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rb := bindViewForTest(t, context.Background(), current)
 	ctx := &cancelAfterChecks{Context: context.Background(), after: 1}
-	if verdict, err := current.CheckObserved(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) || verdict != (Verdict{}) {
-		t.Fatalf("CheckObserved cancellation = %+v, %v; want zero verdict and context.Canceled", verdict, err)
+	if verdict, err := rb.Check(ctx, subject, fingerprint); !errors.Is(err, context.Canceled) || verdict != (Verdict{}) {
+		t.Fatalf("Check cancellation = %+v, %v; want zero verdict and context.Canceled", verdict, err)
 	}
 }
 
@@ -4252,7 +4253,7 @@ func TestObservedProofAdmitsParentTraversalIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4275,14 +4276,14 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !fingerprint.ObservationProof.Observable || !compatibleObservationProof(fingerprint, subject) {
 		t.Fatalf("captured proof = %+v", fingerprint.ObservationProof)
 	}
-	withoutManifest, err := producer.CheckObserved(context.Background(), fingerprint, subject)
+	withoutManifest, err := bindViewForTest(t, context.Background(), producer).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4290,11 +4291,11 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 		t.Fatalf("proof without completed manifest = %+v, want unverifiable", withoutManifest)
 	}
 	observation := supportedObservation(t, producer, dir, dir, "worker", "getenv OUTCOME_VALUE\n")
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := producer.Validate(context.Background()); err != nil {
+	if err := producer.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	current, err := engine.newView(context.Background(), []Subject{subject}, dir)
@@ -4303,14 +4304,17 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	}
 	analyses := 0
 	current.beforePreciseAnalysis = func() { analyses++ }
-	ordinary, err := current.Check(context.Background(), fingerprint, subject)
+	curBind := bindViewForTest(t, context.Background(), current)
+	plainFP := fingerprint
+	plainFP.ObservationAssertion, plainFP.ObservationProof = "", ObservationProof{}
+	ordinary, err := curBind.Check(context.Background(), subject, plainFP)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ordinary.Status != Unverifiable {
 		t.Fatalf("ordinary check inferred observation policy: %+v", ordinary)
 	}
-	observed, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	observed, err := curBind.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4322,7 +4326,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	}
 	tampered := fingerprint
 	tampered.ObservationProof.Evidence = "tampered"
-	verdict, err := current.CheckObserved(context.Background(), tampered, subject)
+	verdict, err := curBind.Check(context.Background(), subject, tampered)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4337,7 +4341,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	malformedFingerprint := fingerprint
 	malformedFingerprint.RuntimeInputs = malformedState.Manifest
 	malformedFingerprint.RuntimeDigest = malformedState.Digest
-	verdict, err = current.CheckObserved(context.Background(), malformedFingerprint, subject)
+	verdict, err = curBind.Check(context.Background(), subject, malformedFingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4355,7 +4359,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("two"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err = current.CheckObserved(context.Background(), fileGuarded, subject)
+	verdict, err = curBind.Check(context.Background(), subject, fileGuarded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4378,7 +4382,7 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4386,7 +4390,7 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4404,8 +4408,8 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 		moved.Digest = "moved"
 		return moved, nil
 	}
-	if err := producer.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate across runtime drift = %v, want ErrViewChanged", err)
+	if err := producer.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate across runtime drift = %v, want ErrViewChanged", err)
 	}
 	if calls != 2 {
 		t.Fatalf("runtime observations = %d, want 2", calls)
@@ -4588,17 +4592,16 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	if runtime.GOOS != "linux" {
+		t.Skip("measurement support requires Linux")
+	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
 	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	measurement, err := engine.newViewFor(context.Background(), []Subject{subject}, dir, Measurement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := measurement.Capture(context.Background(), subject)
+	fingerprint, err := engine.captureFor(context.Background(), subject, dir, Measurement)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4609,10 +4612,11 @@ func TestResultKindIsBoundToFingerprint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := code.Check(context.Background(), fingerprint, subject); err == nil {
+	codeBind := bindViewForTest(t, context.Background(), code)
+	if _, err := codeBind.Check(context.Background(), subject, fingerprint); err == nil {
 		t.Fatal("measurement fingerprint accepted by code-result view")
 	}
-	if _, err := code.CheckBatch(context.Background(), map[Subject]Fingerprint{subject: fingerprint}); err == nil {
+	if _, err := codeBind.CheckBatchWithLedgers(context.Background(), []Candidate{{subject, fingerprint}}, nil); err == nil {
 		t.Fatal("measurement fingerprint accepted by code-result batch")
 	}
 	reclassified := fingerprint
@@ -4648,20 +4652,20 @@ func TestProducerViewValidatesAfterSourceChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The producer view remains the immutable pre-run observation.
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	// The producer view remains the immutable pre-run observation until closing.
+	verdictMap, err := view.checkMap(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Valid {
+	if verdict := verdictMap[subject]; verdict.Status != Valid {
 		t.Fatalf("frozen producer view = {%s %q}, want valid", verdict.Status, verdict.Reason)
 	}
-	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after source edit = %v, want ErrViewChanged", err)
+	if err := view.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after source edit = %v, want ErrViewChanged", err)
 	} else if !strings.Contains(err.Error(), "changed ") || !strings.Contains(err.Error(), "view.go") {
 		t.Fatalf("drift refusal does not name the moved file: %v", err)
 	}
-	verdict, err = engine.check(context.Background(), fingerprint, subject, dir)
+	verdict, err := engine.check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4707,8 +4711,8 @@ func TestProducerViewRejectsSourceIdentityChangeWithEqualBytes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), goMod("dep-b"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after source identity change = %v, want ErrViewChanged", err)
+	if err := view.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after source identity change = %v, want ErrViewChanged", err)
 	} else if !strings.Contains(err.Error(), "moved: ") ||
 		!strings.Contains(err.Error(), "dep-a") || !strings.Contains(err.Error(), "dep-b") {
 		t.Fatalf("identity-change refusal does not name the swapped identities: %v", err)
@@ -4829,8 +4833,8 @@ func TestViewDetectsAddedInitializer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "init.go"), []byte("package view\n\nfunc init() { Value = 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after adding initializer = %v, want ErrViewChanged", err)
+	if err := view.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after adding initializer = %v, want ErrViewChanged", err)
 	}
 }
 
@@ -5045,7 +5049,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, err := v.captureObserved(context.Background(), sub)
+		fp, err := captureObservedForTest(context.Background(), v, sub)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5053,10 +5057,10 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := v.AttachObservation(sub, fp, obs); err != nil {
+		if _, err := attachObservedForTest(v, sub, fp, obs); err != nil {
 			t.Fatal(err)
 		}
-		return v.Validate(context.Background())
+		return v.validate(context.Background())
 	}
 	if err := validate(obsProducerEnv); err != nil {
 		t.Fatalf("producer-env observed validation = %v, want valid", err)
@@ -5084,7 +5088,7 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 			base = append(base, entry)
 		}
 	}
-	view := func(width string) *Snapshot {
+	binding := func(width string) *RuntimeBinding {
 		t.Helper()
 		session, err := NewSession(context.Background(), BuildDescription{Directory: dir, Environment: base, Inputs: []string{}}, SessionPolicy{})
 		if err != nil {
@@ -5094,24 +5098,20 @@ func TestRuntimeConfigGuardTracksProducerEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: append(append([]string(nil), base...), "GOMAXPROCS="+width)}).newView([]Subject{subject})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return v
+		return bindTestRuntime(t, snapshot, RuntimeDescription{Environment: append(append([]string(nil), base...), "GOMAXPROCS="+width)})
 	}
-	fingerprint, err := view("2").Capture(context.Background(), subject)
+	fingerprint, err := binding("2").CurrentFacts(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view("4").Check(context.Background(), fingerprint, subject)
+	verdict, err := binding("4").Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "runtimeconfig" {
 		t.Fatalf("moved producer width = %+v, want stale runtimeconfig", verdict)
 	}
-	verdict, err = view("2").Check(context.Background(), fingerprint, subject)
+	verdict, err = binding("2").Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5148,10 +5148,11 @@ func TestRuntimeInputCheckReobservesBaseView(t *testing.T) {
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
+	rb := bindViewForTest(t, context.Background(), view)
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.Check(context.Background(), fingerprint, subject); !errors.Is(err, ErrViewChanged) {
+	if _, err := rb.Check(context.Background(), subject, fingerprint); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("runtime-input check after base drift = %v, want ErrViewChanged", err)
 	}
 }
@@ -5185,12 +5186,23 @@ func TestRuntimeInputCheckDetectsMovementBetweenSnapshots(t *testing.T) {
 		}
 		return runtimeinput.State{Digest: digest, OK: true}, nil
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	cu, err := bindViewForTest(t, context.Background(), view).BeginCheck([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Status != Stale || verdict.Reason != "runtimeinputs" || calls != 2 {
-		t.Fatalf("moving runtime input verdict = %+v calls=%d, want stale after two observations", verdict, calls)
+	provisional, err := cu.CheckBatch(context.Background(), []Candidate{{subject, fingerprint}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provisional[0].Verdict.Status != Stale || provisional[0].Verdict.Reason != "runtimeinputs" || calls != 2 {
+		t.Fatalf("moving runtime input provisional = %+v calls=%d, want stale after two observations", provisional[0].Verdict, calls)
+	}
+	final, err := cu.Close(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final[0].Verdict.Status != Stale || final[0].Verdict.Reason != "runtimeinputs" || calls != 4 {
+		t.Fatalf("moving runtime input close = %+v calls=%d, want stale after closing endpoints", final[0].Verdict, calls)
 	}
 }
 
@@ -5226,12 +5238,13 @@ func TestCancelledContextAbortsUnchangedRuntimeCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rb := bindViewForTest(t, context.Background(), current)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := current.Check(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
+	if _, err := rb.Check(ctx, subject, fingerprint); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Check under cancelled context = %v, want context.Canceled", err)
 	}
-	verdict, err := current.Check(context.Background(), fingerprint, subject)
+	verdict, err := rb.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5280,35 +5293,32 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 		recorded[subject] = fingerprint
 	}
 
-	deferredEngine, err := newEngine(withDir(dir), withDeferredCheckClose())
-	if err != nil {
-		t.Fatal(err)
-	}
-	deferredView, err := deferredEngine.newView(context.Background(), []Subject{f, g}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
 	defaultView, err := producerEngine.newView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defaultBind := bindViewForTest(t, context.Background(), defaultView)
+	deferredUnit, err := defaultBind.BeginCheck([]Subject{f, g})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// On a quiescent tree, the default check pays exactly its one closing
-	// base observation and the deferred check pays none; both serve the
-	// same valid verdicts.
+	// On a quiescent tree, CheckBatchWithLedgers pays its one closing base
+	// observation and CheckingUnit.CheckBatch pays none until Close; both
+	// serve the same valid verdicts.
 	observations := 0
-	var defaultVerdicts, deferredVerdicts map[Subject]Verdict
+	var defaultChecked, deferredChecked []CheckedCandidate
 	var defaultPasses, deferredPasses int
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		defaultVerdicts, err = defaultView.CheckBatch(context.Background(), recorded)
+		defaultChecked, err = defaultBind.CheckBatchWithLedgers(context.Background(), orderedCandidates(recorded), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defaultPasses = observations
 		observations = 0
-		deferredVerdicts, err = deferredView.CheckBatch(context.Background(), recorded)
+		deferredChecked, err = deferredUnit.CheckBatch(context.Background(), orderedCandidates(recorded))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5317,21 +5327,19 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 	if defaultPasses != 1 || deferredPasses != 0 {
 		t.Fatalf("closing base observations: default = %d, deferred = %d; want 1 and 0", defaultPasses, deferredPasses)
 	}
-	for _, subject := range []Subject{f, g} {
-		if defaultVerdicts[subject].Status != Valid || deferredVerdicts[subject].Status != Valid {
-			t.Fatalf("quiescent verdicts: default %+v, deferred %+v, want both valid", defaultVerdicts[subject], deferredVerdicts[subject])
+	for i := range []Subject{f, g} {
+		if defaultChecked[i].Verdict.Status != Valid || deferredChecked[i].Verdict.Status != Valid {
+			t.Fatalf("quiescent verdicts: default %+v, deferred %+v, want both valid", defaultChecked[i], deferredChecked[i])
 		}
 	}
-	// The observed check path defers identically: an observed-class
-	// recording's check pays the one closing base observation by default
-	// and none under the deferred engine.
+	// Observed-class recordings behave identically across CheckBatchWithLedgers vs CheckingUnit.
 	obsProducer, err := producerEngine.newView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observedRecorded := map[Subject]Fingerprint{}
 	for _, subject := range []Subject{f, g} {
-		fingerprint, err := obsProducer.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), obsProducer, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5344,12 +5352,12 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 		observe: func() { observations++ },
 	}, func() {
 		observations = 0
-		if _, err := defaultView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+		if _, err := defaultBind.CheckBatchWithLedgers(context.Background(), orderedCandidates(observedRecorded), nil); err != nil {
 			t.Fatal(err)
 		}
 		defaultObservedPasses = observations
 		observations = 0
-		if _, err := deferredView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+		if _, err := deferredUnit.CheckBatch(context.Background(), orderedCandidates(observedRecorded)); err != nil {
 			t.Fatal(err)
 		}
 		deferredObservedPasses = observations
@@ -5358,46 +5366,45 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 		t.Fatalf("observed closing base observations: default = %d, deferred = %d; want 1 and 0", defaultObservedPasses, deferredObservedPasses)
 	}
 
-	// The deferred view's one close: validation on the unchanged tree
-	// succeeds with a single comparison observation, so the provisional
-	// verdicts of both check classes stand at the cost of one pass.
+	// CheckingUnit.Close on the unchanged tree succeeds with a single comparison
+	// observation across all rounds.
 	observations = 0
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		if err := deferredView.Validate(context.Background()); err != nil {
+		if _, err := deferredUnit.Close(context.Background()); err != nil {
 			t.Fatalf("deferred close on an unchanged tree: %v", err)
 		}
 	})
 	if observations != 1 {
-		t.Fatalf("the deferred close cost %d observations, want 1 — validation's one comparison observation closes every deferred interval", observations)
+		t.Fatalf("the deferred close cost %d observations, want 1 — Close's one comparison observation closes every round", observations)
 	}
 
-	// An edit after construction: the default check's own close refuses;
-	// the deferred check serves provisionally and the refusal lands at
-	// validation, discarding the verdicts with it.
-	editedDeferred, err := deferredEngine.newView(context.Background(), []Subject{f, g}, dir)
+	// An edit after construction: CheckBatchWithLedgers's own close refuses;
+	// CheckingUnit.CheckBatch serves provisionally and the refusal lands at Close.
+	editedView, err := producerEngine.newView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	editedDefault, err := producerEngine.newView(context.Background(), []Subject{f, g}, dir)
+	editedBind := bindViewForTest(t, context.Background(), editedView)
+	editedUnit, err := editedBind.BeginCheck([]Subject{f, g})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 1 }\nfunc G() {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := editedDefault.CheckBatch(context.Background(), recorded); !errors.Is(err, ErrViewChanged) {
+	if _, err := editedBind.CheckBatchWithLedgers(context.Background(), orderedCandidates(recorded), nil); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("default check across an edit = %v, want ErrViewChanged at the check's own close", err)
 	}
-	provisional, err := editedDeferred.CheckBatch(context.Background(), recorded)
+	provisional, err := editedUnit.CheckBatch(context.Background(), orderedCandidates(recorded))
 	if err != nil {
 		t.Fatalf("deferred check across an edit = %v, want provisional verdicts", err)
 	}
-	if provisional[f].Status != Valid {
-		t.Fatalf("provisional verdict = %+v, want valid pending the deferred close", provisional[f])
+	if provisional[0].Verdict.Status != Valid {
+		t.Fatalf("provisional verdict = %+v, want valid pending Close", provisional[0])
 	}
-	if err := editedDeferred.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+	if _, err := editedUnit.Close(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("deferred close across an edit = %v, want ErrViewChanged discarding the provisional verdicts", err)
 	}
 }
@@ -5450,8 +5457,9 @@ func TestCheckBatchHonorsCancellationDuringRuntimeObservation(t *testing.T) {
 		cancel()
 		return riCurrentCtx(hookCtx, encoded, moduleDir)
 	}
-	if _, err := current.CheckBatch(ctx, recorded); !errors.Is(err, context.Canceled) {
-		t.Fatalf("CheckBatch cancelled during runtime observation = %v, want context.Canceled", err)
+	rb := bindViewForTest(t, context.Background(), current)
+	if _, err := rb.CheckBatchWithLedgers(ctx, orderedCandidates(recorded), nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CheckBatchWithLedgers cancelled during runtime observation = %v, want context.Canceled", err)
 	}
 	if observations != 1 {
 		t.Fatalf("runtime observations after mid-observation cancel = %d, want 1", observations)
@@ -5478,8 +5486,8 @@ func TestCaptureObservedBatchReturnsContextErrorAtAnalysisBoundary(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	view.beforePreciseAnalysis = cancel
-	if _, err := view.CaptureObservedBatch(ctx); !errors.Is(err, context.Canceled) {
-		t.Fatalf("CaptureObservedBatch cancelled at the analysis boundary = %v, want context.Canceled", err)
+	if _, err := view.captureObservedBatch(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("captureObservedBatch cancelled at the analysis boundary = %v, want context.Canceled", err)
 	}
 }
 
@@ -5513,7 +5521,8 @@ func TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis(t *testing.T) {
 	}
 	analyses := 0
 	unchanged.beforePreciseAnalysis = func() { analyses++ }
-	verdict, err := unchanged.Check(context.Background(), fingerprint, subject)
+	unchangedBind := bindViewForTest(t, context.Background(), unchanged)
+	verdict, err := unchangedBind.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5522,7 +5531,7 @@ func TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis(t *testing.T) {
 	}
 	guardDrift := fingerprint
 	guardDrift.Guards.BuildConfig = "different"
-	verdict, err = unchanged.Check(context.Background(), guardDrift, subject)
+	verdict, err = unchangedBind.Check(context.Background(), subject, guardDrift)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5541,7 +5550,7 @@ func TestCheckDecidesFromRecordedEvidenceWithoutPreciseAnalysis(t *testing.T) {
 	}
 	analyses = 0
 	current.beforePreciseAnalysis = func() { analyses++ }
-	verdict, err = current.Check(context.Background(), fingerprint, subject)
+	verdict, err = bindViewForTest(t, context.Background(), current).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5567,8 +5576,8 @@ func TestObservedCaptureHonorsCancelledContext(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := view.captureObserved(ctx, subject); !errors.Is(err, context.Canceled) {
-		t.Fatalf("CaptureObserved under cancelled context = %v, want context.Canceled", err)
+	if _, err := captureObservedForTest(ctx, view, subject); !errors.Is(err, context.Canceled) {
+		t.Fatalf("captureObserved under cancelled context = %v, want context.Canceled", err)
 	}
 }
 
@@ -5596,13 +5605,14 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.Check(ctx, fingerprint, subject); !errors.Is(err, context.Canceled) {
+	rb := bindViewForTest(t, context.Background(), view)
+	if _, err := rb.Check(ctx, subject, fingerprint); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view check = %v, want context.Canceled", err)
 	}
 	stale := fingerprint
 	stale.MaximalClosure = "moved"
 	publicationCtx := &cancelAfterChecks{Context: context.Background(), after: 1}
-	if _, err := view.Check(publicationCtx, stale, subject); !errors.Is(err, context.Canceled) {
+	if _, err := rb.Check(publicationCtx, subject, stale); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled verdict publication = %v, want context.Canceled", err)
 	}
 	current, err := engine.newView(context.Background(), []Subject{subject}, dir)
@@ -5623,9 +5633,10 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 		<-ctx.Done()
 		return runtimeinput.State{}, ctx.Err()
 	}
+	rtBind := bindViewForTest(t, context.Background(), view)
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.Check(runtimeCtx, runtimeFingerprint, subject)
+		_, err := rtBind.Check(runtimeCtx, subject, runtimeFingerprint)
 		done <- err
 	}()
 	select {
@@ -5642,7 +5653,7 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("runtime-input check ignored cancellation")
 	}
-	if err := view.Validate(ctx); !errors.Is(err, context.Canceled) {
+	if err := view.validate(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view validation = %v, want context.Canceled", err)
 	}
 	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, errViewSealed) {
@@ -5667,8 +5678,8 @@ func TestObservedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.captureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("CaptureObserved after drift = %v, want ErrViewChanged", err)
+	if _, err := captureObservedForTest(context.Background(), view, subject); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("captureObserved after drift = %v, want ErrViewChanged", err)
 	}
 }
 
@@ -5695,8 +5706,8 @@ func TestObservedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
 	if err := os.WriteFile(goenv, []byte("GOFLAGS=-tags=second\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.captureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("CaptureObserved after guard drift = %v, want ErrViewChanged", err)
+	if _, err := captureObservedForTest(context.Background(), view, subject); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("captureObserved after guard drift = %v, want ErrViewChanged", err)
 	}
 }
 
@@ -5719,7 +5730,7 @@ func TestCancelledObservedCaptureDoesNotWaitForViewLock(t *testing.T) {
 	view.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.captureObserved(ctx, subject)
+		_, err := captureObservedForTest(ctx, view, subject)
 		done <- err
 	}()
 	select {
@@ -5749,14 +5760,14 @@ func TestObservedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *te
 		t.Fatal(err)
 	}
 	// Warm the proof analysis so the second capture reaches the lock wait.
-	if _, err := view.captureObserved(context.Background(), subject); err != nil {
+	if _, err := captureObservedForTest(context.Background(), view, subject); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	view.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.captureObserved(ctx, subject)
+		_, err := captureObservedForTest(ctx, view, subject)
 		done <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -5773,7 +5784,7 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	// The purity assertion flips during Validate's final re-observation
+	// The purity assertion flips during validate's final re-observation
 	// and nowhere earlier. Observation count to that point: view
 	// construction pair 2, observed capture bracket close 1, validation's
 	// seeded read 1 - so the flip lands on observation 5, the validation
@@ -5793,7 +5804,7 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5801,11 +5812,11 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+	if _, err := attachObservedForTest(view, subject, fingerprint, observation); err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after purity drift = %v, want ErrViewChanged", err)
+	if err := view.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after purity drift = %v, want ErrViewChanged", err)
 	}
 }
 
@@ -5823,7 +5834,7 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := view.Validate(context.Background()); err != nil {
+	if err := view.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, errViewSealed) {
@@ -5833,10 +5844,10 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := observedView.Validate(context.Background()); err != nil {
+	if err := observedView.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := observedView.captureObserved(context.Background(), subject); !errors.Is(err, errViewSealed) {
+	if _, err := captureObservedForTest(context.Background(), observedView, subject); !errors.Is(err, errViewSealed) {
 		t.Fatalf("observed capture after validation = %v, want ErrViewSealed", err)
 	}
 }
@@ -5866,7 +5877,7 @@ func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
 		<-release
 	}
 	go func() {
-		_, err := view.captureObserved(context.Background(), subject)
+		_, err := captureObservedForTest(context.Background(), view, subject)
 		done <- err
 	}()
 	select {
@@ -5874,7 +5885,7 @@ func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("observed capture did not reach the analysis boundary")
 	}
-	if err := view.Validate(context.Background()); err != nil {
+	if err := view.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	close(release)
@@ -5906,7 +5917,7 @@ func TestObservedCaptureIsConcurrentSafe(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			fingerprint, err := view.captureObserved(context.Background(), subject)
+			fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 			results <- fingerprint
 			errs <- err
 		}()
@@ -5949,12 +5960,12 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observation := supportedObservation(t, producer, dir, dir, "worker", "getenv OUTCOME_VALUE\n")
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+	fingerprint, err = attachObservedForTest(producer, subject, fingerprint, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5962,7 +5973,8 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	intact, err := current.CheckObserved(context.Background(), fingerprint, subject)
+	curBind := bindViewForTest(t, context.Background(), current)
+	intact, err := curBind.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5974,7 +5986,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	spliced := fingerprint
 	spliced.ObservationProof.Subject = Subject{Package: "example.com/observed", Symbol: "Sibling"}
 	spliced.ObservationProof.Evidence = observationProofEvidence(spliced)
-	verdict, err := current.CheckObserved(context.Background(), spliced, subject)
+	verdict, err := curBind.Check(context.Background(), subject, spliced)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6017,13 +6029,13 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	}
 	captured := map[Subject]Fingerprint{}
 	for _, subject := range subjects {
-		fingerprint, err := producer.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
 		captured[subject] = fingerprint
 	}
-	processView, err := producer.Sibling([]Subject{bRead})
+	processView, err := producer.sibling([]Subject{bRead})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6040,10 +6052,12 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	singleBind := bindViewForTest(t, context.Background(), singleView)
 	batchView, err := engine.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	batchBind := bindViewForTest(t, context.Background(), batchView)
 	rounds := []map[Subject]Fingerprint{
 		{aF: captured[aF], bRead: captured[bRead], bH: captured[bH]},
 	}
@@ -6065,16 +6079,20 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		for i, recorded := range rounds {
 			singles := map[Subject]Verdict{}
 			for subject, fingerprint := range recorded {
-				verdict, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+				verdict, err := singleBind.Check(context.Background(), subject, fingerprint)
 				if err != nil {
 					t.Fatal(err)
 				}
 				singles[subject] = verdict
 			}
 			observations = 0
-			batch, err := batchView.CheckObservedBatch(context.Background(), recorded)
+			batchChecked, err := batchBind.CheckBatchWithLedgers(context.Background(), orderedCandidates(recorded), nil)
 			if err != nil {
 				t.Fatal(err)
+			}
+			batch := make(map[Subject]Verdict, len(batchChecked))
+			for _, c := range batchChecked {
+				batch[c.Subject] = c.Verdict
 			}
 			for subject := range recorded {
 				if batch[subject] != singles[subject] {
@@ -6082,10 +6100,6 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 				}
 			}
 			if i == 0 {
-				// The first round genuinely exercises every disposition class:
-				// the verifiable subject answers valid, the unverifiable subject
-				// is served valid through its observation lift, and the sibling
-				// without lift evidence answers unverifiable.
 				if singles[aF].Status != Valid {
 					t.Fatalf("verifiable subject = %+v, want valid", singles[aF])
 				}
@@ -6110,42 +6124,47 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 		}
 	})
 
-	// An all-unchanged manifest-less batch answers without observations or
-	// precise analysis, and a cancelled caller context aborts the batch.
+	// CheckingUnit provisional rounds answer without base re-observations or
+	// precise analysis, and a cancelled caller context aborts the round.
 	quietView, err := engine.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observations = 0
 	analyses := 0
+	quietView.beforePreciseAnalysis = func() { analyses++ }
+	quietUnit, err := bindViewForTest(t, context.Background(), quietView).BeginCheck(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer quietUnit.Abort()
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		quietView.beforePreciseAnalysis = func() { analyses++ }
-		quiet, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{aF: captured[aF]})
+		quiet, err := quietUnit.CheckBatch(context.Background(), []Candidate{{aF, captured[aF]}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if quiet[aF].Status != Valid || observations != 0 || analyses != 0 {
-			t.Fatalf("all-unchanged batch = %+v with %d observations and %d analyses, want valid with none", quiet[aF], observations, analyses)
+		if quiet[0].Verdict.Status != Valid || observations != 0 || analyses != 0 {
+			t.Fatalf("all-unchanged provisional batch = %+v with %d observations and %d analyses, want valid with none", quiet[0], observations, analyses)
 		}
 		cancelled, cancel := context.WithCancel(context.Background())
 		cancel()
-		if _, err := quietView.CheckObservedBatch(cancelled, map[Subject]Fingerprint{aF: captured[aF]}); !errors.Is(err, context.Canceled) {
+		if _, err := quietUnit.CheckBatch(cancelled, []Candidate{{aF, captured[aF]}}); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancelled observed batch = %v, want context.Canceled", err)
 		}
 		// Evidence-only staleness — even with a runtime manifest attached — is
-		// decided without opening the observation window.
+		// decided without re-observing source or evaluating the manifest.
 		earlyStale := captured[bRead]
 		earlyStale.MaximalClosure = ""
 		earlyStale.RuntimeInputs = state.Manifest
 		earlyStale.RuntimeDigest = state.Digest
 		observations = 0
-		early, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{bRead: earlyStale})
+		early, err := quietUnit.CheckBatch(context.Background(), []Candidate{{bRead, earlyStale}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := early[bRead]; got.Status != Stale || got.Reason != "closure" || observations != 0 {
+		if got := early[0].Verdict; got.Status != Stale || got.Reason != "closure" || observations != 0 {
 			t.Fatalf("early-stale record = %+v with %d observations, want stale closure with none", got, observations)
 		}
 	})
@@ -6155,14 +6174,6 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	// The undrifted finish must re-observe the runtime window and stale a
-	// record whose runtime input moved mid-check even when the before state
-	// agreed with the recording. The drifted case pins evidence-only
-	// staleness deciding before the window: a drifted core is stale
-	// "closure" regardless of window movement. The guard-drift case
-	// additionally pins one window semantics across the single and batch
-	// forms: an already-stale verdict is not overridden by window movement,
-	// in either form.
 	for _, scenario := range []string{"unchanged", "drifted", "guard drift"} {
 		t.Run(scenario, func(t *testing.T) {
 			drift := scenario == "drifted"
@@ -6180,7 +6191,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fingerprint, err := producer.captureObserved(context.Background(), subject)
+			fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -6220,24 +6231,24 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 				t.Fatal(err)
 			}
 			movingRuntime(current)
-			verdicts, err := current.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
+			batchChecked, err := bindViewForTest(t, context.Background(), current).CheckBatchWithLedgers(context.Background(), []Candidate{{subject, fingerprint}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if verdicts[subject] != want {
-				t.Fatalf("moving runtime input in observed batch = %+v, want %+v", verdicts[subject], want)
+			if batchChecked[0].Verdict != want {
+				t.Fatalf("moving runtime input in observed batch = %+v, want %+v", batchChecked[0].Verdict, want)
 			}
 			singleView, err := engine.newView(context.Background(), []Subject{subject}, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
 			movingRuntime(singleView)
-			single, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+			single, err := bindViewForTest(t, context.Background(), singleView).Check(context.Background(), subject, fingerprint)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if single != verdicts[subject] {
-				t.Fatalf("single verdict %+v diverges from batch %+v under a moving window", single, verdicts[subject])
+			if single != batchChecked[0].Verdict {
+				t.Fatalf("single verdict %+v diverges from batch %+v under a moving window", single, batchChecked[0].Verdict)
 			}
 		})
 	}
@@ -6261,16 +6272,11 @@ func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Capture under an exhausted budget still lands a fingerprint carrying an
-	// unavailable proof — never an operation error while the caller's context
-	// is live, and never observable evidence. The reason names the budget:
-	// the record is read long after the pass, and a bare deadline error would
-	// not say whose deadline cut it.
 	captureView, err := budgeted.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprints, err := captureView.CaptureObservedBatch(context.Background())
+	fingerprints, err := captureView.captureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6280,17 +6286,13 @@ func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
 			t.Fatalf("budget-exhausted capture proof for %s = %+v, want an unavailable disposition naming the budget", subject.Symbol, fingerprint.ObservationProof)
 		}
 	}
-	// A second pass over one subject: the cut is reported for a single
-	// unproven subject too — the count is the fact, not a threshold.
 	single, err := budgeted.newView(context.Background(), subjects[:1], dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := single.captureObserved(context.Background(), subjects[0]); err != nil {
+	if _, err := captureObservedForTest(context.Background(), single, subjects[0]); err != nil {
 		t.Fatal(err)
 	}
-	// Each pass reports its cut once, with the count it left unproven —
-	// never one event per subject.
 	mu.Lock()
 	defer mu.Unlock()
 	var details []string
@@ -6306,42 +6308,35 @@ func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
 	}
 }
 
-// TestValidationReportsUnavailabilityAfterTheClosingCompare pins
-// ErrAnalysisUnavailable's contract: a validation whose proof pass the
-// budget cut still runs its closing runtime-input comparison, so a
-// runtime input moved during the pass is reported as the move, never
-// masked by the unavailability a caller would record as unverifiable
-// evidence.
 func TestValidationReportsUnavailabilityAfterTheClosingCompare(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	engine, producer, fixture, fingerprint := attachedProducer(t)
+	engine, producer, _, fingerprint := attachedProducer(t)
 	if strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("unbudgeted capture proof = %+v, want an analyzed disposition", fingerprint.ObservationProof)
 	}
-	// The validation's own proof pass runs under an exhausted budget —
-	// set on the engine after the capture, the one way to budget the
-	// validation alone (an option budgets every pass of the engine):
-	// with nothing moved, the unavailability is the verdict.
 	engine.analysisBudget = time.Nanosecond
-	if err := producer.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
+	if err := producer.validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
 		t.Fatalf("validation under a cut proof pass = %v, want ErrAnalysisUnavailable", err)
 	}
-	// The fixture moves once the proof pass has begun — after the opening
-	// runtime-input comparison passed, before the closing one runs.
+	// A fresh producer whose fixture moves once the proof pass has begun —
+	// after the opening runtime-input comparison passed, before the closing
+	// one runs — must report ErrViewChanged, never ErrAnalysisUnavailable.
+	engine2, producer2, fixture2, _ := attachedProducer(t)
+	engine2.analysisBudget = time.Nanosecond
 	var err error
 	withViewTestHooks(viewTestHookSet{
 		beforeAnalysis: func() {
-			if err := os.WriteFile(fixture, []byte("moved"), 0o644); err != nil {
+			if err := os.WriteFile(fixture2, []byte("moved"), 0o644); err != nil {
 				t.Error(err)
 			}
 		},
 	}, func() {
-		err = producer.Validate(context.Background())
+		err = producer2.validate(context.Background())
 	})
-	if err == nil || errors.Is(err, ErrAnalysisUnavailable) {
-		t.Fatalf("validation with a moved runtime input under a cut proof pass = %v, want the move reported, never the unavailability", err)
+	if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("validation with a moved runtime input under a cut proof pass = %v, want ErrViewChanged without ErrAnalysisUnavailable", err)
 	}
 }
 
@@ -6353,18 +6348,11 @@ func TestBudgetedProducerValidatesUnavailableProof(t *testing.T) {
 	if !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("budgeted capture proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
-	// The captured proof is unavailable, so validation re-establishes it by
-	// class regardless of where the fresh budget expires — never a spurious
-	// view-changed error from mismatched error text.
-	if err := producer.Validate(context.Background()); err != nil {
+	if err := producer.validate(context.Background()); err != nil {
 		t.Fatalf("budgeted validation of an unavailable proof = %v, want success", err)
 	}
 }
 
-// attachedProducer builds a one-subject module with a fixture file, an
-// engine over it with the given options, a producer view with the
-// subject's observed proof captured, and a completed observation of the
-// fixture attached: the shape every producer-validation test starts from.
 func attachedProducer(t *testing.T, opts ...option) (eng *engine, producer *Snapshot, fixture string, fingerprint Fingerprint) {
 	t.Helper()
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
@@ -6381,7 +6369,7 @@ func attachedProducer(t *testing.T, opts ...option) (eng *engine, producer *Snap
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err = producer.captureObserved(context.Background(), subject)
+	fingerprint, err = captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6389,18 +6377,12 @@ func attachedProducer(t *testing.T, opts ...option) (eng *engine, producer *Snap
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+	if _, err := attachObservedForTest(producer, subject, fingerprint, observation); err != nil {
 		t.Fatal(err)
 	}
 	return eng, producer, fixture, fingerprint
 }
 
-// TestLiveBudgetNamesNoBudgetOnAnOwnCauseRefusal pins the discriminator's
-// negative arm through the isolation retry: a batch that fails for its
-// own cause — a test-only dependency that does not compile, so the
-// subject's test-binary program never loads — refuses the subject under a
-// budget that has not expired with no budget in its reason, and the pass
-// reports no exhaustion.
 func TestLiveBudgetNamesNoBudgetOnAnOwnCauseRefusal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -6436,12 +6418,10 @@ func TestLiveBudgetNamesNoBudgetOnAnOwnCauseRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := producer.CaptureObservedBatch(context.Background())
+	batch, err := producer.captureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The closure's own load-failure prefix is the coupling the pin
-	// wants: it is what makes this refusal an own-cause one.
 	reason := batch[subject].ObservationProof.Reason
 	if !strings.HasPrefix(reason, "observation analysis unavailable: closure: load ") || strings.Contains(reason, "analysis budget") {
 		t.Fatalf("own-cause refusal under a live budget = %q; want the load failure without a budget named", reason)
@@ -6457,9 +6437,6 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	// A fresh cache: the observability memo legitimately swallows the
-	// prove phase on a hit, and this test pins the fresh-analysis
-	// sequence.
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
@@ -6473,7 +6450,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		t.Fatal(err)
 	}
 	events = nil
-	recorded, err := producer.captureObserved(context.Background(), subject)
+	recorded, err := captureObservedForTest(context.Background(), producer, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6490,28 +6467,19 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 				t.Fatalf("%s event names a package: %+v", event.Phase, event)
 			}
 		case "analysis-unavailable", "toolchain-unaudited":
-			// Diagnostic phases carry their payload in Detail; both
-			// fire only under their conditions (an isolated analysis
-			// failure; an unlisted toolchain surface), so their absence here is
-			// as legal as their presence on the next-rc leg.
 			if event.Detail == "" {
 				t.Fatalf("diagnostic phase %q carries no detail", event.Phase)
 			}
 		case "list", "hash", "typecheck", "served", "cancelled":
-			// Per-unit and served/kept reporting rides beside the
-			// step phases; pinned by TestProgressReportsUnitsServedAndKept.
 		default:
 			t.Fatalf("unknown progress phase %q", event.Phase)
 		}
 	}
-	// A cold observed capture observes once - the analysis bracket opens on
-	// the view's agreed facts and reads only at close - opens no runtime
-	// window, loads the package program once, and proves once.
 	if phases["observe"] != 1 || phases["runtime"] != 0 || phases["load"] != 1 || phases["prove"] != 1 {
 		t.Fatalf("progress phases = %v, want observe:1 load:1 prove:1", phases)
 	}
 
-	// A manifest-carrying record's window reads once, at close.
+	// A single checkRecords round reads the runtime window twice (before + after).
 	state, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
 	if err != nil {
 		t.Fatal(err)
@@ -6524,7 +6492,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		t.Fatal(err)
 	}
 	events = nil
-	if _, err := runtimeView.CheckObserved(context.Background(), withRuntime, subject); err != nil {
+	if _, err := runtimeView.checkMap(context.Background(), map[Subject]Fingerprint{subject: withRuntime}); err != nil {
 		t.Fatal(err)
 	}
 	runtimeEvents := 0
@@ -6573,11 +6541,12 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	// A runtime-input check's window opens on the view's agreed facts and
 	// reads only at close: one fresh observation, with drift across the
 	// window still refusing there.
+	currentBind := bindViewForTest(t, context.Background(), current)
 	observations := 0
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
+		if _, err := currentBind.Check(context.Background(), subject, fingerprint); err != nil {
 			t.Fatal(err)
 		}
 		if observations != 1 {
@@ -6628,7 +6597,7 @@ func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -6703,7 +6672,7 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		if err := view.Validate(context.Background()); err != nil {
+		if err := view.validate(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -6725,7 +6694,7 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc Sum(a, b int) int { return a + b + 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := view2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+	if err := view2.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("single-read validation missed the drift: %v", err)
 	}
 }
@@ -6754,7 +6723,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := producer.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -6762,10 +6731,10 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+		if _, err := attachObservedForTest(producer, subject, fingerprint, observation); err != nil {
 			t.Fatal(err)
 		}
-		if err := producer.Validate(context.Background()); err != nil {
+		if err := producer.validate(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -6778,7 +6747,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint2, err := producer2.captureObserved(context.Background(), subject)
+	fingerprint2, err := captureObservedForTest(context.Background(), producer2, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6786,7 +6755,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := producer2.AttachObservation(subject, fingerprint2, observation2); err != nil {
+	if _, err := attachObservedForTest(producer2, subject, fingerprint2, observation2); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "observed.go"), []byte("package observed\n\nfunc Sibling() int { return 2 }\n"), 0o644); err != nil {
@@ -6796,7 +6765,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		if err := producer2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+		if err := producer2.validate(context.Background()); !errors.Is(err, ErrViewChanged) {
 			t.Fatalf("seeded validation missed capture-to-validate drift: %v", err)
 		}
 	})
@@ -6854,18 +6823,18 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	withViewTestHooks(viewTestHookSet{
 		observe: func() { observations++ },
 	}, func() {
-		siblingOne, err = parent.Sibling([]Subject{aF})
+		siblingOne, err = parent.sibling([]Subject{aF})
 		if err != nil {
 			t.Fatal(err)
 		}
-		siblingTwo, err = parent.Sibling([]Subject{aF, bG})
+		siblingTwo, err = parent.sibling([]Subject{aF, bG})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if observations != 0 {
 			t.Fatalf("sibling derivation performed %d observations, want 0 — every served fact must be the parent's", observations)
 		}
-		if _, err := parent.Sibling([]Subject{{Package: "example.com/sibling/a", Symbol: "Absent"}}); err == nil {
+		if _, err := parent.sibling([]Subject{{Package: "example.com/sibling/a", Symbol: "Absent"}}); err == nil {
 			t.Fatal("sibling over a subject outside the parent view derived, want refusal")
 		}
 		oneF, err := siblingOne.Capture(context.Background(), aF)
@@ -6877,7 +6846,7 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 		}
 
 		// The parent's validation seals only the parent's transaction.
-		if err := parent.Validate(context.Background()); err != nil {
+		if err := parent.validate(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := parent.Capture(context.Background(), aF); err == nil {
@@ -6886,7 +6855,7 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 		if _, err := siblingOne.Capture(context.Background(), aF); err != nil {
 			t.Fatalf("sibling capture after the parent's validation: %v", err)
 		}
-		if err := siblingOne.Validate(context.Background()); err != nil {
+		if err := siblingOne.validate(context.Background()); err != nil {
 			t.Fatalf("sibling validation after the parent's: %v", err)
 		}
 		// A sealed parent still derives: the facts are construction-time and
@@ -6894,12 +6863,12 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 		// captured an observed proof, so the derived sibling's observed
 		// capture computes one fresh rather than serving an absent
 		// inherited proof.
-		sealedSibling, err := parent.Sibling([]Subject{aF})
+		sealedSibling, err := parent.sibling([]Subject{aF})
 		if err != nil {
 			t.Fatalf("sibling derivation from a sealed parent: %v", err)
 		}
 		observations = 0
-		if _, err := sealedSibling.captureObserved(context.Background(), aF); err != nil {
+		if _, err := captureObservedForTest(context.Background(), sealedSibling, aF); err != nil {
 			t.Fatalf("observed capture over a subject the parent never captured: %v", err)
 		}
 		if observations == 0 {
@@ -6913,7 +6882,7 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	if _, err := siblingTwo.Capture(context.Background(), bG); err != nil {
 		t.Fatalf("second sibling capture after first sibling's validation: %v", err)
 	}
-	if err := siblingTwo.Validate(context.Background()); err != nil {
+	if err := siblingTwo.validate(context.Background()); err != nil {
 		t.Fatalf("second sibling validation: %v", err)
 	}
 
@@ -6924,15 +6893,15 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	observedFPs, err := attachParent.CaptureObservedBatch(context.Background())
+	observedFPs, err := attachParent.captureObservedBatch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	attachOne, err := attachParent.Sibling([]Subject{aF})
+	attachOne, err := attachParent.sibling([]Subject{aF})
 	if err != nil {
 		t.Fatal(err)
 	}
-	attachTwo, err := attachParent.Sibling([]Subject{aF, bG})
+	attachTwo, err := attachParent.sibling([]Subject{aF, bG})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6940,38 +6909,38 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := attachOne.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+	if _, err := attachObservedForTest(attachOne, aF, observedFPs[aF], observation); err != nil {
 		t.Fatalf("first sibling attach: %v", err)
 	}
-	if _, err := attachTwo.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+	if _, err := attachObservedForTest(attachTwo, aF, observedFPs[aF], observation); err != nil {
 		t.Fatalf("second sibling attach of the same subject: %v", err)
 	}
-	if _, err := attachOne.AttachObservation(aF, observedFPs[aF], observation); err == nil {
+	if _, err := attachObservedForTest(attachOne, aF, observedFPs[aF], observation); err == nil {
 		t.Fatal("re-attachment on one sibling succeeded, want the once-per-transaction refusal")
 	}
 	// The campaign's endgame: a sibling of an observed parent attaches
 	// its target's runtime evidence and validates through the observed
 	// arm on an unchanged tree.
-	if _, err := attachTwo.AttachObservation(bG, observedFPs[bG], observation); err != nil {
+	if _, err := attachObservedForTest(attachTwo, bG, observedFPs[bG], observation); err != nil {
 		t.Fatal(err)
 	}
-	if err := attachTwo.Validate(context.Background()); err != nil {
+	if err := attachTwo.validate(context.Background()); err != nil {
 		t.Fatalf("observed-arm sibling validation on an unchanged tree: %v", err)
 	}
 	// Subject order never shapes the narrowed union: a reversed-order
 	// sibling over both packages still validates the unchanged tree (the
 	// union recipe sorts; an order-carrying union would falsely refuse).
-	reversed, err := attachParent.Sibling([]Subject{bG, aF})
+	reversed, err := attachParent.sibling([]Subject{bG, aF})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reversed.AttachObservation(aF, observedFPs[aF], observation); err != nil {
+	if _, err := attachObservedForTest(reversed, aF, observedFPs[aF], observation); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reversed.AttachObservation(bG, observedFPs[bG], observation); err != nil {
+	if _, err := attachObservedForTest(reversed, bG, observedFPs[bG], observation); err != nil {
 		t.Fatal(err)
 	}
-	if err := reversed.Validate(context.Background()); err != nil {
+	if err := reversed.validate(context.Background()); err != nil {
 		t.Fatalf("reversed-order sibling validation on an unchanged tree: %v", err)
 	}
 }
@@ -7004,14 +6973,14 @@ func TestSiblingValidationRefusesDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sibling, err := parent.Sibling([]Subject{aF})
+	sibling, err := parent.sibling([]Subject{aF})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "a", "a.go"), []byte("package a\n\nfunc F() int { return 3 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := sibling.Validate(context.Background()); err == nil {
+	if err := sibling.validate(context.Background()); err == nil {
 		t.Fatal("sibling validated a drifted tree, want refusal")
 	}
 }
@@ -7050,7 +7019,7 @@ func TestSiblingCrossPackageClosureValidatesUnchangedTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sibling, err := parent.Sibling([]Subject{aF})
+	sibling, err := parent.sibling([]Subject{aF})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7068,7 +7037,7 @@ func TestSiblingCrossPackageClosureValidatesUnchangedTree(t *testing.T) {
 	if !hasA || !hasB {
 		t.Fatalf("cross-package closure union = %v, want both packages' sources", sibling.SourceFiles())
 	}
-	if err := sibling.Validate(context.Background()); err != nil {
+	if err := sibling.validate(context.Background()); err != nil {
 		t.Fatalf("cross-package-closure sibling validation on an unchanged tree: %v", err)
 	}
 }
@@ -7107,7 +7076,7 @@ func TestRuntimeInputManifestEvaluationSharedPerPhase(t *testing.T) {
 		calls++
 		return runtimeinput.State{Digest: "recorded", OK: true}, nil
 	}
-	verdicts, err := view.CheckBatch(context.Background(), recorded)
+	verdicts, err := view.checkMap(context.Background(), recorded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7151,7 +7120,7 @@ func TestDotlessModuleKeepsStartupRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7191,7 +7160,7 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -7225,7 +7194,7 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -7282,11 +7251,11 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range subjects {
-		fingerprint, err := producer.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), producer, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+		if _, err := attachObservedForTest(producer, subject, fingerprint, observation); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -7295,7 +7264,7 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 		calls++
 		return state, nil
 	}
-	if err := producer.Validate(context.Background()); err != nil {
+	if err := producer.validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 2 {
@@ -7392,7 +7361,7 @@ func TestSiblingCarriesPackageProcessDischarges(t *testing.T) {
 	if fingerprint.PackageProcessDischarges == "" {
 		t.Fatal("setup: the union capture carries no discharge to test the carry")
 	}
-	sibling, err := view.Sibling([]Subject{subject})
+	sibling, err := view.sibling([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7431,10 +7400,11 @@ func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
 	if fingerprint.DynamicStateStrategy != DynamicStateStrategy {
 		t.Fatalf("capture recorded strategy %q, want the engine's own", fingerprint.DynamicStateStrategy)
 	}
+	bound := bindViewForTest(t, context.Background(), view)
 	for name, recorded := range map[string]string{"moved": "gofresh/dynamic-state@1", "predates the field": ""} {
 		stale := fingerprint
 		stale.DynamicStateStrategy = recorded
-		verdict, err := view.Check(context.Background(), stale, subject)
+		verdict, err := bound.Check(context.Background(), subject, stale)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -7442,7 +7412,7 @@ func TestDynamicStateStrategyMoveRefusesAtCheck(t *testing.T) {
 			t.Fatalf("%s: verdict = %+v, want the strategy refusal", name, verdict)
 		}
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bound.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7488,7 +7458,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdict, err := view.Check(context.Background(), fingerprint, subject)
+		verdict, err := checkViewForTest(context.Background(), view, subject, fingerprint)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -7647,7 +7617,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			verdict, err := view.Check(context.Background(), fingerprint, subject)
+			verdict, err := checkViewForTest(context.Background(), view, subject, fingerprint)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7680,11 +7650,11 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// then reports that unavailability after every other check.
 		withStraddle(t, 1, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
 			subject := Subject{Package: "example.com/view", Symbol: "F"}
-			fingerprint, err := view.captureObserved(context.Background(), subject)
+			fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 			if err != nil {
 				t.Fatalf("CaptureObserved after a cut construction = %v, want the capture to keep the view's fail-closed facts", err)
 			}
-			if verdict, err := view.Check(context.Background(), fingerprint, subject); err != nil || verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") {
+			if verdict, err := checkViewForTest(context.Background(), view, subject, fingerprint); err != nil || verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") {
 				t.Fatalf("the captured record's verdict = %+v (%v), want the cut's fail-closed refusal naming the budget", verdict, err)
 			}
 			// A stable attached observation: the observed validation runs
@@ -7697,10 +7667,10 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+			if _, err := attachObservedForTest(view, subject, fingerprint, observation); err != nil {
 				t.Fatal(err)
 			}
-			if err := view.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
+			if err := view.validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("validation after a cut construction = %v, want ErrAnalysisUnavailable (held, reported last)", err)
 			}
 		})
@@ -7713,7 +7683,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// behind every other check.
 		withStraddle(t, 4, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
 			subject := Subject{Package: "example.com/view", Symbol: "F"}
-			fingerprint, err := view.captureObserved(context.Background(), subject)
+			fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -7726,13 +7696,13 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+			if _, err := attachObservedForTest(view, subject, fingerprint, observation); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			err = view.Validate(context.Background())
+			err = view.validate(context.Background())
 			if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("validation with a moved input and a cut re-observation = %v, want the moved input reported as drift, the cut held behind it", err)
 			}
@@ -7742,7 +7712,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// Passes 1 and 2 build the view uncut (discharged); the third
 		// pass — the validation's re-observation — is cut.
 		withStraddle(t, 3, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
-			err := view.Validate(context.Background())
+			err := view.validate(context.Background())
 			if !errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "example.com/view.F") {
 				t.Fatalf("validation under a cut re-observation = %v, want ErrAnalysisUnavailable naming the subject", err)
 			}
@@ -7943,7 +7913,7 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 		t.Fatal("warm memo invented a typed source generation")
 	}
 	for _, subject := range scanMemoSubjects {
-		if !cold.facts.maximal[subject].equal(warm.facts.maximal[subject], false) {
+		if !cold.facts.subjects[subject].maximal.equal(warm.facts.subjects[subject].maximal, false) {
 			t.Fatalf("complete base facts differ across cold/warm paths for %v", subject)
 		}
 	}
@@ -8326,7 +8296,7 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 		if view.facts.snapshot == nil {
 			t.Fatal("view retained no construction snapshot")
 		}
-		if _, err := view.captureObserved(context.Background(), subject); err != nil {
+		if _, err := captureObservedForTest(context.Background(), view, subject); err != nil {
 			t.Fatal(err)
 		}
 		if seen != view.facts.snapshot {
@@ -8385,7 +8355,7 @@ func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
 	if err := os.WriteFile(goenv, []byte("GOFLAGS=-overlay=/absent.json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = view.captureObserved(context.Background(), subject)
+	_, err = captureObservedForTest(context.Background(), view, subject)
 	if err == nil || !strings.Contains(err.Error(), "overlay") {
 		t.Fatalf("mid-window overlay capture = %v, want the build-flag overlay refusal", err)
 	}
@@ -8427,7 +8397,7 @@ func TestExternalTestSubjectCollisionRefusesCaptureSubjectLocally(t *testing.T) 
 	if fingerprint.PurityAssertion != "" {
 		t.Fatalf("external twin's directive conferred purity on the collapsed identity: %q", fingerprint.PurityAssertion)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8457,7 +8427,7 @@ func TestResolvedStandardInterfaceTargetIsClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8480,11 +8450,11 @@ func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8514,7 +8484,7 @@ func TestExternalCallbackFromStandardLibraryIsClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8537,11 +8507,11 @@ func TestStandardGlobalStateIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8561,6 +8531,9 @@ func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	if runtime.GOOS != "linux" {
+		t.Skip("measurement support requires Linux")
+	}
 	dir := writeViewModule(t, "package view\n")
 	if err := os.WriteFile(filepath.Join(dir, "benchmark_test.go"), []byte("package view\n\nimport \"testing\"\n\nfunc BenchmarkF(b *testing.B) { _ = b.N }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -8574,11 +8547,16 @@ func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	bound := bindViewForTest(t, context.Background(), view)
+	rv, err := bound.newView([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	fingerprint, err := captureObservedForTest(context.Background(), rv, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := bound.Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8619,7 +8597,7 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -8646,7 +8624,7 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -8670,7 +8648,7 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
+		fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -8722,11 +8700,11 @@ func TestSystemObjectRemainsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8752,7 +8730,7 @@ func TestExternalStandardLinknameTargetBlocksObservationProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8777,7 +8755,7 @@ func TestProductionFunctionNamedTestMainIsAnalyzable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatalf("production TestMain was not analyzable: %v", err)
 	}
@@ -8803,7 +8781,7 @@ func TestProductionTestMainSignatureIsNotHarnessSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
+	fingerprint, err := captureObservedForTest(context.Background(), view, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -8837,12 +8815,21 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 	if declared, err := bindTestRuntime(t, all, RuntimeDescription{}).CurrentFacts(t.Context(), g); err != nil || declared.MaximalClosure == "" {
 		t.Fatalf("the excluded subject is not a real declaration: %v", err)
 	}
-	selected, err := all.Sibling([]Subject{f})
+	selected, err := all.sibling([]Subject{f})
 	if err != nil {
 		t.Fatal(err)
 	}
 	view := selected
 	bound := bindTestRuntime(t, selected, RuntimeDescription{})
+	cu, err := bound.BeginCheck([]Subject{f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cu.Abort()
+	fpF, err := view.Capture(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	view.beforePreciseAnalysis = func() { t.Fatal("membership refusal started proof work") }
 	observation, err := runtimeinput.Incomplete(dir, "unrelated-process", "no completion", os.Environ())
 	if err != nil {
@@ -8850,11 +8837,16 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 	}
 	for name, call := range map[string]func() error{
 		"capture":          func() error { _, err := view.Capture(t.Context(), g); return err },
-		"observed capture": func() error { _, err := view.captureObserved(t.Context(), g); return err },
+		"observed capture": func() error { _, err := captureObservedForTest(t.Context(), view, g); return err },
 		"source files":     func() error { _, err := view.SourceFilesFor(g); return err },
 		"ledger":           func() error { _, err := view.TestVariantLedger(g); return err },
-		"attachment":       func() error { _, err := view.AttachObservation(g, Fingerprint{}, observation); return err },
+		"attachment":       func() error { _, err := attachObservedForTest(view, g, Fingerprint{}, observation); return err },
 		"binding facts":    func() error { _, err := bound.CurrentFacts(t.Context(), g); return err },
+		"checking batch":   func() error { _, err := cu.CheckBatch(t.Context(), []Candidate{{g, fpF}}); return err },
+		"check batch with ledgers": func() error {
+			_, err := bound.CheckBatchWithLedgers(t.Context(), []Candidate{{g, fpF}}, nil)
+			return err
+		},
 		"snapshot sources": func() error { _, err := selected.SourceFilesFor(g); return err },
 		"snapshot ledger":  func() error { _, err := selected.TestVariantLedger(g); return err },
 	} {
@@ -8952,39 +8944,22 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 
 func TestResolveToolchainSelection(t *testing.T) {
 	dir := t.TempDir()
-	build := BuildDescription{Directory: dir, Environment: os.Environ()}
-	if _, err := ResolveToolchainSelection(nil, build); err == nil {
-		t.Fatal("nil context accepted by ResolveToolchainSelection")
-	}
-	if _, err := ResolveToolchainSelection(context.Background(), BuildDescription{Environment: os.Environ()}); err == nil {
-		t.Fatal("empty directory accepted by ResolveToolchainSelection")
-	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := ResolveToolchainSelection(cancelled, build); err == nil {
-		t.Fatal("cancelled context accepted by ResolveToolchainSelection")
-	}
+	build := BuildDescription{Directory: dir, Environment: os.Environ(), Inputs: []string{}}
 	var nilSession *Session
 	if _, err := nilSession.ToolchainSelection(context.Background()); err == nil {
 		t.Fatal("nil session accepted by ToolchainSelection")
 	}
-	if _, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), GoEnv: map[string]string{}}); err == nil {
-		t.Fatal("empty GoEnv map accepted by ResolveToolchainSelection")
+	sess, err := NewSession(context.Background(), build, SessionPolicy{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := CaptureGuards(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), GoEnv: map[string]string{}}, nil, CodeResult); err == nil {
-		t.Fatal("empty GoEnv map accepted by CaptureGuards")
+	if _, err := sess.ToolchainSelection(nil); err == nil {
+		t.Fatal("nil context accepted by ToolchainSelection")
 	}
-	if _, err := CaptureGuards(context.Background(), BuildDescription{
-		Directory: dir,
-		GoEnv: map[string]string{
-			"GOVERSION":  "go1.27.0",
-			"GOHOSTOS":   runtime.GOOS,
-			"GOHOSTARCH": runtime.GOARCH,
-			"GOOS":       runtime.GOOS,
-			"GOARCH":     runtime.GOARCH,
-		},
-	}, nil, CodeResult); err == nil {
-		t.Fatal("nil Environment accepted by CaptureGuards when GoEnv is primed")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := sess.ToolchainSelection(cancelled); err == nil {
+		t.Fatal("cancelled context accepted by ToolchainSelection")
 	}
 	linkDir := filepath.Join(t.TempDir(), "link")
 	if err := os.Symlink(dir, linkDir); err != nil {
@@ -8994,33 +8969,23 @@ func TestResolveToolchainSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	envSpawns := 0
 	var seenDirs []string
-	primedGuard, err := CaptureGuards(context.Background(), BuildDescription{
-		Directory:   linkDir,
-		Environment: os.Environ(),
-		GoEnv: map[string]string{
-			"GOVERSION":  "go1.27.0",
-			"GOHOSTOS":   runtime.GOOS,
-			"GOHOSTARCH": runtime.GOARCH,
-			"GOOS":       runtime.GOOS,
-			"GOARCH":     runtime.GOARCH,
-		},
-	}, nil, CodeResult, func(cmd *exec.Cmd) {
-		seenDirs = append(seenDirs, cmd.Dir)
-		if len(cmd.Args) > 1 && cmd.Args[1] == "env" {
-			envSpawns++
-		}
-	})
-	if err != nil || primedGuard.Toolchain == "" || primedGuard.BuildConfig == "" || envSpawns != 0 {
-		t.Fatalf("primed CaptureGuards: guards=%+v err=%v envSpawns=%d", primedGuard, err, envSpawns)
-	}
 	degradedEnv := environmentWith(map[string]string{"GOENV": "off", "GOFLAGS": "-tags"})
-	degraded, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: linkDir, Environment: degradedEnv}, func(cmd *exec.Cmd) {
-		seenDirs = append(seenDirs, cmd.Dir)
+	degradedSess, err := NewSession(context.Background(), BuildDescription{
+		Directory:   linkDir,
+		Environment: degradedEnv,
+		Inputs:      []string{},
+	}, SessionPolicy{
+		PrepareCommand: func(cmd *exec.Cmd) {
+			seenDirs = append(seenDirs, cmd.Dir)
+		},
 	})
 	if err != nil {
-		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS: %v", err)
+		t.Fatalf("NewSession degraded GOFLAGS: %v", err)
+	}
+	degraded, err := degradedSess.ToolchainSelection(context.Background())
+	if err != nil {
+		t.Fatalf("ToolchainSelection degraded GOFLAGS: %v", err)
 	}
 	for _, seenDir := range seenDirs {
 		if seenDir != resolvedDir {
@@ -9028,17 +8993,17 @@ func TestResolveToolchainSelection(t *testing.T) {
 		}
 	}
 	if degraded.ToolchainContent != "" || degraded.AdmissionPolicy == "" || !strings.Contains(degraded.SelectionNotice, "-tags (from $GOFLAGS)") {
-		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS = %+v", degraded)
+		t.Fatalf("ToolchainSelection degraded GOFLAGS = %+v", degraded)
 	}
 	if testing.Short() {
 		t.Skip("audits the host toolchain selection via go list")
 	}
-	sel, err := ResolveToolchainSelection(context.Background(), build)
+	sel, err := sess.ToolchainSelection(context.Background())
 	if err != nil {
-		t.Fatalf("ResolveToolchainSelection: %v", err)
+		t.Fatalf("ToolchainSelection: %v", err)
 	}
 	if sel.ToolchainContent == "" || sel.AdmissionPolicy == "" {
-		t.Fatalf("ResolveToolchainSelection returned empty digests: %+v", sel)
+		t.Fatalf("ToolchainSelection returned empty digests: %+v", sel)
 	}
 }
 
@@ -9274,11 +9239,11 @@ func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
 	}
 
 	events = nil
-	sib1, err := parent.Sibling([]Subject{s1})
+	sib1, err := parent.sibling([]Subject{s1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp1, err := sib1.captureObserved(ctx, s1)
+	fp1, err := captureObservedForTest(ctx, sib1, s1)
 	if err != nil {
 		t.Fatalf("sib1 captureObserved: %v", err)
 	}
@@ -9299,11 +9264,11 @@ func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
 	// Second sibling for s2 must hit the memo populated by sib1's package-mate batching
 	// with 0 SSA loads and 0 prove events.
 	events = nil
-	sib2, err := parent.Sibling([]Subject{s2})
+	sib2, err := parent.sibling([]Subject{s2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp2, err := sib2.captureObserved(ctx, s2)
+	fp2, err := captureObservedForTest(ctx, sib2, s2)
 	if err != nil {
 		t.Fatalf("sib2 captureObserved: %v", err)
 	}
@@ -9319,11 +9284,11 @@ func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
 	// Third sibling for s3 also hits the memo populated by sib1's package-mate batching
 	// with 0 SSA loads and 0 prove events.
 	events = nil
-	sib3, err := parent.Sibling([]Subject{s3})
+	sib3, err := parent.sibling([]Subject{s3})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp3, err := sib3.captureObserved(ctx, s3)
+	fp3, err := captureObservedForTest(ctx, sib3, s3)
 	if err != nil {
 		t.Fatalf("sib3 captureObserved: %v", err)
 	}
@@ -9422,7 +9387,7 @@ func TestMutableLocalFactsReuseAcrossUnchangedSnapshotPassesAndInvalidateOnEdit(
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := snap.Check(context.Background(), fp, subject)
+	verdict, err := bindViewForTest(t, context.Background(), snap).Check(context.Background(), subject, fp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9513,7 +9478,7 @@ func TestMutableLocalFactsReuseAcrossUnchangedSnapshotPassesAndInvalidateOnEdit(
 		if err != nil {
 			t.Fatal(err)
 		}
-		cleanVerdict, err := cleanSnap.Check(context.Background(), cleanFP, subj)
+		cleanVerdict, err := bindViewForTest(t, context.Background(), cleanSnap).Check(context.Background(), subj, cleanFP)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -9601,7 +9566,7 @@ func TestMutableLocalFactsReuseAcrossUnchangedSnapshotPassesAndInvalidateOnEdit(
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredVerdict, err := restoredSnap.Check(context.Background(), restoredFP, dischargeSubj)
+	restoredVerdict, err := bindViewForTest(t, context.Background(), restoredSnap).Check(context.Background(), dischargeSubj, restoredFP)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9671,7 +9636,7 @@ func Arm() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := singleSnap.Check(context.Background(), fp, subject)
+	verdict, err := bindViewForTest(t, context.Background(), singleSnap).Check(context.Background(), subject, fp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9761,7 +9726,7 @@ func TestSubjectFn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := snap.Check(context.Background(), fp, subj)
+	verdict, err := bindViewForTest(t, context.Background(), snap).Check(context.Background(), subj, fp)
 	if err != nil {
 		t.Fatal(err)
 	}

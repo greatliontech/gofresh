@@ -21,7 +21,6 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
 // testEntryDigest satisfies the entry-digest shape for hand-built manifests;
@@ -43,13 +42,13 @@ func (c *cancelAfterChecks) Err() error {
 
 func TestCurrentHonorsCancellation(t *testing.T) {
 	moduleDir := t.TempDir()
-	state, err := ambientMerge(moduleDir)
+	encoded, err := encode(manifest{Version: manifestVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := Current(ctx, state.Manifest, moduleDir, os.Environ()); !errors.Is(err, context.Canceled) {
+	if _, err := Current(ctx, encoded, moduleDir, os.Environ()); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled current check = %v, want context.Canceled", err)
 	}
 }
@@ -102,7 +101,7 @@ func testDirs(t *testing.T) (string, string) {
 	return moduleDir, packageDir
 }
 
-func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
+func TestIncompleteObservationIsDistinctFromCompletedEmpty(t *testing.T) {
 	moduleDir := t.TempDir()
 	incomplete, err := ambientIncomplete(moduleDir, "worker", "test process timed out")
 	if err != nil {
@@ -111,19 +110,19 @@ func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
 	if !incomplete.OK || !incomplete.Unverifiable || !strings.Contains(incomplete.Reason, "timed out") {
 		t.Fatalf("Incomplete = %+v", incomplete)
 	}
-	empty, err := ambientMerge(moduleDir)
+	empty, err := ambientFromTestLog(nil, moduleDir, moduleDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if incomplete.Manifest == empty.Manifest {
 		t.Fatal("incomplete observation equals completed empty observation")
 	}
-	merged, err := ambientMerge(moduleDir, empty, incomplete)
+	cur, err := ambientCurrent(incomplete.Manifest, moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !merged.Unverifiable || !strings.Contains(merged.Reason, "timed out") {
-		t.Fatalf("merged incomplete evidence = %+v", merged)
+	if cur != incomplete.State || !cur.Unverifiable || !strings.Contains(cur.Reason, "timed out") {
+		t.Fatalf("current incomplete evidence = %+v, want %+v", cur, incomplete.State)
 	}
 	if _, err := ambientIncomplete(moduleDir, "worker", " "); err == nil {
 		t.Fatal("Incomplete accepted an empty reason")
@@ -132,86 +131,6 @@ func TestIncompleteObservationIsDistinctAndMergeable(t *testing.T) {
 		if _, err := ambientIncomplete(moduleDir, "worker", reason); err == nil {
 			t.Errorf("Incomplete accepted unsafe reason %q", reason)
 		}
-	}
-}
-
-func TestAbsoluteIdentitiesMergeAcrossModuleRoots(t *testing.T) {
-	moduleA, packageA := testDirs(t)
-	moduleB, packageB := testDirs(t)
-	pathA := filepath.Join(packageA, "a.txt")
-	pathB := filepath.Join(packageB, "b.txt")
-	if err := os.WriteFile(pathA, []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(pathB, []byte("b"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	a, err := ambientFromTestLog([]byte("open a.txt\n"), moduleA, packageA, WithCompletedProcess("module-a"), WithBracket(testBracket(t, moduleA)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := ambientFromTestLog([]byte("open b.txt\n"), moduleB, packageB, WithCompletedProcess("module-b"), WithBracket(testBracket(t, moduleB)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err = ambientAbsolute(a, moduleA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err = ambientAbsolute(b, moduleB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := ambientMerge(t.TempDir(), a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths, err := Paths(merged.Manifest, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(paths, []string{pathA, pathB}) {
-		t.Fatalf("merged absolute paths = %v, want [%s %s]", paths, pathA, pathB)
-	}
-}
-
-func TestAbsoluteIdentitiesNeverSuppressUnverifiability(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	external := filepath.Join(t.TempDir(), "external.txt")
-	if err := os.WriteFile(external, []byte("external"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(external, filepath.Join(packageDir, "link")); err != nil {
-		t.Skipf("symlink unavailable: %v", err)
-	}
-	state, err := ambientFromTestLog([]byte("open link\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !state.Unverifiable {
-		t.Fatal("external symlink target was not unverifiable before conversion")
-	}
-	converted, err := ambientAbsolute(state, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !converted.Unverifiable || converted.Reason == "" {
-		t.Fatalf("Absolute suppressed unverifiability: %+v", converted)
-	}
-
-	regular := filepath.Join(packageDir, "regular.txt")
-	if err := os.WriteFile(regular, []byte("before"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	state, err = ambientFromTestLog([]byte("open regular.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(regular, []byte("after"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientAbsolute(state, moduleDir); err == nil {
-		t.Fatal("Absolute accepted a moved state")
 	}
 }
 
@@ -303,48 +222,6 @@ func TestFromTestLogMarksPWDUnverifiable(t *testing.T) {
 	}
 }
 
-func TestEnvironmentStateAbsoluteAndMergeUseSuppliedEnvironment(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "fixture.txt"), []byte("fixture"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GOWORK", "/ambient/workspace")
-	env := []string{"GOWORK=/explicit/workspace"}
-	state, err := FromTestLog([]byte("getenv GOWORK\nopen fixture.txt\n"), moduleDir, packageDir, env, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	absolute, err := Absolute(state, moduleDir, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientAbsolute(state, moduleDir); err == nil {
-		t.Fatal("ambient Absolute accepted a state finalized under a different environment")
-	}
-	incomplete, err := Incomplete(moduleDir, "worker-incomplete", "worker interrupted", env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mergeDir := t.TempDir()
-	merged, err := Merge(mergeDir, env, absolute, incomplete)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := ambientCurrentEnv(merged.Manifest, mergeDir, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current != merged.State || !merged.Unverifiable {
-		t.Fatalf("merged explicit-environment state = %+v, current = %+v", merged, current)
-	}
-	if _, err := ambientMerge(mergeDir, absolute, incomplete); err == nil {
-		t.Fatal("ambient Merge accepted states finalized under a different environment")
-	}
-	if _, err := Merge(mergeDir, []string{"GOWORK=/other/workspace"}, absolute); err == nil {
-		t.Fatal("Merge accepted a state finalized under a different supplied environment")
-	}
-}
-
 func TestAmbientConstructionWrappersMatchAmbientEnvironment(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GOWORK", "/ambient/workspace")
@@ -370,28 +247,6 @@ func TestAmbientConstructionWrappersMatchAmbientEnvironment(t *testing.T) {
 	}
 	if !reflect.DeepEqual(incompleteAmbient, incompleteEnv) {
 		t.Fatal("Incomplete wrapper differs from ambient Env variant")
-	}
-	absoluteAmbient, err := ambientAbsolute(fromAmbient, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	absoluteEnv, err := Absolute(fromEnv, dir, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(absoluteAmbient, absoluteEnv) {
-		t.Fatal("Absolute wrapper differs from ambient Env variant")
-	}
-	mergedAmbient, err := ambientMerge(dir, absoluteAmbient, incompleteAmbient)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mergedEnv, err := Merge(dir, env, absoluteEnv, incompleteEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(mergedAmbient, mergedEnv) {
-		t.Fatal("Merge wrapper differs from ambient Env variant")
 	}
 }
 
@@ -942,59 +797,6 @@ func TestPathsMaterializesRelativeAndExternalIdentities(t *testing.T) {
 	}
 }
 
-func TestMergeUnionsIndependentProcessManifests(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	for _, name := range []string{"a.txt", "b.txt"} {
-		if err := os.WriteFile(filepath.Join(packageDir, name), []byte(name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("MERGE_A", "a")
-	t.Setenv("MERGE_B", "b")
-	a, err := ambientFromTestLog([]byte("getenv MERGE_A\nopen a.txt\nunknown first\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := ambientFromTestLog([]byte("getenv MERGE_B\nopen b.txt\nbadline\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	merged, err := ambientMerge(moduleDir, a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := decode(merged.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envNames []string
-	for _, entry := range m.Env {
-		envNames = append(envNames, entry.Name)
-	}
-	if got := strings.Join(envNames, ","); got != "MERGE_A,MERGE_B" {
-		t.Fatalf("merged env = %q", got)
-	}
-	if len(m.Paths) != 2 || m.Paths[0].Path != "pkg/a.txt" || m.Paths[1].Path != "pkg/b.txt" {
-		t.Fatalf("merged paths = %+v", m.Paths)
-	}
-	wantReasons := "malformed testlog line,unrecognized testlog op: unknown"
-	if got := strings.Join(m.Unverifiable, ","); got != wantReasons || !merged.Unverifiable {
-		t.Fatalf("merged unverifiable = %v state=%+v", m.Unverifiable, merged)
-	}
-
-	if err := os.WriteFile(filepath.Join(packageDir, "b.txt"), []byte("changed"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	changed, err := ambientCurrent(merged.Manifest, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed.Digest == merged.Digest {
-		t.Fatal("change to second process input did not move merged digest")
-	}
-}
-
 func TestCompletedObservationRequiresProcessAssertion(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	if _, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir); err == nil {
@@ -1030,215 +832,31 @@ func TestCompletedObservationRetainsMalformedRecords(t *testing.T) {
 	}
 }
 
-func TestMergeRejectsConflictingEvidenceForOneProcess(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	first, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := ambientIncomplete(moduleDir, "worker", "worker interrupted")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientMerge(moduleDir, first, second); err == nil {
-		t.Fatal("conflicting evidence for one process was merged")
-	}
-}
-
-func TestProducerOperationsRejectRecomputedState(t *testing.T) {
+func TestCompletedStateRejectsUnsealedAndTamperedObservations(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	state, err := ambientCurrent(rawManifest(t, manifest{Version: manifestVersion}), moduleDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	forged := Observation{State: state}
-	if _, err := ambientMerge(moduleDir, forged); err == nil {
-		t.Fatal("merge accepted checker-recomputed state")
+	if _, err := CompletedState(forged); err == nil || !strings.Contains(err.Error(), "no process provenance") {
+		t.Fatalf("CompletedState(forged) = %v, want no process provenance", err)
 	}
-	if _, err := ambientAbsolute(forged, moduleDir); err == nil {
-		t.Fatal("absolute conversion accepted checker-recomputed state")
+	incomplete := Observation{process: "worker", State: State{OK: false}}
+	if _, err := CompletedState(incomplete); err == nil || !strings.Contains(err.Error(), "incomplete") {
+		t.Fatalf("CompletedState(incomplete) = %v, want incomplete state refusal", err)
 	}
 	valid, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	got, err := CompletedState(valid)
+	if err != nil || got != valid.State {
+		t.Fatalf("CompletedState(valid) = %+v, %v; want %+v", got, err, valid.State)
+	}
 	valid.State = state
-	if _, err := ambientMerge(moduleDir, valid); err == nil {
-		t.Fatal("merge accepted transplanted state under genuine provenance")
-	}
-	if _, err := ambientAbsolute(valid, moduleDir); err == nil {
-		t.Fatal("absolute conversion accepted transplanted state under genuine provenance")
-	}
-}
-
-func TestMergeRejectsRelativeAndAbsoluteEvidenceForOneProcess(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "fixture"), []byte("fixture"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	relative, err := ambientFromTestLog([]byte("open fixture\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	absolute, err := ambientAbsolute(relative, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientMerge(moduleDir, relative, absolute); err == nil {
-		t.Fatal("relative and absolute evidence for one process were merged")
-	}
-	absoluteAgain, err := ambientAbsolute(absolute, moduleDir)
-	if err != nil || !reflect.DeepEqual(absoluteAgain, absolute) {
-		t.Fatalf("absolute conversion is not idempotent: %+v != %+v, err=%v", absoluteAgain, absolute, err)
-	}
-}
-
-func TestAbsolutePreservesCompletedVersusIncompleteOrigin(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	completed, err := ambientFromTestLog([]byte("\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	incomplete, err := ambientIncomplete(moduleDir, "worker", "malformed testlog line")
-	if err != nil {
-		t.Fatal(err)
-	}
-	completed, err = ambientAbsolute(completed, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	incomplete, err = ambientAbsolute(incomplete, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if completed.State != incomplete.State {
-		t.Fatalf("test precondition failed: completed=%+v incomplete=%+v", completed.State, incomplete.State)
-	}
-	if _, err := ambientMerge(moduleDir, completed, incomplete); err == nil {
-		t.Fatal("absolute conversion erased completed-versus-incomplete provenance")
-	}
-}
-
-func TestAbsoluteProcessViewIgnoresUnrelatedMergedProcesses(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	for _, name := range []string{"a", "b"} {
-		if err := os.WriteFile(filepath.Join(packageDir, name), []byte(name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	a, err := ambientFromTestLog([]byte("open a\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := ambientFromTestLog([]byte("open b\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	whole, err := ambientMerge(moduleDir, a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	whole, err = ambientAbsolute(whole, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err = ambientAbsolute(a, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientMerge(moduleDir, whole, a); err != nil {
-		t.Fatalf("unrelated process changed absolute view for worker-a: %v", err)
-	}
-}
-
-func TestMergeAlgebra(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	states := make([]Observation, 3)
-	for i, log := range []string{"getenv C\n", "getenv A\n", "getenv B\n"} {
-		var err error
-		states[i], err = ambientFromTestLog([]byte(log), moduleDir, packageDir, WithCompletedProcess(fmt.Sprintf("worker-%d", i)), WithBracket(testBracket(t, moduleDir)))
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	merge := func(inputs ...Observation) Observation {
-		t.Helper()
-		st, err := ambientMerge(moduleDir, inputs...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return st
-	}
-	ab := merge(states[0], states[1])
-	ba := merge(states[1], states[0])
-	if !reflect.DeepEqual(ab, ba) {
-		t.Fatalf("merge is not commutative:\n%+v\n%+v", ab, ba)
-	}
-	aa := merge(states[0], states[0])
-	if !reflect.DeepEqual(aa, states[0]) {
-		t.Fatalf("merge is not idempotent:\n%+v\n%+v", aa, states[0])
-	}
-	left := merge(ab, states[2])
-	bc := merge(states[1], states[2])
-	right := merge(states[0], bc)
-	if !reflect.DeepEqual(left, right) {
-		t.Fatalf("merge is not associative:\n%+v\n%+v", left, right)
-	}
-}
-
-func TestMergeZeroIsExplicitEmptyManifest(t *testing.T) {
-	moduleDir, _ := testDirs(t)
-	st, err := ambientMerge(moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Manifest == "" || st.Digest == "" || !st.OK {
-		t.Fatalf("zero merge = %+v, want encoded observation-free state", st)
-	}
-	m, err := decode(st.Manifest)
-	if err != nil || m.Version != manifestVersion || len(m.Env)+len(m.Paths)+len(m.Unverifiable) != 0 {
-		t.Fatalf("zero merge manifest = %+v err=%v", m, err)
-	}
-	if _, err := ambientMerge(moduleDir, Observation{}); err == nil {
-		t.Fatal("empty merge input accepted as observation-free manifest")
-	}
-	nested, err := ambientMerge(moduleDir, st)
-	if err != nil || !reflect.DeepEqual(nested, st) {
-		t.Fatalf("nested zero merge = %+v, %v; want identity", nested, err)
-	}
-}
-
-func TestMergeRejectsChildThatMovedBeforeUnion(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	t.Setenv("MERGE_COHERENCE", "first")
-	first, err := ambientFromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-a"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("MERGE_COHERENCE", "second")
-	second, err := ambientFromTestLog([]byte("getenv MERGE_COHERENCE\n"), moduleDir, packageDir, WithCompletedProcess("worker-b"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientMerge(moduleDir, first, second); err == nil {
-		t.Fatal("merge accepted child states finalized under different input values")
-	}
-}
-
-func TestMergeRejectsMalformedAndUnsupportedManifest(t *testing.T) {
-	moduleDir, _ := testDirs(t)
-	for _, raw := range []string{
-		`{"v":4,"future":true}`,
-		`{"v":1}`,
-	} {
-		state := State{
-			Manifest: base64.RawURLEncoding.EncodeToString([]byte(raw)),
-			Digest:   "supplied",
-			OK:       true,
-		}
-		if _, err := ambientMerge(moduleDir, newObservation(state, "worker", "complete")); err == nil {
-			t.Fatalf("Merge accepted %s", raw)
-		}
+	if _, err := CompletedState(valid); err == nil || !strings.Contains(err.Error(), "seal is invalid") {
+		t.Fatalf("CompletedState(tampered) = %v, want seal is invalid", err)
 	}
 }
 
@@ -1328,97 +946,6 @@ func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 	}
 }
 
-func FuzzMergeAlgebra(f *testing.F) {
-	f.Add([]byte("a"), []byte("b"), []byte("c"))
-	f.Add([]byte("same"), []byte("same"), []byte{})
-	f.Add([]byte{1, 'm'}, []byte{2, 'u'}, []byte{3, 'b'})
-	f.Add([]byte{3}, []byte{3}, []byte{0})
-	f.Fuzz(func(t *testing.T, a, b, c []byte) {
-		moduleDir := t.TempDir()
-		manifestFor := func(value []byte) Observation {
-			t.Helper()
-			token := base64.RawURLEncoding.EncodeToString(value)
-			// Bracket-binding unverifiable reasons ride the manifest like any
-			// other reason: the low bits of the first input byte select the
-			// moved-bracket observation-level class and the uncovered
-			// per-identity class (REQ-inputs-value-binding).
-			unverifiable := []string{"fuzz reason " + token}
-			if len(value) > 0 && value[0]&1 != 0 {
-				unverifiable = append(unverifiable, "observation bracket moved: fuzzroot"+token)
-			}
-			if len(value) > 0 && value[0]&2 != 0 {
-				unverifiable = append(unverifiable, "runtime input not covered by observation bracket: fuzz/x"+token)
-			}
-			encoded, err := encode(manifest{
-				Version:      manifestVersion,
-				Env:          []envInput{{Name: "FUZZ_" + token, Digest: testEntryDigest}},
-				Paths:        []pathInput{{pathID: pathID{Kind: pathRel, Path: "fuzz/x" + token}, Digest: testEntryDigest}},
-				Unverifiable: unverifiable,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			state, err := ambientCurrent(encoded, moduleDir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return newObservation(state, "worker-"+token, "complete")
-		}
-		reasons := func(o Observation) map[string]bool {
-			t.Helper()
-			m, err := decode(o.Manifest)
-			if err != nil {
-				t.Fatal(err)
-			}
-			set := make(map[string]bool, len(m.Unverifiable))
-			for _, reason := range m.Unverifiable {
-				set[reason] = true
-			}
-			return set
-		}
-		merge := func(inputs ...Observation) Observation {
-			t.Helper()
-			st, err := ambientMerge(moduleDir, inputs...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// The merged union's unverifiable set contains every input's
-			// reasons: merge never drops a binding reason
-			// (REQ-inputs-merge, REQ-inputs-value-binding).
-			got := reasons(st)
-			for _, input := range inputs {
-				for reason := range reasons(input) {
-					if !got[reason] {
-						t.Fatalf("merge dropped unverifiable reason %q", reason)
-					}
-				}
-			}
-			return st
-		}
-		ma, mb, mc := manifestFor(a), manifestFor(b), manifestFor(c)
-		ab, ba := merge(ma, mb), merge(mb, ma)
-		if !reflect.DeepEqual(ab, ba) {
-			t.Fatalf("commutativity: %+v != %+v", ab, ba)
-		}
-		if aa := merge(ma, ma); !reflect.DeepEqual(aa, merge(ma)) {
-			t.Fatalf("idempotence: %+v != %+v", aa, merge(ma))
-		}
-		left := merge(ab, mc)
-		bc := merge(mb, mc)
-		right := merge(ma, bc)
-		if !reflect.DeepEqual(left, right) {
-			t.Fatalf("associativity: %+v != %+v", left, right)
-		}
-		// A completed state without sealed construction provenance — the only
-		// way one can lack bracket provenance, since the bracket-gated
-		// constructor is the sole completed path — is refused, never merged
-		// silently (REQ-inputs-completed-observation).
-		if _, err := ambientMerge(moduleDir, Observation{State: ma.State}); err == nil {
-			t.Fatal("merge accepted a completed state without construction provenance")
-		}
-	})
-}
-
 func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 	f.Add("KEY_A", "val1", "sub/data.txt", uint8(0))
 	f.Add("KEY_B", "val2", "../outside.txt", uint8(1))
@@ -1473,7 +1000,7 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 
 		ambient := []string{key + "=" + cleanVal, "OTHER_VAR=constant"}
 
-		// 1. Observable read set, path congruence, & coherence across FromTestLog, Current, Merge, Adopt
+		// 1. Observable read set, path congruence, & coherence across fromTestLog, Current, and CompletedState
 		// (REQ-inputs-observable-read-set, REQ-inputs-path-congruence, REQ-inputs-observation-coherence).
 		bracket, err := CaptureBracket(context.Background(), modDir, []string{"."})
 		if err != nil {
@@ -1506,19 +1033,9 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		if curState != obs1.State {
 			t.Fatalf("Current state %+v != fromTestLog state %+v", curState, obs1.State)
 		}
-		adopted, err := Adopt(obs1.Manifest, modDir, "w-adopted", ambient)
-		if err != nil {
-			t.Fatalf("Adopt on matching ambient: %v", err)
-		}
-		if adopted.State != obs1.State || adopted.Manifest != obs1.Manifest {
-			t.Fatalf("Adopt mismatch: %+v vs %+v", adopted, obs1)
-		}
-		merged, err := Merge(modDir, ambient, obs1, adopted)
-		if err != nil {
-			t.Fatalf("Merge on coherent observations: %v", err)
-		}
-		if merged.State != obs1.State {
-			t.Fatalf("idempotent Merge changed state: %+v vs %+v", merged.State, obs1.State)
+		sealedState, err := CompletedState(obs1)
+		if err != nil || sealedState != obs1.State {
+			t.Fatalf("CompletedState = %+v, %v; want %+v", sealedState, err, obs1.State)
 		}
 
 		// Mutating the observed env var shifts Current state while mutating an
@@ -1555,12 +1072,9 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		if !unverObs.State.OK || !unverObs.State.Unverifiable {
 			t.Fatalf("expected completed unverifiable state for %q, got %+v", badOp, unverObs.State)
 		}
-		mergedUnver, err := Merge(modDir, ambient, obs1, unverObs)
-		if err != nil {
-			t.Fatalf("Merge with unverifiable observation: %v", err)
-		}
-		if !mergedUnver.State.Unverifiable {
-			t.Fatalf("Merge suppressed unverifiability from %q: %+v", badOp, mergedUnver.State)
+		curUnver, err := Current(context.Background(), unverObs.Manifest, modDir, ambient)
+		if err != nil || !curUnver.Unverifiable || curUnver != unverObs.State {
+			t.Fatalf("Current suppressed unverifiability from %q: %+v (err=%v)", badOp, curUnver, err)
 		}
 
 		// 2. Path coverage, unknown binding, and manifest-representable attribution
@@ -1594,7 +1108,7 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		if !inc.State.Unverifiable {
 			t.Fatal("Incomplete observation did not report Unverifiable")
 		}
-		if _, err := CompletedState( Observation{State: obs1.State}); err == nil {
+		if _, err := CompletedState(Observation{State: obs1.State}); err == nil {
 			t.Fatal("CompletedState accepted unsealed observation")
 		}
 		if st, err := CompletedState(obs1); err != nil || st != obs1.State {
@@ -1620,7 +1134,6 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		}
 	})
 }
-
 
 // A classification refusal names the observation that produced its path
 // (REQ-inputs-refusal-attribution): the operation, its quoted logged
@@ -1735,7 +1248,6 @@ func TestClassificationRefusalNamesItsObservation(t *testing.T) {
 func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 	log := []byte("open /\nstat /\n")
 	var states [2]Observation
-	var portables [2]string
 	for i := range states {
 		moduleDir, packageDir := testDirs(t)
 		state, err := FromTestLog(log, moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
@@ -1753,40 +1265,7 @@ func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 		if derived != state.State {
 			t.Fatalf("checkout %d: the derived state = %+v, want the recorded state whole", i, derived)
 		}
-		merged, err := Merge(moduleDir, nil, state, state)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if merged.Attribution != state.Attribution || merged.Reason != state.Reason {
-			t.Fatalf("checkout %d: the merge carried %q / %q", i, merged.Attribution, merged.Reason)
-		}
-		absolute, err := Absolute(state, moduleDir, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		relative, err := Relative(absolute, moduleDir, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// A conversion converts the directory the attribution names as
-		// it converts the identities: module-relative in the portable
-		// form, the process's absolute directory again in the absolute
-		// form, the operation and name untouched.
-		relPkg, err := filepath.Rel(moduleDir, packageDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		portable := strings.TrimSuffix(state.Attribution, strconv.Quote(packageDir)) + strconv.Quote(filepath.ToSlash(relPkg))
-		if absolute.Attribution != state.Attribution || relative.Attribution != portable {
-			t.Fatalf("checkout %d: the conversions carried %q / %q, want %q / %q", i, absolute.Attribution, relative.Attribution, state.Attribution, portable)
-		}
-		if back, err := Absolute(relative, moduleDir, nil); err != nil || back.Attribution != state.Attribution {
-			t.Fatalf("checkout %d: the absolute form of the portable attribution = %q, %v", i, back.Attribution, err)
-		}
-		portables[i] = relative.Attribution
-		// A directory outside the module keeps its own spelling in
-		// both forms: a refusal attributed after a traversal chdir
-		// names the directory it happened in.
+		// A refusal attributed after a traversal chdir names the directory it happened in.
 		left, err := FromTestLog([]byte("chdir /usr\nopen /\n"), moduleDir, packageDir, nil, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 		if err != nil {
 			t.Fatal(err)
@@ -1794,13 +1273,6 @@ func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 		if left.Attribution != `open "/" in "/usr"` {
 			t.Fatalf("checkout %d: the traversal's attribution = %q", i, left.Attribution)
 		}
-		if outside, err := Relative(left, moduleDir, nil); err != nil || outside.Attribution != left.Attribution {
-			t.Fatalf("checkout %d: the portable form moved an outside directory: %q, %v", i, outside.Attribution, err)
-		}
-	}
-	// The portable form is the same in every checkout.
-	if portables[0] != portables[1] {
-		t.Fatalf("the portable attributions differ across checkouts: %q / %q", portables[0], portables[1])
 	}
 	// Two clauses, log order against sorted order: the state names the
 	// sorted manifest's first clause and the attribution is that clause's.
@@ -1821,23 +1293,6 @@ func TestAttributionIsOutsideTheInputsIdentity(t *testing.T) {
 	}
 	if !strings.HasPrefix(unattributed.Reason, "ambiguous parent traversal") || unattributed.Attribution != "" {
 		t.Fatalf("reason %q attributed %q, want the traversal's reason with no attribution", unattributed.Reason, unattributed.Attribution)
-	}
-	// A merge names the union's first clause and carries the attribution
-	// of the contributor whose reason it is, whatever the caller's order.
-	usr, err := FromTestLog([]byte("open /usr\n"), moduleDir, packageDir, nil, WithCompletedProcess("usr"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	root, err := FromTestLog([]byte("open /\n"), moduleDir, packageDir, nil, WithCompletedProcess("root"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := Merge(moduleDir, nil, usr, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if merged.Reason != root.Reason || merged.Attribution != root.Attribution {
-		t.Fatalf("merge = %q attributed %q, want the root contributor's", merged.Reason, merged.Attribution)
 	}
 	if states[0].Manifest != states[1].Manifest || states[0].Digest != states[1].Digest || states[0].Reason != states[1].Reason {
 		t.Fatalf("two checkouts' identities differ:\n%+v\n%+v", states[0].State, states[1].State)
@@ -1968,28 +1423,6 @@ func TestRefusalAttributionIsTheClauseSplitsComplement(t *testing.T) {
 		}
 		if attribution != "" && clause+sep+attribution != c.reason {
 			t.Errorf("the split of %q does not rejoin: clause %q, attribution %q", c.reason, clause, attribution)
-		}
-	}
-}
-
-// The directory conversion rewrites exactly the operation form and
-// passes everything else through — a resolved-target attribution, an
-// operation form with trailing text, a string no grammar parses —
-// never rewriting a value into a form it was not
-// (REQ-inputs-refusal-attribution).
-func TestConvertAttributionDirRewritesOnlyTheOperationForm(t *testing.T) {
-	upper := func(dir string) string { return strings.ToUpper(dir) }
-	for _, c := range []struct{ in, want string }{
-		{`open "/x" in "/w/pkg"`, `open "/x" in "/W/PKG"`},
-		{`stat "a b" in "rel/dir"`, `stat "a b" in "REL/DIR"`},
-		{`open "/x" in "/w/pkg" trailing`, `open "/x" in "/w/pkg" trailing`},
-		{`recorded path "pkg/link" resolves to "/srv/x" outside the tree`, `recorded path "pkg/link" resolves to "/srv/x" outside the tree`},
-		{`rename "/x" in "/w"`, `rename "/x" in "/w"`},
-		{`open /x in "/w"`, `open /x in "/w"`},
-		{"", ""},
-	} {
-		if got := convertAttributionDir(c.in, upper); got != c.want {
-			t.Errorf("convertAttributionDir(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
@@ -2230,7 +1663,6 @@ func TestMovedBracketRootSpelledLikeAMemberList(t *testing.T) {
 		t.Fatalf("the plain root's clause %q, want it bare", state.Reason)
 	}
 }
-
 
 // TestExcludedPathsAreNeverRecorded pins REQ-inputs-exclusions: an
 // excluded observation records neither a path identity nor a per-path
@@ -4113,64 +3545,6 @@ func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 	}
 }
 
-func TestPWDConversionReanchorsSubpackageToModuleRoot(t *testing.T) {
-	moduleDir := t.TempDir()
-	pkgA := filepath.Join(moduleDir, "internal", "alpha")
-	pkgB := filepath.Join(moduleDir, "internal", "beta")
-	for _, pkgDir := range []string{pkgA, pkgB} {
-		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(pkgDir, "fixture.txt"), []byte(filepath.Base(pkgDir)), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	bracket, err := ambientCaptureBracket(moduleDir, []string{"."})
-	if err != nil {
-		t.Fatal(err)
-	}
-	obsA, err := FromTestLog([]byte("getenv PWD\nopen fixture.txt\n"), moduleDir, pkgA, []string{"PWD=" + pkgA},
-		WithCompletedProcess("worker-a"), WithBracket(bracket))
-	if err != nil || obsA.Unverifiable {
-		t.Fatalf("FromTestLog(pkgA) = %+v, %v", obsA, err)
-	}
-	obsB, err := FromTestLog([]byte("getenv PWD\nopen fixture.txt\n"), moduleDir, pkgB, []string{"PWD=" + pkgB},
-		WithCompletedProcess("worker-b"), WithBracket(bracket))
-	if err != nil || obsB.Unverifiable {
-		t.Fatalf("FromTestLog(pkgB) = %+v, %v", obsB, err)
-	}
-
-	if _, err := Absolute(obsA, moduleDir, []string{"PWD=" + filepath.Join(moduleDir, "unrelated")}); err == nil || !strings.Contains(err.Error(), "state moved before absolute identity conversion") {
-		t.Fatalf("Absolute with unrelated PWD = %v, want state-moved refusal", err)
-	}
-
-	treeEnv := []string{"PWD=" + moduleDir}
-	absA, err := Absolute(obsA, moduleDir, treeEnv)
-	if err != nil || absA.Unverifiable {
-		t.Fatalf("Absolute(pkgA, treeEnv) = %+v, %v", absA, err)
-	}
-	absB, err := Absolute(obsB, moduleDir, treeEnv)
-	if err != nil || absB.Unverifiable {
-		t.Fatalf("Absolute(pkgB, treeEnv) = %+v, %v", absB, err)
-	}
-	merged, err := Merge(moduleDir, treeEnv, absA, absB)
-	if err != nil || merged.Unverifiable {
-		t.Fatalf("Merge(absA, absB) = %+v, %v", merged, err)
-	}
-	rel, err := Relative(merged, moduleDir, treeEnv)
-	if err != nil || rel.Unverifiable {
-		t.Fatalf("Relative(merged) = %+v, %v", rel, err)
-	}
-	adopted, err := Adopt(rel.Manifest, moduleDir, "reader", treeEnv)
-	if err != nil || adopted.Unverifiable {
-		t.Fatalf("Adopt(rel) = %+v, %v", adopted, err)
-	}
-	cur, err := Current(context.Background(), rel.Manifest, moduleDir, treeEnv)
-	if err != nil || cur != rel.State {
-		t.Fatalf("Current(rel) = %+v, %v; want %+v", cur, err, rel.State)
-	}
-}
-
 // An external directory's stat binds existence alone: the entry
 // revalidates equal while the directory exists, moves when it vanishes
 // or becomes a file, and the open/listing form keeps ordinary
@@ -4494,65 +3868,42 @@ func TestStatUpgradesAnOpenObservedEntry(t *testing.T) {
 	}
 }
 
-// Merging an open-only observation with a stat observation of the
-// same identity keeps the metadata-bound class
-// (REQ-inputs-observation-class).
-func TestMergeUnionsObservationClasses(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	statted, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := ambientMerge(moduleDir, opened, statted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := decode(merged.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Paths) != 1 || !m.Paths[0].Metadata {
-		t.Fatalf("merge dropped the metadata-bound class: %+v", m.Paths)
-	}
-}
-
-// Relative is the persisted portable form: identities under the
-// module convert to module-relative, the state revalidates in a
-// second checkout of the same content, and the observation class
-// rides the conversion (REQ-inputs-relative-identities).
+// Identities inside the evidence root ingest directly in portable
+// module-relative form (`rel`), while external identities stay absolute
+// (`abs`); the relative state revalidates in a second checkout of the same
+// content (REQ-inputs-relative-identities).
 func TestRelativeIdentitiesTravelAcrossCheckoutRoots(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
 	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external.txt")
+	if err := os.WriteFile(external, []byte("ext"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	absolute, err := ambientAbsolute(obs, moduleDir)
+	m, err := decode(obs.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	relative, err := ambientRelative(absolute, moduleDir)
+	if len(m.Paths) != 1 || m.Paths[0].Kind != "rel" || m.Paths[0].Path != "pkg/a.txt" {
+		t.Fatalf("in-module identity not recorded relative: %+v", m.Paths)
+	}
+	extObs, err := ambientFromTestLog([]byte("open "+external+"\n"), moduleDir, packageDir, WithCompletedProcess("worker-ext"), WithBracket(testBracket(t, moduleDir, ".", external)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := decode(relative.Manifest)
+	extM, err := decode(extObs.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range m.Paths {
-		if entry.Kind != "rel" {
-			t.Fatalf("in-module identity not relative after conversion: %+v", entry)
-		}
+	if len(extM.Paths) != 1 || extM.Paths[0].Kind != "abs" || extM.Paths[0].Path != external {
+		t.Fatalf("external identity did not stay absolute: %+v", extM.Paths)
 	}
+
 	secondRoot := filepath.Join(t.TempDir(), "clone")
 	if err := os.MkdirAll(filepath.Join(secondRoot, "pkg"), 0o755); err != nil {
 		t.Fatal(err)
@@ -4560,186 +3911,20 @@ func TestRelativeIdentitiesTravelAcrossCheckoutRoots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(secondRoot, "pkg", "a.txt"), []byte("a"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved, err := ambientCurrent(relative.Manifest, secondRoot)
+	moved, err := ambientCurrent(obs.Manifest, secondRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if moved.Digest != relative.State.Digest || !moved.OK {
-		t.Fatalf("relative evidence did not travel: %+v vs %+v", moved, relative.State)
+	if moved.Digest != obs.State.Digest || !moved.OK {
+		t.Fatalf("relative evidence did not travel: %+v vs %+v", moved, obs.State)
 	}
-	paths, err := Paths(relative.Manifest, secondRoot)
+	paths, err := Paths(obs.Manifest, secondRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := filepath.Join(secondRoot, "pkg", "a.txt")
 	if len(paths) != 1 || paths[0] != want {
 		t.Fatalf("relative identity materialized %v, want [%s]", paths, want)
-	}
-}
-
-// A metadata-bound class rides both identity-kind conversions and the
-// round trip unchanged — a conversion must never downgrade an entry
-// whose subject observed metadata (REQ-inputs-observation-class,
-// REQ-inputs-relative-identities).
-func TestConversionsPreserveMetadataClass(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	obs, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadataBound := func(label string, o Observation) {
-		t.Helper()
-		m, err := decode(o.Manifest)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(m.Paths) != 1 || !m.Paths[0].Metadata {
-			t.Fatalf("%s dropped the metadata-bound class: %+v", label, m.Paths)
-		}
-	}
-	metadataBound("observation", obs)
-	absolute, err := ambientAbsolute(obs, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadataBound("Absolute", absolute)
-	relative, err := ambientRelative(absolute, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadataBound("Relative", relative)
-	again, err := ambientAbsolute(relative, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadataBound("round trip", again)
-	if again.State != absolute.State {
-		t.Fatalf("metadata-bound round trip diverged:\n got %+v\nwant %+v", again.State, absolute.State)
-	}
-}
-
-// A conversion that maps two identity kinds onto one identity
-// collapses them under the class-union rule instead of minting a
-// duplicate the validator refuses (REQ-inputs-observation-class).
-func TestConversionCollapsesKindsUnderClassUnion(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opened, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("opener"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	statted, err := ambientFromTestLog([]byte("stat a.txt\n"), moduleDir, packageDir, WithCompletedProcess("statter"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Absolutize only one side, then merge under a foreign root: the
-	// merged manifest carries the SAME file as a rel identity (open,
-	// content-bound) and an abs identity (stat, metadata-bound).
-	absStatted, err := ambientAbsolute(statted, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := ambientMerge(moduleDir, opened, absStatted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := decode(merged.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Paths) != 2 {
-		t.Fatalf("fixture did not produce both kinds: %+v", m.Paths)
-	}
-	// Relative maps both onto one rel identity: one entry, class union.
-	relative, err := ambientRelative(merged, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err = decode(relative.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Paths) != 1 || !m.Paths[0].Metadata || m.Paths[0].Kind != "rel" {
-		t.Fatalf("kind collapse dropped the class union: %+v", m.Paths)
-	}
-}
-
-// External identities stay absolute through Relative — only the
-// module's own surface relativizes (REQ-inputs-relative-identities).
-func TestRelativeExternalIdentitiesStayAbsolute(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	external := filepath.Join(t.TempDir(), "external.txt")
-	if err := os.WriteFile(external, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	obs, err := ambientFromTestLog([]byte("open "+external+"\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative, err := ambientRelative(obs, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := decode(relative.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Paths) != 1 || m.Paths[0].Kind != "abs" || m.Paths[0].Path != external {
-		t.Fatalf("external identity did not stay absolute: %+v", m.Paths)
-	}
-}
-
-// Relative refuses a state that moved since observation, exactly as
-// Absolute does (REQ-inputs-relative-identities).
-func TestRelativeRefusesMovedState(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	target := filepath.Join(packageDir, "a.txt")
-	if err := os.WriteFile(target, []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("changed"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientRelative(obs, moduleDir); err == nil || !strings.Contains(err.Error(), "state moved before relative identity conversion") {
-		t.Fatalf("moved state accepted: %v", err)
-	}
-}
-
-// The two conversions are inverses on states: converting to relative
-// and back reproduces the absolute state exactly
-// (REQ-inputs-relative-identities, REQ-inputs-absolute-identities).
-func TestRelativeRoundTripsWithAbsolute(t *testing.T) {
-	moduleDir, packageDir := testDirs(t)
-	if err := os.WriteFile(filepath.Join(packageDir, "a.txt"), []byte("a"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	obs, err := ambientFromTestLog([]byte("open a.txt\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	absolute, err := ambientAbsolute(obs, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relative, err := ambientRelative(absolute, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := ambientAbsolute(relative, moduleDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if again.State != absolute.State {
-		t.Fatalf("round trip diverged:\n got %+v\nwant %+v", again.State, absolute.State)
 	}
 }
 
@@ -4759,14 +3944,13 @@ func FuzzHistoricalPWDManifestDoesNotUpgrade(f *testing.F) {
 			m.Env = []envInput{{Name: "PWD"}, {Name: "OBSERVED"}}
 		}
 		if supported {
-			m.Outcome, m.Subjects = outcome.Method, []string{supportedSubject}
+			m.Outcome, m.Subjects = OutcomeMethod, []string{supportedSubject}
 		}
 		current, err := stateFromManifest(context.Background(), m, dir, env)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fresh := newObservation(current, "fresh", "fixture")
-		if _, err := Adopt(current.Manifest, dir, "current", env); err != nil {
+		if _, err := Current(context.Background(), current.Manifest, dir, env); err != nil {
 			t.Fatalf("current control: %v", err)
 		}
 		if HasOutcomeSupport(current.Manifest, supportedSubject) != supported {
@@ -4782,24 +3966,18 @@ func FuzzHistoricalPWDManifestDoesNotUpgrade(f *testing.F) {
 			t.Fatal(err)
 		}
 		encoded := base64.RawURLEncoding.EncodeToString(raw)
-		old := newObservation(State{Manifest: encoded, Digest: manifestDigest(legacy), OK: true}, "historical", "fixture")
 		if HasOutcomeSupport(encoded, supportedSubject) {
 			t.Fatal("historical manifest gained outcome support")
 		}
 		for name, check := range map[string]func() error{
-			"current":         func() error { _, err := Current(context.Background(), encoded, dir, env); return err },
-			"adopt":           func() error { _, err := Adopt(encoded, dir, "old", env); return err },
-			"absolute":        func() error { _, err := Absolute(old, dir, env); return err },
-			"relative":        func() error { _, err := Relative(old, dir, env); return err },
-			"merge old first": func() error { _, err := Merge(dir, env, old, fresh); return err },
-			"merge old last":  func() error { _, err := Merge(dir, env, fresh, old); return err },
+			"current":  func() error { _, err := Current(context.Background(), encoded, dir, env); return err },
+			"movers":   func() error { _, err := MovedInputs(context.Background(), encoded, dir, env); return err },
+			"describe": func() error { _, err := Describe(encoded, dir); return err },
+			"paths":    func() error { _, err := Paths(encoded, dir); return err },
 		} {
 			if err := check(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("unsupported manifest version %d", legacy.Version)) {
 				t.Fatalf("%s upgraded history: %v", name, err)
 			}
-		}
-		if old.Manifest != encoded {
-			t.Fatal("historical bytes changed")
 		}
 	})
 }
@@ -5168,20 +4346,6 @@ func TestRunToIngestWindowMutationSealsObservationUnverifiable(t *testing.T) {
 	}
 	if !current.Unverifiable {
 		t.Fatal("current check read a moved-bracket manifest as bound")
-	}
-	merged, err := Merge(moduleDir, nil, observation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !merged.Unverifiable {
-		t.Fatal("merge read a moved-bracket observation as bound")
-	}
-	converted, err := Absolute(observation, moduleDir, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !converted.Unverifiable {
-		t.Fatal("absolute conversion read a moved-bracket observation as bound")
 	}
 }
 
@@ -5554,125 +4718,6 @@ func TestAbsoluteIdentitySubRootChainStaysEnforced(t *testing.T) {
 	if !strings.Contains(joined, "runtime input not covered by observation bracket: "+hop1) ||
 		!strings.Contains(joined, "symlink outside every bracket root: "+hop2) {
 		t.Fatalf("reasons = %q, want uncovered %s naming out-of-root link %s", joined, hop1, hop2)
-	}
-}
-
-// bindingReasonObservations builds one observation per binding-reason class
-// under one module view: a moved-bracket observation carrying the
-// observation-level reason "observation bracket moved: data", an
-// uncovered-identity observation carrying the per-identity reason
-// "runtime input not covered by observation bracket: other.txt", and a bound
-// sibling carrying no reason.
-func bindingReasonObservations(t *testing.T, moduleDir string) (moved, uncovered, bound Observation) {
-	t.Helper()
-	movedBracket := testBracket(t, moduleDir, "data")
-	if err := os.WriteFile(filepath.Join(moduleDir, "data", "fixture.txt"), []byte("edited between run and ingest"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	moved, err := FromTestLog([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-moved"), WithBracket(movedBracket))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(moduleDir, "other.txt"), []byte("out of root"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	uncovered, err = FromTestLog([]byte("open other.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-uncovered"), WithBracket(testBracket(t, moduleDir, "data")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bound, err = FromTestLog([]byte("open data/fixture.txt\n"), moduleDir, moduleDir, nil, WithCompletedProcess("worker-bound"), WithBracket(testBracket(t, moduleDir, "data")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !moved.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, moved.State), "\n"), "observation bracket moved: data") {
-		t.Fatalf("precondition: moved observation = %+v, want moved-bracket reason", moved.State)
-	}
-	if !uncovered.Unverifiable || !strings.Contains(strings.Join(manifestReasons(t, uncovered.State), "\n"), "runtime input not covered by observation bracket: other.txt") {
-		t.Fatalf("precondition: uncovered observation = %+v, want uncovered-identity reason", uncovered.State)
-	}
-	if bound.Unverifiable || bound.Reason != "" {
-		t.Fatalf("precondition: bound sibling = %+v, want bound", bound.State)
-	}
-	return moved, uncovered, bound
-}
-
-// TestBindingReasonsSurviveMergeUnion pins the merge leg of
-// REQ-inputs-value-binding under the union clause of REQ-inputs-merge: the
-// moved-bracket observation-level reason and the uncovered per-identity
-// reason each appear verbatim in the merged manifest's unverifiable set, in
-// either merge order, alongside a bound sibling — the merged union's
-// unverifiable set contains every input's binding reasons, so merge never
-// weakens a binding disposition (REQ-inputs-bracket-coverage).
-func TestBindingReasonsSurviveMergeUnion(t *testing.T) {
-	moduleDir := bindingModule(t)
-	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
-	merged, err := Merge(moduleDir, nil, moved, uncovered, bound)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reversed, err := Merge(moduleDir, nil, bound, uncovered, moved)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(merged, reversed) {
-		t.Fatalf("binding-reason merge is not commutative:\n%+v\n%+v", merged, reversed)
-	}
-	got := map[string]bool{}
-	for _, reason := range manifestReasons(t, merged.State) {
-		got[reason] = true
-	}
-	for _, input := range []Observation{moved, uncovered, bound} {
-		for _, reason := range manifestReasons(t, input.State) {
-			if !got[reason] {
-				t.Errorf("merge dropped binding reason %q", reason)
-			}
-		}
-	}
-	// The moved-bracket reason now carries its attribution suffix
-	// (the moved member named), so the class match is by prefix; the
-	// uncovered-input class stays verbatim.
-	movedClass := false
-	for reason := range got {
-		if strings.HasPrefix(reason, "observation bracket moved: data") {
-			movedClass = true
-		}
-	}
-	if !movedClass || !got["runtime input not covered by observation bracket: other.txt"] {
-		t.Fatalf("merged reasons = %v, want both binding classes", got)
-	}
-	if !merged.Unverifiable {
-		t.Fatal("binding-unverifiable union merged as bound")
-	}
-}
-
-// TestBindingReasonsSurviveAbsoluteConversion pins the conversion leg of
-// REQ-inputs-value-binding under REQ-inputs-absolute-identities: absolute
-// conversion carries both binding-reason classes into the converted manifest
-// verbatim — path identities convert, recorded reasons never do — and the
-// converted evidence stays unverifiable, never weakened.
-func TestBindingReasonsSurviveAbsoluteConversion(t *testing.T) {
-	moduleDir := bindingModule(t)
-	moved, uncovered, _ := bindingReasonObservations(t, moduleDir)
-	for name, observation := range map[string]Observation{
-		"moved":     moved,
-		"uncovered": uncovered,
-	} {
-		converted, err := Absolute(observation, moduleDir, nil)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		got := map[string]bool{}
-		for _, reason := range manifestReasons(t, converted.State) {
-			got[reason] = true
-		}
-		for _, reason := range manifestReasons(t, observation.State) {
-			if !got[reason] {
-				t.Errorf("%s: absolute conversion dropped binding reason %q", name, reason)
-			}
-		}
-		if !converted.Unverifiable {
-			t.Fatalf("%s: absolute conversion weakened the binding disposition", name)
-		}
 	}
 }
 

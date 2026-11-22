@@ -15,22 +15,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/outcome"
 )
-
-// OutcomeBinding is an opaque execution-coordinate binding shared by a
-// frame's completion receipt and analysis-issued outcome support. Only
-// ProducerFrame.OutcomeBinding constructs a non-zero binding.
-type OutcomeBinding = outcome.Binding
-
-// OutcomeSupport is an opaque analysis-derived prerequisite for one execution.
-// Only the analysis view constructs support; the zero value grants none.
-type OutcomeSupport = outcome.Support
-
-// TrackedChdirSupport is an opaque analysis-derived capability certifying that
-// the producing test binary satisfies the toolchain and binary-graph premises
-// for balanced LIFO testing.Chdir excursion tracking. The zero value grants none.
-type TrackedChdirSupport = outcome.TrackedChdirSupport
 
 // CompletionReceipt records the result owner's terminal harness judgment.
 // Normal completion includes ordinarily completed failing tests; it does not
@@ -70,7 +55,7 @@ type ProducerFrame struct {
 	// bracket is nil exactly when reason is non-empty.
 	bracket *Bracket
 	reason  string
-	span    *outcome.Span
+	span    *outcomeSpan
 }
 
 // Reason reports why the frame carries no bracket - empty exactly when
@@ -112,7 +97,7 @@ func ResolveProducerFrame(treeRoot, pkgDir string) ProducerFrame {
 		PkgDir: resolvedPkgDir,
 		PkgRel: filepath.ToSlash(rel),
 		reason: "no observation bracket was captured",
-		span:   new(outcome.Span),
+		span:   new(outcomeSpan),
 	}
 }
 
@@ -145,7 +130,7 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 	if err != nil {
 		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
 	}
-	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket, span: new(outcome.Span)}
+	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket, span: new(outcomeSpan)}
 }
 
 // ProducerIngest carries one process's ingest inputs: the caller owns
@@ -282,7 +267,7 @@ func (f ProducerFrame) PrepareTrackedChdir(safe bool) TrackedChdirSupport {
 	if f.bracket == nil {
 		return TrackedChdirSupport{}
 	}
-	return outcome.PrepareTrackedChdir(f.span, f.Root, f.PkgDir, safe)
+	return prepareTrackedChdir(f.span, f.Root, f.PkgDir, safe)
 }
 
 // Completion records the caller's verified terminal disposition for this frame,
@@ -316,7 +301,7 @@ func (f ProducerFrame) outcomeBindingNormalized(process string, env []string) ([
 	// bytes injectively, including Linux environment values that are not UTF-8.
 	// JSON strings would replace those bytes and equate distinct executions.
 	digest := sha256.Sum256([]byte(strings.Join(normalized, "\x00")))
-	return normalized, outcome.Bind(f.span, process, hex.EncodeToString(digest[:]), f.Root, f.PkgDir), nil
+	return normalized, bindOutcome(f.span, process, hex.EncodeToString(digest[:]), f.Root, f.PkgDir), nil
 }
 
 // HasOutcomeSupport reports whether a canonical manifest retains support for
@@ -512,7 +497,7 @@ func (f ProducerFrame) captureStream(ctx context.Context, br *bufio.Reader, in P
 		}
 		return incompleteAfterDrain(fmt.Sprintf("classification roots unresolved under the process environment: %v", err))
 	}
-	trackedChdir := outcome.MatchesTrackedChdir(in.TrackedChdir, f.span, f.Root, f.PkgDir)
+	trackedChdir := matchesTrackedChdir(in.TrackedChdir, f.span, f.Root, f.PkgDir)
 	opts := []TestLogOption{
 		WithCompletedProcess(in.Identity),
 		WithBracket(*f.bracket),

@@ -636,11 +636,6 @@ func chainResolveComplete(p string) (string, []string, bool, bool) {
 	return chainResolveObservedComplete(context.Background(), p, nil)
 }
 
-func chainResolveObserved(ctx context.Context, p string, facts *pathFacts) (string, []string, bool) {
-	resolved, links, ok, _ := chainResolveObservedComplete(ctx, p, facts)
-	return resolved, links, ok
-}
-
 func chainResolveFrom(baseResolved string, baseLinks []string, component string) (string, []string, bool, bool) {
 	var links []string
 	if len(baseLinks) > 0 {

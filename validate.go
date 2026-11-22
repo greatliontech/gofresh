@@ -24,13 +24,11 @@ func cappedList(names []string) string {
 	return strings.Join(names[:movedListCap], ", ") + fmt.Sprintf(", and %d more", len(names)-movedListCap)
 }
 
-// Validate re-observes the Snapshot's complete subject set under the caller's
+// validate re-observes the Snapshot's complete subject set under the caller's
 // context and reports ErrViewChanged when any source closure, guard, or purity
-// assertion moved. A producer calls it after execution before persisting
-// results (REQ-fresh-producer-view). Selected applicability checks are also
-// re-established, including their historical runtime evidence and any current
-// proof needed for an observation lift; they require no new process receipt.
-func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
+// assertion moved. Unit.Close calls it after execution before returning
+// finalized results (REQ-fresh-producer-view).
+func (v *Snapshot) validate(ctx context.Context) (opErr error) {
 	if v == nil || v.facts == nil || v.session == nil {
 		return errors.New("gofresh: uninitialized snapshot")
 	}
@@ -50,13 +48,15 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 	}
 	v.mu.Lock()
 	v.sealed = true
-	hasObserved := len(v.capturedObserved) != 0
-	checks := slices.Clone(v.applicabilityChecks)
+	hasObserved := false
 	identities := make(map[Subject]runtimeinput.State)
 	var identitySubjects []Subject
 	for _, subject := range v.subjects {
-		if state, attached := v.attachedObservations[subject]; attached && !v.capturedObserved[subject] {
-			identities[subject] = state
+		tx := v.txState[subject]
+		if tx.capturedObserved {
+			hasObserved = true
+		} else if tx.hasAttached {
+			identities[subject] = tx.attached
 			identitySubjects = append(identitySubjects, subject)
 		}
 	}
@@ -78,41 +78,26 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 			}
 		}()
 	}
-	// The view validates whatever it captured: observation proofs and retained
-	// applicability checks share one seeded validation view; a maximal-only
-	// producer runs one comparison-only re-observation (REQ-fresh-coherent-view).
+	// The view validates whatever it captured: observation proofs use one
+	// seeded validation view; a maximal-only producer runs one comparison-only
+	// re-observation (REQ-fresh-coherent-view).
 	var unavailable error
-	if !hasObserved && len(checks) == 0 {
+	if !hasObserved {
 		if err := deferValidationUnavailability(v.reobserveBase(ctx), &unavailable); err != nil {
 			return err
 		}
 		return v.resolveValidationUnavailable(ctx, nil, unavailable)
 	}
-	var (
-		subjects []Subject
-		expected map[Subject]observability.Observability
-		attached map[Subject]runtimeinput.State
-	)
-	if hasObserved {
-		var err error
-		subjects, expected, attached, err = v.prepareObservedValidation()
-		if err != nil {
-			return err
-		}
+	subjects, expected, attached, err := v.prepareObservedValidation()
+	if err != nil {
+		return err
 	}
 	current, err := v.newSeededValidationView(ctx)
 	if err != nil {
 		return err
 	}
-	if hasObserved {
-		if err := deferValidationUnavailability(v.validateObservedWithSeeded(ctx, current, subjects, expected, attached), &unavailable); err != nil {
-			return err
-		}
-	}
-	if len(checks) > 0 {
-		if err := deferValidationUnavailability(v.validateApplicabilityBatches(ctx, current, checks), &unavailable); err != nil {
-			return err
-		}
+	if err := deferValidationUnavailability(v.validateObservedWithSeeded(ctx, current, subjects, expected, attached), &unavailable); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -145,14 +130,17 @@ func (v *Snapshot) newSeededValidationView(ctx context.Context) (*Snapshot, erro
 
 func (v *Snapshot) prepareObservedValidation() ([]Subject, map[Subject]observability.Observability, map[Subject]runtimeinput.State, error) {
 	v.mu.RLock()
-	subjects := make([]Subject, 0, len(v.capturedObserved))
-	expected := make(map[Subject]observability.Observability, len(v.capturedObserved))
-	attached := make(map[Subject]runtimeinput.State, len(v.capturedObserved))
+	subjects := make([]Subject, 0, len(v.subjects))
+	expected := make(map[Subject]observability.Observability)
+	attached := make(map[Subject]runtimeinput.State)
 	for _, subject := range v.subjects {
-		if v.capturedObserved[subject] {
+		tx := v.txState[subject]
+		if tx.capturedObserved {
 			subjects = append(subjects, subject)
-			expected[subject] = v.observable[subject]
-			attached[subject] = v.attachedObservations[subject]
+			expected[subject] = tx.observable
+			if tx.hasAttached {
+				attached[subject] = tx.attached
+			}
 		}
 	}
 	v.mu.RUnlock()
@@ -165,33 +153,6 @@ func (v *Snapshot) prepareObservedValidation() ([]Subject, map[Subject]observabi
 	return subjects, expected, attached, nil
 }
 
-// validateObserved re-establishes every captured observation proof and
-// attached runtime state.
-func (v *Snapshot) validateObserved(ctx context.Context) error {
-	v.mu.Lock()
-	v.sealed = true
-	v.mu.Unlock()
-	if ctx == nil {
-		return errors.New("gofresh: nil observation validation context")
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	// Preparation: what the validation needs from the sealed view is
-	// known before any re-observation — a proof-less view or a subject
-	// with no completed observation attached refuses here, never after a
-	// full observation pass has been paid.
-	subjects, expected, attached, err := v.prepareObservedValidation()
-	if err != nil {
-		return err
-	}
-	current, err := v.newSeededValidationView(ctx)
-	if err != nil {
-		return err
-	}
-	return v.validateObservedWithSeeded(ctx, current, subjects, expected, attached)
-}
-
 func (v *Snapshot) validateObservedWithSeeded(ctx context.Context, current *Snapshot, subjects []Subject, expected map[Subject]observability.Observability, attached map[Subject]runtimeinput.State) error {
 	if err := v.compareAttachedObservations(ctx, attached, subjects); err != nil {
 		return err
@@ -202,7 +163,7 @@ func (v *Snapshot) validateObservedWithSeeded(ctx context.Context, current *Snap
 	current.mu.RLock()
 	var unavailable error
 	for _, subject := range subjects {
-		err := compareObservationProof(subject, current.observable[subject], expected[subject])
+		err := compareObservationProof(subject, current.txState[subject].observable, expected[subject])
 		switch {
 		case err == nil:
 		case errors.Is(err, ErrAnalysisUnavailable):
@@ -500,11 +461,7 @@ func (v *Snapshot) evidenceRoot() string {
 // undecodable or moverless manifests — an older recording regenerates either
 // way — and gains "(moved: …)" whenever attribution is derivable.
 func (v *Snapshot) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
-	return v.withEndpointMovedInputs(ctx, verdict, recorded, nil)
-}
-
-func (v *Snapshot) withEndpointMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint, ep *runtimeEndpoint) Verdict {
-	verdict, _ = v.withEndpointMovedInputsList(ctx, verdict, recorded, ep)
+	verdict, _ = v.withEndpointMovedInputsList(ctx, verdict, recorded, nil)
 	return verdict
 }
 
@@ -569,19 +526,6 @@ func (v *Snapshot) compareAttachedObservations(ctx context.Context, attached map
 	return ctx.Err()
 }
 
-// closeCheckWindow closes one check's runtime-input window: the base
-// re-observation proves the tree stable across the window's reads. A
-// deferred-close engine skips it — the view's validation is the one
-// close for every deferred interval (REQ-fresh-coherent-view's deferred
-// close) — and a window that read no runtime inputs has nothing to
-// close.
-func (v *Snapshot) closeCheckWindow(ctx context.Context, hasRuntimeInputs, deferClose bool) error {
-	if hasRuntimeInputs && !deferClose {
-		return v.reobserveBase(ctx)
-	}
-	return nil
-}
-
 // reobserveBase detects source, guard, or purity drift since view construction
 // with one fresh observation compared against the constructing view. This
 // provides the same ordinary-drift guarantee as a full double-observed view per
@@ -639,12 +583,14 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !construction && !slices.Equal(current.sourceFilesBySubject[subject], base.sourceFilesBySubject[subject]) {
+		baseEntry := base.subjects[subject]
+		curEntry := current.subjects[subject]
+		if !construction && !slices.Equal(curEntry.sourceFiles, baseEntry.sourceFiles) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject])
-			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
+			emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", baseEntry.sourceFiles, curEntry.sourceFiles)
+			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(baseEntry.sourceFiles, curEntry.sourceFiles, base.fileDigests, current.fileDigests))
 		}
 		// A budget cut in either observation compares with the
 		// discharge-shaped fields cleared; during construction the view
@@ -652,60 +598,60 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		// comparison reports a difference those fields alone carry as
 		// analysis unavailability after every other comparison holds
 		// (REQ-fresh-context).
-		cutHere := current.cut[subject] || base.cut[subject]
-		if !current.maximal[subject].equal(base.maximal[subject], cutHere) {
+		cutHere := curEntry.cut || baseEntry.cut
+		if !curEntry.maximal.equal(baseEntry.maximal, cutHere) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			emitTwoPassDiff(ctx, &subject, func() (string, string, string) {
-				return diffSubjectFacts(base.maximal[subject], current.maximal[subject], cutHere)
+				return diffSubjectFacts(baseEntry.maximal, curEntry.maximal, cutHere)
 			})
-			return fmt.Errorf("%w: closure for %s.%s%s%s", ErrViewChanged, subject.Package, subject.Symbol, during, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
+			return fmt.Errorf("%w: closure for %s.%s%s%s", ErrViewChanged, subject.Package, subject.Symbol, during, movedIdentitySuffix(baseEntry.sourceFiles, curEntry.sourceFiles, base.fileDigests, current.fileDigests))
 		}
-		if !construction && cutHere && !current.maximal[subject].equal(base.maximal[subject], false) {
+		if !construction && cutHere && !curEntry.maximal.equal(baseEntry.maximal, false) {
 			unjudged = append(unjudged, subject)
 		}
-		if current.purity[subject] != base.purity[subject] {
+		if curEntry.purity != baseEntry.purity {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			emitTwoPassStringDiff(ctx, &subject, "purity", base.purity[subject], current.purity[subject])
+			emitTwoPassStringDiff(ctx, &subject, "purity", baseEntry.purity, curEntry.purity)
 			return fmt.Errorf("%w: purity for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, during)
 		}
 		if construction {
-			if base.vouchDischarges[subject] != current.vouchDischarges[subject] {
+			if baseEntry.vouchDischarges != curEntry.vouchDischarges {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				emitTwoPassStringDiff(ctx, &subject, "vouch_discharges", base.vouchDischarges[subject], current.vouchDischarges[subject])
+				emitTwoPassStringDiff(ctx, &subject, "vouch_discharges", baseEntry.vouchDischarges, curEntry.vouchDischarges)
 				return fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
-			if !cutHere && base.discharges[subject].singleSubject != current.discharges[subject].singleSubject {
+			if !cutHere && baseEntry.discharges.singleSubject != curEntry.discharges.singleSubject {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				emitTwoPassStringDiff(ctx, &subject, "single_subject_discharges", base.discharges[subject].singleSubject, current.discharges[subject].singleSubject)
+				emitTwoPassStringDiff(ctx, &subject, "single_subject_discharges", baseEntry.discharges.singleSubject, curEntry.discharges.singleSubject)
 				return fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
-			if !cutHere && base.discharges[subject].packageProcess != current.discharges[subject].packageProcess {
+			if !cutHere && baseEntry.discharges.packageProcess != curEntry.discharges.packageProcess {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				emitTwoPassStringDiff(ctx, &subject, "package_process_discharges", base.discharges[subject].packageProcess, current.discharges[subject].packageProcess)
+				emitTwoPassStringDiff(ctx, &subject, "package_process_discharges", baseEntry.discharges.packageProcess, curEntry.discharges.packageProcess)
 				return fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
-			if current.cut[subject] && !base.cut[subject] {
+			if curEntry.cut && !baseEntry.cut {
 				base.takeCut(current, subject)
 			}
 			if err := compareModelProjectionsDuringConstruction(ctx, base, current, subject); err != nil {
 				return err
 			}
-			if !slices.Equal(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject]) {
+			if !slices.Equal(baseEntry.sourceFiles, curEntry.sourceFiles) {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject])
-				return fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
+				emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", baseEntry.sourceFiles, curEntry.sourceFiles)
+				return fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(baseEntry.sourceFiles, curEntry.sourceFiles, base.fileDigests, current.fileDigests))
 			}
 		}
 	}

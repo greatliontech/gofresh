@@ -1416,9 +1416,9 @@ bindings {
   content_hash: "bb8a38a484e4fd360063da10b6e8d8ea8d9a057a564b08c376415f2d4d58128b"
   source_hash: "52e609c91a954988092e81c98e47f992ad7e341f5d81e8fa75ba39d3b5acb4d7"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.Snapshot.checkInertTestVariantExtension"
+  symbol: "github.com/greatliontech/gofresh.CheckingUnit.ExtendInertBatch"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "128963b570702ae7122e3f17d936c278a65961dbf9bab8925e67e991439cee4d"
+  shape_hash: "ceaac77c316076db9e91875fdec8b17759cd04b2ad84a59d9a136e0a56b86c65"
 }
 
 bindings {

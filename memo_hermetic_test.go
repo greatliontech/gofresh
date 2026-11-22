@@ -416,8 +416,9 @@ func scanOutputs(t *testing.T, view *Snapshot, subjects []Subject) map[Subject]s
 		if err != nil {
 			t.Fatal(err)
 		}
-		d := view.facts.discharges[s]
-		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + view.facts.vouchDischarges[s] + "|" + d.packageProcess + "|" + d.singleSubject
+		entry := view.facts.subjects[s]
+		d := entry.discharges
+		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + entry.vouchDischarges + "|" + d.packageProcess + "|" + d.singleSubject
 	}
 	return out
 }

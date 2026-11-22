@@ -3,7 +3,6 @@ package gofresh
 import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
@@ -172,11 +171,7 @@ func purityAttribution(assertion string) PurityAttribution {
 }
 
 func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) ObservationAuthority {
-	return admittedObservationForModel(rec, subject, cl, false)
-}
-
-func admittedObservationForModel(rec Fingerprint, subject Subject, cl closure.Closure, singleSubject bool) ObservationAuthority {
-	return admittedObservationWithSupport(rec, subject, cl, singleSubject, func(target string) bool {
+	return admittedObservationWithSupport(rec, subject, cl, false, func(target string) bool {
 		return runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, target)
 	})
 }
@@ -190,10 +185,10 @@ func admittedObservationWithSupport(rec Fingerprint, subject Subject, cl closure
 		return ObservationAuthority{}
 	}
 	if hasOutcomeSupport(outcomeSubject(rec, subject)) {
-		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method, SingleSubject: reqSingleSubject}
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: runtimeinput.OutcomeMethod, SingleSubject: reqSingleSubject}
 	}
 	if effectFree {
-		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.StaticMethod, SingleSubject: reqSingleSubject}
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: runtimeinput.StaticOutcomeMethod, SingleSubject: reqSingleSubject}
 	}
 	return ObservationAuthority{}
 }
@@ -204,17 +199,20 @@ func (v *Snapshot) judgmentFor(subject Subject, verdict Verdict) Verdict {
 		ResultKind:     v.kind,
 		ExecutionModel: v.effectiveExecutionModel(),
 	}
+	var entry subjectEntry
+	if v.facts != nil {
+		entry = v.facts.subjects[subject]
+	}
 	// A cut is the immutable pass's unavailability, not proof that the
 	// surviving culprit affects this subject. It still blocks observation lift.
-	if verdict.Ground.Cause.Kind == SharedDynamicStateCause && v.facts.cut[subject] {
+	if verdict.Ground.Cause.Kind == SharedDynamicStateCause && entry.cut {
 		verdict.Ground.Cause.Condition = Unavailable
 		verdict.Ground.Cause.Culprit = Subject{}
 	}
 	if verdict.Ground.Accepted.GuardAgreement {
-		d := v.facts.discharges[subject]
-		verdict.Ground.Accepted.DynamicStateVouches = v.facts.vouchDischarges[subject]
-		verdict.Ground.Accepted.SingleSubjectDischarges = d.singleSubject
-		verdict.Ground.Accepted.PackageProcessDischarges = d.packageProcess
+		verdict.Ground.Accepted.DynamicStateVouches = entry.vouchDischarges
+		verdict.Ground.Accepted.SingleSubjectDischarges = entry.discharges.singleSubject
+		verdict.Ground.Accepted.PackageProcessDischarges = entry.discharges.packageProcess
 	}
 	return verdict
 }
@@ -261,7 +259,7 @@ func decide(rec Fingerprint, cl closure.Closure, cur guard.Guards, rt runtimeinp
 }
 
 // recordedEvidenceVerdict is the evidence-only verdict ladder shared by every
-// check surface (decide, checkBatch, CheckObservedBatch), so the tier
+// check surface (decide, checkRecordsWithEndpoints), so the tier
 // ordering is written once: an unevaluable recorded core is stale on the
 // closure (REQ-fresh-sound); an unchanged core compares the test-variant
 // compartment next, stale with the stable discriminating reason

@@ -19,183 +19,9 @@ import (
 	"testing/quick"
 	"time"
 
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"pgregory.net/rapid"
 )
-
-// adoptTestState re-evaluates a manifest of identities against the current
-// view, yielding the canonical completed state a producing run would have
-// recorded.
-func adoptTestState(t *testing.T, m manifest, moduleDir string, env []string) State {
-	t.Helper()
-	encoded, err := encode(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	normalized, err := normalizeEnvironment(env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	state, err := currentWithNormalizedEnvContext(t.Context(), encoded, moduleDir, normalized)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return state
-}
-
-// A persisted union re-admitted through adoption merges with fresh
-// observations to exactly the state a fresh merge of every contributor
-// yields (REQ-inputs-adoption).
-func TestAdoptedUnionMergesLikeFreshObservations(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "fixture.txt"), []byte("one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env := []string{"ADOPT_A=1", "ADOPT_B=2"}
-	stateA := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_A", Digest: testEntryDigest}}}, dir, env)
-	stateB := adoptTestState(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "fixture.txt"}, Digest: testEntryDigest}}}, dir, env)
-	obsA := newObservation(stateA, "proc-a", "test")
-	obsB := newObservation(stateB, "proc-b", "test")
-	union, err := Merge(dir, env, obsA, obsB)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persisted := union.State.Manifest
-
-	adopted, err := Adopt(persisted, dir, "persisted-union", env)
-	if err != nil {
-		t.Fatalf("Adopt: %v", err)
-	}
-	stateC := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_B", Digest: testEntryDigest}}}, dir, env)
-	obsC := newObservation(stateC, "proc-c", "test")
-	widened, err := Merge(dir, env, adopted, obsC)
-	if err != nil {
-		t.Fatalf("merge with adopted union: %v", err)
-	}
-	fresh, err := Merge(dir, env, obsA, obsB, obsC)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if widened.State != fresh.State {
-		t.Fatalf("adopted-path union state = %+v, fresh union state = %+v, want identical digest semantics", widened.State, fresh.State)
-	}
-}
-
-// Adoption re-evaluates recorded evidence and refuses a contradicted manifest,
-// naming the moved input — persisted evidence never re-enters silently.
-func TestAdoptRefusesMovedManifestNamingTheMover(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fixture.txt")
-	if err := os.WriteFile(path, []byte("one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	env := []string{"ADOPT_A=1"}
-	state := adoptTestState(t, manifest{Version: manifestVersion, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "fixture.txt"}, Digest: testEntryDigest}}}, dir, env)
-	if err := os.WriteFile(path, []byte("two"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Adopt(state.Manifest, dir, "persisted-union", env)
-	if err == nil || !strings.Contains(err.Error(), "moved") || !strings.Contains(err.Error(), "fixture.txt") {
-		t.Fatalf("Adopt after move = %v, want refusal naming fixture.txt", err)
-	}
-}
-
-// Adoption accepts only the canonical encoding; padded, reordered, or
-// otherwise re-serialized manifests are refused structurally.
-func TestAdoptRefusesNonCanonicalEncoding(t *testing.T) {
-	dir := t.TempDir()
-	env := []string{"ADOPT_A=1"}
-	state := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_A", Digest: testEntryDigest}}}, dir, env)
-	if _, err := Adopt(state.Manifest+"A", dir, "persisted-union", env); err == nil {
-		t.Fatal("Adopt accepted a tampered encoding")
-	}
-	if _, err := Adopt("", dir, "persisted-union", env); err == nil {
-		t.Fatal("Adopt accepted an empty manifest string")
-	}
-	// A semantically equal but re-serialized manifest — valid base64, valid
-	// JSON, non-canonical byte form — must refuse at the canonical-encoding
-	// gate itself, not depend on transport-layer validation.
-	raw, err := base64.RawURLEncoding.DecodeString(state.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reserialized := base64.RawURLEncoding.EncodeToString(append(raw, ' '))
-	_, err = Adopt(reserialized, dir, "persisted-union", env)
-	if err == nil || !strings.Contains(err.Error(), "canonical") {
-		t.Fatalf("Adopt(re-serialized) = %v, want canonical-encoding refusal", err)
-	}
-}
-
-// Adoption validates its inputs at the boundary: a process identity and a
-// well-formed environment are required, and an adopted observation never
-// aliases a genuine completed observation of the same state under the same
-// process — their provenance dispositions differ, so merge refuses the
-// conflict instead of silently unifying unverified and verified evidence.
-func TestAdoptBoundaryValidationAndProvenance(t *testing.T) {
-	dir := t.TempDir()
-	env := []string{"ADOPT_A=1"}
-	state := adoptTestState(t, manifest{Version: manifestVersion, Env: []envInput{{Name: "ADOPT_A", Digest: testEntryDigest}}}, dir, env)
-	if _, err := Adopt(state.Manifest, dir, "", env); err == nil {
-		t.Fatal("Adopt accepted an empty process identity")
-	}
-	if _, err := Adopt(state.Manifest, dir, "p", []string{"ADOPT_A=1", "ADOPT_A=2"}); err == nil {
-		t.Fatal("Adopt accepted a duplicate-key environment")
-	}
-	adopted, err := Adopt(state.Manifest, dir, "p", env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	genuine := newObservation(state, "p", "complete")
-	if _, err := Merge(dir, env, adopted, genuine); err == nil || !strings.Contains(err.Error(), "conflicting observations") {
-		t.Fatalf("merge of adopted and genuine evidence under one process = %v, want provenance conflict refusal", err)
-	}
-}
-
-// An adopted union carries recorded incompleteness into merge: the reasons
-// survive and keep the merged evidence unverifiable, never silently dropped.
-func TestAdoptCarriesUnverifiableReasons(t *testing.T) {
-	dir := t.TempDir()
-	env := []string{"ADOPT_A=1"}
-	state := adoptTestState(t, manifest{Version: manifestVersion, Unverifiable: []string{"incomplete: proc-x"}}, dir, env)
-	adopted, err := Adopt(state.Manifest, dir, "persisted-union", env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := Merge(dir, env, adopted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := decode(merged.State.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Unverifiable) != 1 || m.Unverifiable[0] != "incomplete: proc-x" {
-		t.Fatalf("merged unverifiable = %v, want the adopted incompleteness reason", m.Unverifiable)
-	}
-}
-
-// Adopting the observation-free manifest succeeds and stays the identity of
-// merge, mirroring REQ-inputs-merge's zero-observation semantics.
-func TestAdoptObservationFreeManifest(t *testing.T) {
-	dir := t.TempDir()
-	env := []string{"ADOPT_A=1"}
-	empty, err := Merge(dir, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adopted, err := Adopt(empty.State.Manifest, dir, "persisted-union", env)
-	if err != nil {
-		t.Fatalf("Adopt(observation-free): %v", err)
-	}
-	remerged, err := Merge(dir, env, adopted)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if remerged.State != empty.State {
-		t.Fatalf("re-merged empty state = %+v, want the observation-free state %+v", remerged.State, empty.State)
-	}
-}
 
 func TestAliasRootListingAvailabilityDoesNotMixStatIdentities(t *testing.T) {
 	dir := t.TempDir()
@@ -456,7 +282,7 @@ func TestProducerPremisesAcrossGeneratedBindings(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				in.Outcome = outcome.Prepare(binding, []string{supportedSubject}, "")
+				in.Outcome = PrepareOutcomeSupport(binding, []string{supportedSubject}, "")
 				wantReason = "operation-outcome support belongs to a different execution or environment"
 			case "missing-env", "missing-pwd":
 				withoutPWD := slices.DeleteFunc(slices.Clone(env), func(s string) bool { return strings.HasPrefix(s, "PWD=") })
@@ -510,30 +336,11 @@ func TestProducerPremisesAcrossGeneratedBindings(t *testing.T) {
 			if !conserved("original", obs) {
 				return false
 			}
-			// Identity conversions and serialized re-admission preserve the
-			// already-established class, not the current method's availability.
-			absolute, err := Absolute(obs, root, in.Env)
-			if err != nil {
-				return fail("absolute: %v", err)
+			cur, err := Current(ctx, obs.Manifest, root, in.Env)
+			if err != nil || cur != obs.State {
+				return fail("recheck changed state: %+v, %v", cur, err)
 			}
-			if !conserved("absolute", absolute) {
-				return false
-			}
-			relative, err := Relative(absolute, root, in.Env)
-			if err != nil {
-				return fail("conversion changed authority: %+v, %v", relative, err)
-			}
-			if !conserved("relative", relative) {
-				return false
-			}
-			adopted, err := Adopt(relative.Manifest, root, "reader", in.Env)
-			if err != nil {
-				return fail("readmission changed authority: %+v, %v", adopted, err)
-			}
-			if !conserved("adopted", adopted) {
-				return false
-			}
-			if HasOutcomeSupport(adopted.Manifest, strings.Repeat("c", 64)) {
+			if HasOutcomeSupport(obs.Manifest, strings.Repeat("c", 64)) {
 				return fail("another subject borrowed persisted support")
 			}
 		}
@@ -1425,16 +1232,16 @@ func TestExistenceBoundNotBypassedByOpenOrFullStat(t *testing.T) {
 }
 
 // Boundary escapes for Bracket and ScratchNamespace:
-// 1. A ScratchNamespace whose declared Dir is a symlink to a bracket-excluded
-//    directory inside the bracket root must not admit consumed-and-removed files.
-// 2. A bracket root that was absent at capture time (no directory walk) must
-//    not admit scratch reads if created during the run.
-// 3. Prefix-colliding sibling directories (scratch vs scratch2) must not admit
-//    reads under the sibling.
-// 4. Hardlink mutation of a tracked file through a temporary scratch hardlink
-//    that is removed before ingest is caught by bracket revalidation.
-// 5. Filenames containing attribution framing characters (quotes, semicolons,
-//    brackets) preserve clean clause/attribution splitting.
+//  1. A ScratchNamespace whose declared Dir is a symlink to a bracket-excluded
+//     directory inside the bracket root must not admit consumed-and-removed files.
+//  2. A bracket root that was absent at capture time (no directory walk) must
+//     not admit scratch reads if created during the run.
+//  3. Prefix-colliding sibling directories (scratch vs scratch2) must not admit
+//     reads under the sibling.
+//  4. Hardlink mutation of a tracked file through a temporary scratch hardlink
+//     that is removed before ingest is caught by bracket revalidation.
+//  5. Filenames containing attribution framing characters (quotes, semicolons,
+//     brackets) preserve clean clause/attribution splitting.
 func TestScratchNamespaceBoundaryAndSymlinkEscapes(t *testing.T) {
 	t.Run("symlinked_namespace_dir_to_excluded_subtree_stays_observed", func(t *testing.T) {
 		moduleDir, packageDir := testDirs(t)
@@ -1747,18 +1554,6 @@ func TestCurrentWithMoversAndAdoptSinglePassProperty(t *testing.T) {
 		}
 		if (len(gotMovers) > 0) != (gotState.Manifest != recorded.Manifest) {
 			rt.Fatalf("mover/manifest mismatch: movers=%v", gotMovers)
-		}
-
-		adopted, adoptErr := Adopt(recorded.Manifest, modDir, "adopter", curEnv)
-		if len(gotMovers) == 0 {
-			if adoptErr != nil || adopted.State != recorded {
-				rt.Fatalf("unmoved Adopt = (%+v, %v), want recorded state", adopted, adoptErr)
-			}
-		} else {
-			wantSubstr := "adopted manifest moved: " + strings.Join(gotMovers, ", ")
-			if adoptErr == nil || !strings.Contains(adoptErr.Error(), wantSubstr) {
-				rt.Fatalf("moved Adopt err = %v, want substring %q", adoptErr, wantSubstr)
-			}
 		}
 	})
 }

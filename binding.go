@@ -11,7 +11,6 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
@@ -101,28 +100,13 @@ func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGua
 	return guards, nil
 }
 
-// ProducerSnapshot selects a nonempty subset of this binding's source snapshot
-// for a caller-managed producer transaction. It observes no new source or build
-// facts and uses this binding's runtime environment and guards. Subjects outside
-// the source snapshot are refused; duplicates collapse in first-request order.
-// Captured source observability proofs and their validation obligations survive
-// selection, but attachments and closing state do not. Capture any missing proof
-// before execution, attach the execution's observation afterward, and successfully
-// Validate before publishing its fingerprints. The caller owns execution scope,
-// completion and dependency protection throughout that span. This operation
-// supplies no built-artifact declaration, execution receipt or outcome support;
-// identity-only observations retain their original authority.
-func (b *RuntimeBinding) ProducerSnapshot(subjects []Subject) (*Snapshot, error) {
-	return b.newView(subjects)
-}
-
 // newView selects immutable source facts and the binding while giving the caller
 // a fresh transaction. No attachment, obligation or seal crosses this boundary.
 func (b *RuntimeBinding) newView(subjects []Subject) (*Snapshot, error) {
 	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
 		return nil, errors.New("gofresh: uninitialized runtime binding")
 	}
-	v, err := b.snapshot.Sibling(subjects)
+	v, err := b.snapshot.sibling(subjects)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +250,7 @@ func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput
 	if err != nil {
 		return runtimeinput.OutcomeSupport{}, nil, err
 	}
-	fingerprints, err := v.CaptureObservedBatch(ctx)
+	fingerprints, err := v.captureObservedBatch(ctx)
 	if err != nil {
 		return runtimeinput.OutcomeSupport{}, nil, err
 	}
@@ -285,21 +269,13 @@ func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput
 	reason := ""
 	singleSubject := v.effectiveExecutionModel().singleSubject()
 	for _, subject := range v.subjects {
-		proof := v.observable[subject]
-		if (proof.OutcomeMethod != outcome.Method || (proof.RequiresSingleSubject && !singleSubject)) && reason == "" {
+		proof := v.txState[subject].observable
+		if (proof.OutcomeMethod != runtimeinput.OutcomeMethod || (proof.RequiresSingleSubject && !singleSubject)) && reason == "" {
 			reason = fmt.Sprintf("operation-outcome support unavailable for %q", subject.Package+"."+subject.Symbol)
 		}
 		subjects = append(subjects, outcomeSubject(fingerprints[subject], subject))
 	}
-	return outcome.Prepare(binding, subjects, reason), fingerprints, nil
-}
-
-// PrepareTrackedChdirSupport derives a frame-bound TrackedChdirSupport
-// capability for pkg under this snapshot when the analyzed test binary
-// satisfies the toolchain and binary-graph premises for balanced LIFO
-// testing.Chdir excursion tracking.
-func (v *Snapshot) PrepareTrackedChdirSupport(ctx context.Context, frame ProducerFrame, pkg string) (TrackedChdirSupport, error) {
-	return v.prepareTrackedChdirSupport(ctx, frame.frame, pkg)
+	return runtimeinput.PrepareOutcomeSupport(binding, subjects, reason), fingerprints, nil
 }
 
 func (v *Snapshot) prepareTrackedChdirSupport(ctx context.Context, frame runtimeinput.ProducerFrame, pkg string) (support runtimeinput.TrackedChdirSupport, opErr error) {
@@ -331,9 +307,9 @@ func (v *Snapshot) prepareTrackedChdirSupport(ctx context.Context, frame runtime
 		if s.Package != pkg {
 			continue
 		}
-		if proof, ok := v.observable[s]; ok {
+		if tx := v.txState[s]; tx.hasObservable {
 			v.mu.RUnlock()
-			return frame.PrepareTrackedChdir(proof.TrackedChdirSafe), nil
+			return frame.PrepareTrackedChdir(tx.observable.TrackedChdirSafe), nil
 		}
 		if !haveProbe {
 			probe = s
@@ -358,13 +334,13 @@ func (v *Snapshot) prepareTrackedChdirSupport(ctx context.Context, frame runtime
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.TrackedChdirSupport{}, err
 	}
-	return frame.PrepareTrackedChdir(v.observable[probe].TrackedChdirSafe), nil
+	return frame.PrepareTrackedChdir(v.txState[probe].observable.TrackedChdirSafe), nil
 }
 
 func outcomeSubject(fingerprint Fingerprint, subject Subject) string {
 	// A string-array encoding is total; it frames every field and uses the
 	// manifest's canonical escaping without another serialization grammar.
-	data, _ := json.Marshal([]string{outcome.Method, subject.Package, subject.Symbol, fingerprint.MaximalClosure, fingerprint.TestVariantClosure, fingerprint.Guards.Toolchain, fingerprint.Guards.BuildConfig, fingerprint.ToolchainContent, fingerprint.AdmissionPolicy, fingerprint.ObservationProof.Strategy})
+	data, _ := json.Marshal([]string{runtimeinput.OutcomeMethod, subject.Package, subject.Symbol, fingerprint.MaximalClosure, fingerprint.TestVariantClosure, fingerprint.Guards.Toolchain, fingerprint.Guards.BuildConfig, fingerprint.ToolchainContent, fingerprint.AdmissionPolicy, fingerprint.ObservationProof.Strategy})
 	digest := sha256.Sum256(data)
 	return hex.EncodeToString(digest[:])
 }

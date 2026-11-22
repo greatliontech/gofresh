@@ -15,18 +15,6 @@ func ambientIncomplete(moduleDir, process, reason string) (Observation, error) {
 	return Incomplete(moduleDir, process, reason, os.Environ())
 }
 
-func ambientAbsolute(observation Observation, moduleDir string) (Observation, error) {
-	return Absolute(observation, moduleDir, os.Environ())
-}
-
-func ambientRelative(observation Observation, moduleDir string) (Observation, error) {
-	return Relative(observation, moduleDir, os.Environ())
-}
-
-func ambientMerge(moduleDir string, observations ...Observation) (Observation, error) {
-	return Merge(moduleDir, os.Environ(), observations...)
-}
-
 func ambientCurrent(encoded, moduleDir string) (State, error) {
 	return Current(context.Background(), encoded, moduleDir, os.Environ())
 }

@@ -11,7 +11,8 @@
 //
 // Setting GOFRESH_TRACE (for example GOFRESH_TRACE=all, GOFRESH_TRACE=toolchain,view,
 // or GOFRESH_TRACE=closure:BenchmarkFoo) enables structured operational diagnostic
-// tracing across the toolchain, closure, view, and session subsystems without
+// tracing across the toolchain, closure, dynstate, runtimeinput, cache, view, and
+// session subsystems without
 // altering any normalized environment, guard, closure digest, memo key, or
 // recorded runtime-input dependency. Events write to os.Stderr by default or to
 // the path named by GOFRESH_TRACE_FILE (JSON Lines when ending in .jsonl or .json,
@@ -55,44 +56,6 @@ type Guards = guard.Guards
 
 func refreshTraceFromEnv() {
 	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
-}
-
-// CaptureGuards computes the environment guards applicable to kind for build
-// under runtimeEnv as the complete runtime environment (a nil runtimeEnv
-// inherits build.Environment).
-func CaptureGuards(ctx context.Context, build BuildDescription, runtimeEnv []string, kind Kind, prepare ...func(*exec.Cmd)) (Guards, error) {
-	refreshTraceFromEnv()
-	if ctx == nil {
-		return Guards{}, errors.New("gofresh: nil guard capture context")
-	}
-	if err := ctx.Err(); err != nil {
-		return Guards{}, err
-	}
-	if build.Directory == "" {
-		return Guards{}, errors.New("gofresh: empty guard capture directory")
-	}
-	if build.Environment == nil {
-		return Guards{}, errors.New("gofresh: build environment must be explicitly provided")
-	}
-	if runtimeEnv == nil {
-		runtimeEnv = build.Environment
-	}
-	reader, err := primedBuildReader(build, prepare)
-	if err != nil {
-		return Guards{}, err
-	}
-	inputs := make([]string, 0, len(build.Flags)+len(build.Inputs))
-	for _, flag := range build.Flags {
-		inputs = append(inputs, "flag="+flag)
-	}
-	for _, input := range build.Inputs {
-		inputs = append(inputs, "input="+input)
-	}
-	return guard.Capture(ctx, reader, runtimeEnv, kind, inputs...)
-}
-
-func primedBuildReader(build BuildDescription, prepare []func(*exec.Cmd)) (*gotool.EnvReader, error) {
-	return gotool.PrimedEnvReaderFromValues(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment, build.GoEnv)
 }
 
 // TestVariantBindingStrategy versions the base-package binding derivation on
@@ -182,12 +145,6 @@ type BuildDescription struct {
 	Environment []string
 	Flags       []string
 	Inputs      []string
-	// GoEnv is an optional pass-scoped `go env -json` setting map already
-	// taken by the caller in the same observation pass for Directory and
-	// Environment, avoiding a duplicate `go env` subprocess in CaptureGuards
-	// and ResolveToolchainSelection. NewSession ignores it and always takes
-	// its own snapshot.
-	GoEnv map[string]string
 }
 
 // RuntimeDescription is the complete environment of the built program. A nil
@@ -257,9 +214,8 @@ type Session struct {
 	analysisBudget time.Duration
 	// runner spawns every go command the session runs itself; the zero
 	// value is the plain spawn.
-	runner             gotool.Runner
-	progress           func(Progress)
-	deferredCheckClose bool
+	runner   gotool.Runner
+	progress func(Progress)
 	// sortedVouches is the caller's canonical sorted vouch set:
 	// "<import path>.<Variable>" identities of version-pinned dependency
 	// variables the caller accepts as stable after initialization
@@ -455,23 +411,14 @@ func rebaseProcessPath(directory, path string) (string, error) {
 	return directory + string(filepath.Separator) + path, nil
 }
 
-// Snapshot observes the requested subjects under the session's admitted build.
-// It captures no measurement-side guards; BindRuntime admits those separately.
+// Snapshot observes the requested subjects under the session's admitted build
+// with the guards applicable to kind. It captures no measurement-side guards;
+// BindRuntime admits those separately.
 func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (*Snapshot, error) {
 	if s == nil || s.dir == "" {
 		return nil, errors.New("gofresh: uninitialized session")
 	}
-	return s.SnapshotFor(ctx, subjects, s.build.Directory, kind)
-}
-
-// SnapshotFor observes the requested subjects and moduleDir under the
-// session's admitted build with the guards applicable to kind. It captures no
-// measurement-side guards; BindRuntime admits those separately.
-func (s *Session) SnapshotFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*Snapshot, error) {
-	if s == nil || s.dir == "" {
-		return nil, errors.New("gofresh: uninitialized session")
-	}
-	return s.observeSnapshot(ctx, subjects, moduleDir, kind)
+	return s.observeSnapshot(ctx, subjects, s.build.Directory, kind)
 }
 
 // newPassReader mints a pass's environment reader over the session's

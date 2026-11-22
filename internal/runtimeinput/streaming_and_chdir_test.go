@@ -14,7 +14,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"pgregory.net/rapid"
 )
@@ -229,10 +228,6 @@ func TestTrackedChdirBalancedExcursionsDedupAndFromTestLogFile(t *testing.T) {
 	if classifyCalls > 5 {
 		t.Fatalf("expected duplicate external dir stats to be deduplicated, got %d classifyStat probes", classifyCalls)
 	}
-	absObs, err := Absolute(obs, root, gotool.SetEnv(env, "PWD", root))
-	if err != nil || absObs.Unverifiable {
-		t.Fatalf("Absolute conversion after tracked chdir failed: obs=%+v err=%v", absObs, err)
-	}
 
 	// Verify FromTestLogFile matches FromTestLog byte-for-byte on identity-only options.
 	rawBytes, err := os.ReadFile(logPath)
@@ -391,9 +386,9 @@ func TestProducerStreamingRefusalPrecedenceMidStreamReadAndOutcomeScreen(t *test
 	// Step 4 (mid-stream read error) outranks Step 6 (unsupported op), Step 7 (no bracket), and Step 8 (bad PWD).
 	ioBoom := errors.New("synthetic mid-stream EIO")
 	for _, tc := range []struct {
-		name  string
-		f     ProducerFrame
-		env   []string
+		name   string
+		f      ProducerFrame
+		env    []string
 		reqOut bool
 	}{
 		{"happy_frame_supported", frame, env, true},
@@ -805,7 +800,7 @@ func TestProducerSetupFailureStillEnforcesOutcomeAndReadPrecedence(t *testing.T)
 		Env:           env,
 		Roots:         &Roots{},
 		Completion:    receipt,
-		Outcome:       outcome.Prepare(binding, []string{"sub1"}, ""),
+		Outcome:       PrepareOutcomeSupport(binding, []string{"sub1"}, ""),
 		ExcludedPaths: []string{""},
 	})
 	if err != nil {

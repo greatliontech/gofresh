@@ -781,3 +781,48 @@ func MutateIndirectBareSlice() {
 		}
 	}
 }
+
+func TestOutflowEvalTerminatesOnCyclicSignatureLeafCallWriteback(t *testing.T) {
+	pkg := mustTypecheckPackage(t, "example.com/outflowcycle", map[string]string{
+		"cycle.go": `package outflowcycle
+
+type policy struct {
+	check func(int) bool
+}
+
+func deriveHook(m map[string]func() int) func() int {
+	return func() int { return len(m) }
+}
+
+func touchMap(m map[string]func() int, tag string) {
+	_ = m[tag]
+}
+
+func derivePolicy(s []policy) policy {
+	return policy{check: func(n int) bool { return n < len(s) }}
+}
+
+func BuildCyclicMap(p map[string]func() int) map[string]func() int {
+	m := map[string]func() int{}
+	m["self"] = deriveHook(m)
+	touchMap(m, "self")
+	p["param"] = deriveHook(p)
+	touchMap(p, "param")
+	return m
+}
+
+func BuildCyclicSlice() []policy {
+	s := make([]policy, 1)
+	s[0] = derivePolicy(s)
+	return s
+}
+`,
+	})
+	fact := FactOf(true, pkg)
+	for _, fn := range []string{"BuildCyclicMap", "BuildCyclicSlice"} {
+		fk := syntaxutil.FuncKey{Pkg: "example.com/outflowcycle", Name: fn}
+		if slices.Contains(fact.ReturnEnvFree, fk) {
+			t.Fatalf("ReturnEnvFree unexpectedly admitted cyclic mutable-reach call writeback %s: %+v", fn, fact.ReturnEnvFree)
+		}
+	}
+}

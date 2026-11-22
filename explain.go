@@ -14,8 +14,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
-	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // The explain surface turns a refusal into its derivation chain
@@ -61,30 +61,6 @@ type Chain struct {
 // chainLinkCap bounds a chain's link count; the remainder is counted,
 // never silent (REQ-explain-bounded).
 const chainLinkCap = 24
-
-// CulpritFromReason extracts the package path and variable name from a
-// shared-dynamic-state refusal reason string when only diagnostic text is
-// available (for example, an unverified verdict reason persisted in a caller's
-// historical record). Live checks expose the culprit directly on
-// Verdict.Ground.Cause.Culprit. A reason whose reachability pass was cut by an
-// analysis budget names no proven culprit and returns false.
-func CulpritFromReason(reason string) (Subject, bool) {
-	if strings.Contains(reason, " (reachability unjudged: ") {
-		return Subject{}, false
-	}
-	fields := strings.Split(reason, " ")
-	for i := 0; i+1 < len(fields); i++ {
-		pkg, ok := strings.CutSuffix(fields[i], ":")
-		if !ok || pkg == "" || strings.IndexAny(pkg, " \t\r\n:") >= 0 {
-			continue
-		}
-		sym, ok := strings.CutPrefix(fields[i+1], pkg+".")
-		if ok && token.IsIdentifier(sym) {
-			return Subject{Package: pkg, Symbol: sym}, true
-		}
-	}
-	return Subject{}, false
-}
 
 // ExplainDynamicState derives the refusal chain for a dynamic-state
 // culprit a verdict's reason names: the variable varName declared in

@@ -30,11 +30,11 @@ func TestViewAcceptsPromotedMethodSubject(t *testing.T) {
 	if !ok {
 		t.Fatal("inMemorySnapshotForSubject declined")
 	}
-	var err error
-	verdict, err = current.Check(context.Background(), fingerprint, subject)
+	verdicts, err := current.checkMap(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}
+	verdict = verdicts[subject]
 	if verdict.Status != Stale || verdict.Reason != "closure" {
 		t.Fatalf("promoting type edit = %+v, want stale closure", verdict)
 	}
@@ -70,10 +70,11 @@ func TestSourcePurityRemainsPortableWhenProducerAlsoAsserts(t *testing.T) {
 	if !ok {
 		t.Fatal("inMemorySnapshotForSubject declined")
 	}
-	verdict, err := consumer.Check(context.Background(), fingerprint, subject)
+	verdicts, err := consumer.checkMap(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}
+	verdict := verdicts[subject]
 	if verdict.Status != Valid {
 		t.Fatalf("portable source purity verdict = %+v, want valid", verdict)
 	}
@@ -88,10 +89,11 @@ func TestMalformedPurityAttributionCannotOverride(t *testing.T) {
 	if !ok {
 		t.Fatal("inMemorySnapshotForSubject declined")
 	}
-	verdict, err := consumer.Check(context.Background(), fingerprint, subject)
+	verdicts, err := consumer.checkMap(context.Background(), map[Subject]Fingerprint{subject: fingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}
+	verdict := verdicts[subject]
 	if verdict.Status != Unverifiable {
 		t.Fatalf("malformed purity attribution verdict = %+v, want unverifiable", verdict)
 	}

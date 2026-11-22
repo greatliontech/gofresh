@@ -64,12 +64,12 @@ applicability extension require the caller's single-subject-process
 execution attestation (`SingleSubjectExecution`), refusing shared-process capture
 and cross-mode replay fail-closed and recording `SingleSubject` on the accepted
 `ObservationAuthority`. Likewise, tracked-`chdir` unsealing during test-log
-finalization requires an unforgeable analysis-issued `TrackedChdirSupport`
-capability bound to the execution's `ProducerFrame` span, root, and package
+finalization requires an unforgeable analysis-issued tracked-`chdir`
+capability bound to that unit execution's frame span, root, and package
 directory; zero, mismatched, or unproven capabilities retain fail-closed
 untracked `chdir` sealing. Unknown,
 absent or incompatible support supplies no positive evidence. Hashes, seals,
-successful decoding, set union and current reconstruction establish none of
+successful decoding and current reconstruction establish none of
 the missing historical premises. Explicit purity keeps its specified override
 authority without relabeling the observation or overriding externality and
 real guard drift.
@@ -333,10 +333,10 @@ in the operation's account. The library does not continue a cancelled entry
 under a private uncancellable context. Closing expiry yields no final reusable
 answer from that unit; an earlier independently committed unit remains kept.
 
-## Explicit built-artifact production
+## Built-artifact production
 
-**REQ-fresh-built-unit** (behavior): The explicit built-artifact producing form
-MUST bind its snapshot, declared successful build and contributing execution
+**REQ-fresh-built-unit** (behavior): Producing execution units
+MUST bind their snapshot, declared successful build and contributing execution
 without exposing mutable analysis or transaction state. The session owns copied
 build description and accepted assertion sets; its complete vouch set
 is caller-resolved in canonical `import-path.Variable` identity form, with no

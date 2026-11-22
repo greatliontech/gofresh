@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/stipulator/stipulate/structural"
@@ -27,14 +27,23 @@ import (
 // environment in its signature (REQ-closure-analysis: the analyzed tree
 // and build selection are explicit inputs, never implicit coupling): no
 // production source of the internal packages or the root files outside
-// session.go and view.go reads the ambient process environment (os.Environ,
+// session.go reads the ambient process environment (os.Environ,
 // Getenv, LookupEnv, ExpandEnv, and syscall's).
 //
 //gofresh:pure
 func TestPublicPackagesReadNoAmbientEnvironment(t *testing.T) {
-	roots := []string{"internal"}
-	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "runtimeinputs.go", "unit.go", "validate.go", "vouchfile.go"}
-	for _, root := range roots {
+	var files []string
+	rootEntries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range rootEntries {
+		name := entry.Name()
+		if !entry.IsDir() && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") && name != "session.go" {
+			files = append(files, name)
+		}
+	}
+	for _, root := range []string{"internal"} {
 		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -242,7 +251,9 @@ func TestPurityInputIsSubjectPredicate(t *testing.T) {
 }
 
 func TestViewCheckUsesConstructionKind(t *testing.T) {
-	structural.FunctionSignature[func(*Snapshot, context.Context, Fingerprint, Subject) (Verdict, error)](t, (*Snapshot).Check)
+	structural.FunctionSignature[func(*Session, context.Context, []Subject, Kind) (*Snapshot, error)](t, (*Session).Snapshot)
+	structural.FunctionSignature[func(*RuntimeBinding, context.Context, Subject, Fingerprint) (Verdict, error)](t, (*RuntimeBinding).Check)
+	structural.FunctionSignature[func(*CheckingUnit, context.Context, []Candidate) ([]CheckedCandidate, error)](t, (*CheckingUnit).CheckBatch)
 }
 
 func TestVouchInputShapes(t *testing.T) {
@@ -279,7 +290,11 @@ func TestTraceDomainsAndTwoPassDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := snap.Check(ctx, fps[subj], subj)
+	binding, err := snap.BindRuntime(ctx, RuntimeDescription{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := binding.Check(ctx, subj, fps[subj])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,8 +320,8 @@ func TestTraceDomainsAndTwoPassDiff(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package traced\n\nfunc Add(a, b int) int { return a + b + 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := snap.Validate(ctx); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("Validate after source edit = %v, want ErrViewChanged", err)
+	if err := snap.validate(ctx); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("validate after source edit = %v, want ErrViewChanged", err)
 	}
 	diffs := rec.ByName("two_pass_diff")
 	if len(diffs) == 0 {
@@ -418,7 +433,7 @@ func TestExportedSurfaceInventory(t *testing.T) {
 		"asmverify": true, "auditset": true, "cachefile": true,
 		"capsule": true, "closure": true, "cprep": true, "dynstate": true, "flowir": true,
 		"freshalloc": true, "gotool": true, "guard": true, "jsonrecord": true,
-		"observability": true, "outcome": true, "propharness": true, "refconfine": true,
+		"observability": true, "propharness": true, "refconfine": true,
 		"rta": true, "runtimeinput": true, "seams": true, "structmut": true, "syntaxutil": true,
 		"testenv": true, "testvariant": true, "toolchain": true, "trace": true,
 	}
@@ -505,21 +520,21 @@ func TestExportedSurfaceInventory(t *testing.T) {
 	// 3. Verify promoted type aliases do not expose any method whose signature
 	// references an unexported or internal-only type outside the promoted root aliases.
 	promotedPkgPaths := map[string]bool{
-		"":                                     true,
-		"github.com/greatliontech/gofresh":     true,
+		"":                                 true,
+		"github.com/greatliontech/gofresh": true,
 		"github.com/greatliontech/gofresh/internal/runtimeinput": true,
 		"github.com/greatliontech/gofresh/internal/guard":        true,
 		"github.com/greatliontech/gofresh/internal/testvariant":  true,
 	}
 	for _, typ := range []reflect.Type{
-		reflect.TypeFor[*InputRoots](),
-		reflect.TypeFor[Observation](),
 		reflect.TypeFor[RuntimeState](),
-		reflect.TypeFor[Bracket](),
+		reflect.TypeFor[RuntimeInputsDescription](),
 		reflect.TypeFor[ScratchNamespace](),
-		reflect.TypeFor[TrackedChdirSupport](),
 		reflect.TypeFor[Guards](),
+		reflect.TypeFor[Kind](),
 		reflect.TypeFor[TestVariantLedger](),
+		reflect.TypeFor[TestVariantDelta](),
+		reflect.TypeFor[MemoPruneReport](),
 	} {
 		for i := range typ.NumMethod() {
 			m := typ.Method(i)
@@ -695,7 +710,7 @@ func TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution(t *testing.
 		t.Fatalf("Snapshot: %v", err)
 	}
 	for _, s := range subjects {
-		if st := snap.facts.maximal[s].sharedState; st != nil {
+		if st := snap.facts.subjects[s].maximal.sharedState; st != nil {
 			t.Errorf("undischarged shared dynamic state on %s.%s: culprit=%s.%s reason=%s",
 				s.Package, s.Symbol, st.culprit.Package, st.culprit.Symbol, st.reason)
 		}

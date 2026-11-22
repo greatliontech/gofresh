@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/cachefile"
@@ -562,12 +565,12 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				return cached
 			}
 			emitLocalFactLoadViewHook(listing, false)
-			fact := dynstate.FactOf(hasher.SelectionAudited(), pkg)
+			fact := dynstate.FactOfWithHooksCtx(ctx, hasher.SelectionAudited(), pkg, false, nil)
 			localFacts.store(key, fact)
 			return fact
 		}
 		emitLocalFactLoadViewHook(listing, false)
-		return dynstate.FactOf(hasher.SelectionAudited(), pkg)
+		return dynstate.FactOfWithHooksCtx(ctx, hasher.SelectionAudited(), pkg, false, nil)
 	}
 
 	requestedViewPkg := make(map[string]bool, len(viewPackages))
@@ -607,6 +610,11 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		rootLocals = append(rootLocals, localPkgEntry{listing: listing, pkg: pkg})
 	}
 	for _, entry := range rootLocals {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, postFactKeys, loadedLocal))
 	}
 	var testedWithIntermediates []string
@@ -662,10 +670,15 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			interEntries = append(interEntries, localPkgEntry{listing: listing, pkg: pkg})
 		})
 		for _, entry := range interEntries {
+			if ctx != nil {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			if nodesByListing[entry.listing].Class == closure.MutableLocalPackage {
 				record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, interPostKeys, graphLoaded))
 			} else {
-				record(entry.listing, entry.pkg.PkgPath, dynstate.FactOf(hasher.SelectionAudited(), entry.pkg))
+				record(entry.listing, entry.pkg.PkgPath, dynstate.FactOfWithHooksCtx(ctx, hasher.SelectionAudited(), entry.pkg, false, nil))
 			}
 		}
 	}
@@ -728,13 +741,18 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		derived := map[string]dynstate.Fact{}
 		for _, pkg := range missLoad.Packages() {
+			if ctx != nil {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			if pkg.ForTest != "" || pkg.Name == "main" {
 				continue
 			}
 			for _, loadErr := range pkg.Errors {
 				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
 			}
-			derived[pkg.PkgPath] = dynstate.FactOf(hasher.SelectionAudited(), pkg)
+			derived[pkg.PkgPath] = dynstate.FactOfWithHooksCtx(ctx, hasher.SelectionAudited(), pkg, false, nil)
 		}
 		store := map[string]map[string]json.RawMessage{}
 		for _, node := range missing {
@@ -760,8 +778,16 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 	}
 
-	activeModel := execModelFromBools(singleSubject, packageProcess)
-	for _, viewPackage := range viewPackages {
+	type preparedViewCone struct {
+		viewPackage  string
+		coneMeta     []closure.GraphPackage
+		coneFacts    map[string][]dynstate.Fact
+		genComposed  dynstate.ConeState
+		pkgComposed  dynstate.ConeState
+		soloComposed dynstate.ConeState
+	}
+	prepared := make([]preparedViewCone, len(viewPackages))
+	for i, viewPackage := range viewPackages {
 		coneMeta, coneFacts := dynstate.Cone(meta, nodesByListing, factsByListing, viewPackage)
 		if extra := extraVariantFacts[viewPackage]; len(extra) > 0 {
 			seenExtra := map[string]bool{}
@@ -769,7 +795,12 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 				seenExtra[node.PkgPath] = true
 			}
 			for _, pkg := range extra {
-				coneFacts[pkg.PkgPath] = append(coneFacts[pkg.PkgPath], dynstate.FactOf(hasher.SelectionAudited(), pkg))
+				if ctx != nil {
+					if err := ctx.Err(); err != nil {
+						return nil, err
+					}
+				}
+				coneFacts[pkg.PkgPath] = append(coneFacts[pkg.PkgPath], dynstate.FactOfWithHooksCtx(ctx, hasher.SelectionAudited(), pkg, false, nil))
 				if !seenExtra[pkg.PkgPath] {
 					seenExtra[pkg.PkgPath] = true
 					coneMeta = append(coneMeta, closure.GraphPackage{
@@ -797,14 +828,69 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			state.drifted[viewPackage] = true
 		}
 		state.cones[viewPackage] = coneFacts
+		prepared[i] = preparedViewCone{
+			viewPackage: viewPackage,
+			coneMeta:    coneMeta,
+			coneFacts:   coneFacts,
+		}
+	}
 
-		genComposed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, false, false)
-		recordComposedInModel(state.byModel[GeneralExecution], viewPackage, genComposed)
+	composeOne := func(item *preparedViewCone) {
+		if ctx != nil && ctx.Err() != nil {
+			return
+		}
+		item.genComposed = dynstate.ComposeCtx(ctx, item.coneMeta, item.coneFacts, item.viewPackage, vouches, false, false)
 		if singleSubject || packageProcess {
-			pkgComposed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, false, true)
-			recordComposedInModel(state.byModel[PackageExecution], viewPackage, pkgComposed)
-			soloComposed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, true, false)
-			recordComposedInModel(state.byModel[SingleSubjectExecution], viewPackage, soloComposed)
+			if ctx != nil && ctx.Err() != nil {
+				return
+			}
+			item.pkgComposed = dynstate.ComposeCtx(ctx, item.coneMeta, item.coneFacts, item.viewPackage, vouches, false, true)
+			if ctx != nil && ctx.Err() != nil {
+				return
+			}
+			item.soloComposed = dynstate.ComposeCtx(ctx, item.coneMeta, item.coneFacts, item.viewPackage, vouches, true, false)
+		}
+	}
+	if len(prepared) <= 1 {
+		for i := range prepared {
+			composeOne(&prepared[i])
+		}
+	} else {
+		workers := min(max(runtime.GOMAXPROCS(0), 1), len(prepared))
+		var nextIdx atomic.Int64
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for range workers {
+			go func() {
+				defer wg.Done()
+				for {
+					if ctx != nil && ctx.Err() != nil {
+						return
+					}
+					idx := int(nextIdx.Add(1) - 1)
+					if idx >= len(prepared) {
+						return
+					}
+					composeOne(&prepared[idx])
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+
+	activeModel := execModelFromBools(singleSubject, packageProcess)
+	for i := range prepared {
+		item := &prepared[i]
+		viewPackage := item.viewPackage
+		recordComposedInModel(state.byModel[GeneralExecution], viewPackage, item.genComposed)
+		if singleSubject || packageProcess {
+			recordComposedInModel(state.byModel[PackageExecution], viewPackage, item.pkgComposed)
+			recordComposedInModel(state.byModel[SingleSubjectExecution], viewPackage, item.soloComposed)
 		}
 
 		activeDS := state.byModel[activeModel]

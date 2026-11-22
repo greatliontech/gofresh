@@ -1,14 +1,10 @@
 package gofresh
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
-	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/greatliontech/gofresh/internal/closure"
@@ -17,65 +13,46 @@ import (
 	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/internal/trace"
 )
 
-// ErrViewChanged reports that a producer Snapshot no longer describes the current
-// source, build, guard, or purity state and its results must not be persisted.
-var ErrViewChanged = errors.New("gofresh: analysis view changed")
-
-// errViewSealed reports a capture attempted after producer validation started.
-var errViewSealed = errors.New("gofresh: analysis view sealed by validation")
-
-// ErrAnalysisUnavailable reports that producer validation could not
-// re-establish a captured observation proof because the current analysis was
-// unavailable — an exhausted analysis budget or a failed load — never because
-// the view drifted: it is reported only once every other check of the
-// validation passed, the runtime-input comparison that closes the proof
-// pass included, so a caller holding it knows nothing else moved. The
-// error names the first subject the pass could not re-establish; the
-// pass's own progress diagnostic carries the count. The evidence is not
-// persisted; the caller may retry with a larger budget or record the
-// run's outcomes under unverifiable observation evidence.
-var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailable during validation")
+// subjectTxState holds one subject's mutable transaction state on a Snapshot
+// (cached Tier-2 observability, captured-proof flag, and attached runtime state).
+type subjectTxState struct {
+	observable       observability.Observability
+	hasObservable    bool
+	capturedObserved bool
+	attached         runtimeinput.State
+	hasAttached      bool
+}
 
 // Snapshot is one immutable observation of the source, build, guards, and purity
-// behind a caller-supplied subject set. It can serve a current check batch or a
-// producer transaction. Analysis state never crosses view generations; within
-// one generation, Sibling derives subset views sharing this view's observation
-// while owning their producer transactions.
+// behind a caller-supplied subject set. Analysis state never crosses view
+// generations; within one generation, derived subset views share this view's
+// observation while owning independent unit or checking transactions.
 type Snapshot struct {
-	mu                   sync.RWMutex
-	session              *Session
-	parent               *Snapshot
-	subjects             []Subject
-	requests             []closure.Subject
-	packages             []string
-	moduleDir            string
-	kind                 Kind
-	executionModel       ExecutionModel
-	hasExecutionModel    bool
-	facts                *observationFacts
-	runtime              *boundRuntime
-	observable           map[Subject]observability.Observability
-	capturedObserved     map[Subject]bool
-	attachedObservations map[Subject]runtimeinput.State
-	sealed               bool
-	applicabilityChecks  []applicabilityCheck
+	mu                sync.RWMutex
+	session           *Session
+	parent            *Snapshot
+	subjects          []Subject
+	requests          []closure.Subject
+	packages          []string
+	moduleDir         string
+	kind              Kind
+	executionModel    ExecutionModel
+	hasExecutionModel bool
+	facts             *observationFacts
+	runtime           *boundRuntime
+	txState           map[Subject]subjectTxState
+	sealed            bool
 	// cutUnavailable holds a comparison's unavailability that a budget
-	// cut alone explains (compareFactsContext): never returned where it
-	// arose — a capture keeps the view's fail-closed facts, a validation
-	// runs every other check first — and read by the observed
-	// validation's end (REQ-fresh-context).
+	// cut alone explains: never returned where it arose — a capture keeps
+	// the view's fail-closed facts, a validation runs every other check
+	// first — and read by the observed validation's end (REQ-fresh-context).
 	cutUnavailable error
 	runtimeCurrent func(context.Context, string, string) (runtimeinput.State, error)
 	// beforePreciseAnalysis observes the start of drift-forced precise analysis
 	// (the observability proof). Tests use it to pin which check paths run
-	// analysis and to inject cancellation at the analysis boundary. It stays
-	// per-view — outside the package-level viewTestHooks surface — because
-	// its granularity is load-bearing: pass-economy tests count analyses on
-	// one view while another is live, which a package-global hook cannot
-	// attribute.
+	// analysis and to inject cancellation at the analysis boundary.
 	beforePreciseAnalysis func()
 	// beforeOutcomeIssue lets lifecycle tests intervene after capture has
 	// released its lock and before preparation checks the transaction seal.
@@ -138,18 +115,16 @@ func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject
 		hasExecModel = true
 	}
 	return &Snapshot{
-		session:              s,
-		subjects:             subjects,
-		requests:             requests,
-		packages:             packages,
-		moduleDir:            moduleDir,
-		kind:                 kind,
-		executionModel:       execModel,
-		hasExecutionModel:    hasExecModel,
-		facts:                facts,
-		observable:           make(map[Subject]observability.Observability, len(subjects)),
-		capturedObserved:     make(map[Subject]bool, len(subjects)),
-		attachedObservations: make(map[Subject]runtimeinput.State, len(subjects)),
+		session:           s,
+		subjects:          subjects,
+		requests:          requests,
+		packages:          packages,
+		moduleDir:         moduleDir,
+		kind:              kind,
+		executionModel:    execModel,
+		hasExecutionModel: hasExecModel,
+		facts:             facts,
+		txState:           make(map[Subject]subjectTxState, len(subjects)),
 	}
 }
 
@@ -160,316 +135,13 @@ func (v *Snapshot) cloneShell(subjects []Subject, requests []closure.Subject, pa
 	shell.parent = v.parent
 	shell.runtime = v.runtime
 	shell.runtimeCurrent = v.runtimeCurrent
+	shell.beforePreciseAnalysis = v.beforePreciseAnalysis
+	shell.beforeOutcomeIssue = v.beforeOutcomeIssue
 	return shell
 }
 
-// observationFacts is one generation's immutable observation: derived
-// by an observation pass (or assembled as a subject-scoped subset by
-// Sibling) and shared read-only by every Snapshot holding it. The struct
-// is mutex-free and setter-free, so read-only sharing is structural,
-// never conventional; the Snapshot keeps only transactional state (seal,
-// captured proofs, runtime attachments) beside it. Explicit snapshots retain only
-// source/build guards here; their immutable runtime binding supplies the rest.
-type observationFacts struct {
-	// snapshot is the construction pass's env snapshot. The process
-	// environment is immutable configuration (REQ-fresh-coherent-view);
-	// go env FILE values can still change on disk, so a bracket reusing
-	// this snapshot resolves only GOMODCACHE from it, revalidates GOFLAGS
-	// live before any load (the memo write precedes the closing compare),
-	// and relies on the closing pass's fresh snapshot to refuse any drift
-	// the guards cover.
-	snapshot *gotool.EnvSnapshot
-	// reader is the construction pass's reader, the snapshot's home: the
-	// bracket's constructor reads the construction snapshot through it.
-	reader  *gotool.EnvReader
-	maximal map[Subject]subjectFacts
-	// source retains only typed inputs actually loaded by this generation. A
-	// warm scan memo can leave it absent or partially populated; that is not
-	// permission to acquire replacement inputs or infer implementation support.
-	source          *closure.ViewLoad
-	guards          guard.Guards
-	purity          map[Subject]string
-	vouchDischarges map[Subject]string
-	discharges      map[Subject]attestationDischarges
-	// cut is the set of subjects the analysis budget left undischarged
-	// in this pass — a fact of the pass, never of the tree: the fields
-	// the discharge shapes (the downgrade in maximal, the attestation
-	// and package-process discharges) are compared only between passes
-	// not cut on the subject, and a difference a cut explains is the
-	// analysis's unavailability, never drift (REQ-fresh-context).
-	cut                  map[Subject]bool
-	sourceFiles          []string
-	sourceFilesBySubject map[Subject][]string
-	// fileDigests carries a construction-time content digest per source
-	// identity, so a later validation failure can name the moved file
-	// (REQ-fresh-producer-view's naming arm). Best-effort attribution:
-	// the digests are read moments after the closure hashes, so a file
-	// that moves inside that window names imprecisely while the closure
-	// comparison still refuses.
-	fileDigests map[string]string
-	// testVariantLedgers: per-package compartment ledgers, pure functions
-	// of the same bytes the compartment hashes fold, so the agreement
-	// pair's hash comparison vouches for them.
-	testVariantLedgers map[string]testvariant.TestVariantLedger
-	modelProjections   [3]executionModelProjection
-	hasProjection      [3]bool
-}
-
-func (s *Session) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
-	return s.observeViewWithExecution(ctx, subjects, requests, packages, moduleDir, kind, s.executionModel)
-}
-
-func (s *Session) observeViewWithExecution(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind, execModel ExecutionModel) (facts observationFacts, err error) {
-	emitObserveViewHook()
-	var hasher *closure.Hasher
-	defer func() { accountPass(ctx, hasher) }()
-	if s.progress != nil {
-		s.progress(Progress{Phase: "observe"})
-	}
-	// One `go env -json` read serves this whole pass: the hasher's
-	// GOMODCACHE and GOFLAGS validation, the guard's build-config digest,
-	// and the typed load's validation all derive from it. The snapshot is
-	// pass-scoped - a later pass takes its own, so environment drift still
-	// meets an observation (REQ-guard-buildconfig; the toolchain guard is
-	// the snapshot's GOVERSION with the host platform, REQ-guard-toolchain).
-	reader := s.newPassReader()
-	snapshot, err := reader.Snapshot(ctx)
-	if err != nil {
-		return observationFacts{}, err
-	}
-	hasher, err = closure.NewAt(ctx, reader, s.buildFlags...)
-	if err != nil {
-		return observationFacts{}, err
-	}
-	// The toolchain-selection verdict is a construction fact: the Hasher
-	// resolved it from the snapshot it was built on, so the notice that a
-	// selection outside the audit degrades every later proof is announced
-	// here, before any load — never first on the precise-analysis path a
-	// caller may reach only after execution.
-	if s.progress != nil {
-		emitUnauditedToolchainNotice(&s.unauditedNotice, hasher.SelectionNotice(), func(detail string) {
-			s.progress(Progress{Phase: "toolchain-unaudited", Detail: detail})
-		})
-		// The construction pass reports its units too: each package's
-		// listing and closure fold, the shared typed load, and every
-		// memo hit that stood in for a step — the operator sees why a
-		// warm pass is quick and where a cold one is.
-		s.wireProgress(hasher)
-	}
-	// The guard reads the pass's one snapshot — the reader that took it
-	// is the guard's, its directory the one every guard observation
-	// captures in — never a second probe of the same pass
-	// (REQ-guard-buildconfig, REQ-guard-toolchain).
-	inputs := s.guardInputs()
-	guardKind := kind
-	if s.build.Directory != "" {
-		identity, err := guard.CompleteBuildEnvironment(ctx, snapshot, s.dir, s.env)
-		if err != nil {
-			return observationFacts{}, err
-		}
-		inputs = append(inputs, "gofresh/build-description@2="+identity)
-		guardKind = CodeResult
-	}
-	// Explicit snapshots retain compilation facts only. A runtime-bound view
-	// adds its independently captured measurement guards at use and comparison.
-	guards, err := guard.Capture(ctx, gotool.PrimedEnvReader(s.runner, observedGuardDir(reader.Dir), s.env, snapshot), s.evidenceEnv(), guardKind, inputs...)
-	if err != nil {
-		return observationFacts{}, err
-	}
-	// One typed load serves this whole observation pass: scanViewSubjects
-	// loads the view packages and every mutable-local graph package once,
-	// installs the load on the hasher for the testing-type effect scan, and
-	// serves version-pinned dynamic-state facts from the memo under the
-	// guard-derived scope — so no two derivations of one pass can straddle
-	// an edit (REQ-fresh-coherent-view). Each pass loads afresh; the paired
-	// observations stay independent witnesses.
-	// The analysis scope is the identity outside the source closure —
-	// the strategy versions, the code guards, the attestations, the
-	// vouches — set once for the pass: it arms every memo the closure
-	// folds consult (the typed testing-effect scan included, without
-	// which every fold would recompute the scan through a private typed
-	// load) and keys the facts and the scan below
-	// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo,
-	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
-	scope := hasher.SetAnalysisScope(s.analysisScope(guards))
-	emitFactScopeViewHook(scope.Facts())
-	if kind == SourceResult {
-		emitScanScopeViewHook(scope.SourceScan())
-	} else {
-		emitScanScopeViewHook(scope.Scan())
-	}
-	scan, source, cut, err := scanViewSubjectsWithMode(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, kind == SourceResult, execModel, packages...)
-	if err != nil {
-		return observationFacts{}, err
-	}
-	// One diagnostic per pass the budget cut, never one per subject —
-	// the discharge's twin of the proof pass's report (REQ-fresh-progress).
-	reportBudgetCut(s.progress, s.analysisBudget, len(cut), "undischarged")
-	directivePure, known, openWorld, external := scan.directivePure, scan.known, scan.openWorld, scan.external
-	if kind == SourceResult {
-		for _, pkg := range packages {
-			if errMsg := scan.loadErr[pkg]; errMsg != "" {
-				return observationFacts{}, fmt.Errorf("gofresh: load %s: %s", pkg, errMsg)
-			}
-		}
-	} else {
-		for _, s := range subjects {
-			if (!known[s] || scan.staticDecl[s]) && scan.loadErr[s.Package] != "" {
-				return observationFacts{}, fmt.Errorf("gofresh: load %s: %s", s.Package, scan.loadErr[s.Package])
-			}
-		}
-	}
-	// Subject existence is decided by the scan; refusing here, before
-	// the maximal fold reads and hashes every contributing file, is
-	// preparation — the fold below cannot change the answer. The
-	// refusal names every unknown subject of the batch at once, so a
-	// caller narrows its batch in one step (REQ-fresh-preparation).
-	if err := requireSubjects(subjects, func(s Subject) bool { return known[s] }, SelectedSource); err != nil {
-		return observationFacts{}, err
-	}
-	if kind == Measurement {
-		if err := checkStaticDeclsForMeasurement(ctx, subjects, scan.staticDecl, moduleDir); err != nil {
-			return observationFacts{}, err
-		}
-	}
-	emitMaximalBatchViewHook()
-	computed, sources, err := hasher.ComputeMaximalFactsBatch(requests)
-	if err != nil {
-		return observationFacts{}, err
-	}
-	observation := observationFacts{
-		cut:                  cut,
-		snapshot:             snapshot,
-		reader:               reader,
-		maximal:              make(map[Subject]subjectFacts, len(subjects)),
-		source:               source,
-		guards:               guards,
-		purity:               make(map[Subject]string, len(subjects)),
-		vouchDischarges:      make(map[Subject]string, len(subjects)),
-		discharges:           make(map[Subject]attestationDischarges, len(subjects)),
-		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
-		testVariantLedgers:   make(map[string]testvariant.TestVariantLedger, len(packages)),
-	}
-	for _, pkg := range packages {
-		// Served from the hasher's compartment memo: the ledger was derived
-		// from the same reads as the compartment hash above, never a
-		// re-read that could straddle an edit.
-		ledger, err := hasher.TestVariantLedger(pkg)
-		if err != nil {
-			return observationFacts{}, err
-		}
-		observation.testVariantLedgers[pkg] = ledger
-	}
-	sourceGroups := make([][]string, 0, len(requests))
-	for _, request := range requests {
-		sourceGroups = append(sourceGroups, sources[request])
-	}
-	observation.sourceFiles = sortedUniqueUnion(sourceGroups)
-	observation.fileDigests = make(map[string]string, len(observation.sourceFiles))
-	for _, path := range observation.sourceFiles {
-		if err := ctx.Err(); err != nil {
-			return observationFacts{}, err
-		}
-		// The digest comes from the Hasher's own closure reads — the exact
-		// bytes the compared closure hash was built over — never a second
-		// read that could straddle an edit. A source the closure's reads
-		// did not digest keeps degraded attribution; detection is the
-		// closure comparison's, not this naming pass's.
-		if digest, ok := hasher.FileDigest(path); ok {
-			observation.fileDigests[path] = digest
-		}
-	}
-	if kind != SourceResult {
-		observation.modelProjections, observation.hasProjection = buildModelProjections(subjects, scan, hasher.SelectionAttribution(), budgetExhausted(s.analysisBudget))
-	}
-	for _, subject := range subjects {
-		isStatic := scan.staticDecl[subject]
-		maximal := subjectFacts{
-			source:     computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}],
-			staticDecl: isStatic,
-			sourceOnly: kind == SourceResult,
-		}
-		if kind != SourceResult && !isStatic {
-			if term := openWorld[subject]; term != "" {
-				maximal.openWorld = &subjectRefusal{reason: closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
-			}
-			if reason := scan.downgradeReason[subject]; reason != "" {
-				var culprit Subject
-				if !cut[subject] {
-					culprit = scan.downgradeCulprit[subject]
-				}
-				if cut[subject] {
-					reason += " (reachability unjudged: " + budgetExhausted(s.analysisBudget) + ")"
-				}
-				maximal.sharedState = &subjectRefusal{
-					reason:  closure.AttributeSelection(reason, hasher.SelectionAttribution()),
-					culprit: culprit,
-				}
-			}
-			if discharges := scan.vouchDischarges[subject]; discharges != "" {
-				observation.vouchDischarges[subject] = discharges
-			}
-			if d := scan.discharges[subject]; d != (attestationDischarges{}) {
-				observation.discharges[subject] = d
-			}
-		}
-		if detail := scan.ambiguous[subject]; detail != "" {
-			maximal.ambiguous = &subjectRefusal{reason: "ambiguous subject identity: " + detail + "; rename one declaration to address either"}
-		}
-		if kind != SourceResult && external[subject] {
-			maximal.external = true
-		}
-		observation.maximal[subject] = maximal
-		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-		observation.sourceFilesBySubject[subject] = slices.Clone(sources[request])
-		sort.Strings(observation.sourceFilesBySubject[subject])
-		if kind == SourceResult || isStatic || external[subject] || scan.ambiguous[subject] != "" {
-			continue
-		}
-		switch caller, directive := s.assumePure(subject), directivePure(subject); {
-		case caller && directive:
-			observation.purity[subject] = "caller assertion and source directive"
-		case caller:
-			observation.purity[subject] = "caller assertion"
-		case directive:
-			observation.purity[subject] = "source directive"
-		}
-	}
-	if trace.AnyEnabled() {
-		for _, subject := range subjects {
-			target := subject.Package + "." + subject.Symbol
-			if !trace.Enabled(ctx, trace.DomainClosure, target) {
-				continue
-			}
-			c := observation.maximal[subject].closure()
-			culpritStr := ""
-			if c.Culprit.Package != "" || c.Culprit.Symbol != "" {
-				culpritStr = c.Culprit.Package + "." + c.Culprit.Symbol
-			}
-			trace.Emit(ctx, trace.DomainClosure, "subject_closure", target,
-				trace.String("hash", c.Hash),
-				trace.String("test_variants", c.TestVariants),
-				trace.Bool("unverifiable", c.Unverifiable),
-				trace.Int("refusal", int(c.Refusal)),
-				trace.String("culprit", culpritStr),
-				trace.String("reason", c.Reason),
-			)
-		}
-		if trace.Enabled(ctx, trace.DomainView, moduleDir) {
-			trace.Emit(ctx, trace.DomainView, "pass_summary", moduleDir,
-				trace.Int("subjects", len(subjects)),
-				trace.Int("source_files", len(observation.sourceFiles)),
-				trace.Int("cut_subjects", len(observation.cut)),
-				trace.String("guards_toolchain", observation.guards.Toolchain),
-				trace.String("guards_buildconfig", observation.guards.BuildConfig),
-			)
-		}
-	}
-	return observation, nil
-}
-
 // Capture returns subject's precomputed fingerprint from this Snapshot. Runtime-input
-// evidence belongs to the producing run and is attached by the caller afterward.
+// evidence belongs to the producing unit and is attached when the unit closes.
 func (v *Snapshot) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
 	if ctx == nil {
 		return Fingerprint{}, errors.New("gofresh: nil analysis context")
@@ -510,7 +182,7 @@ func (v *Snapshot) SourceFilesFor(subject Subject) ([]string, error) {
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return nil, err
 	}
-	return slices.Clone(v.facts.sourceFilesBySubject[subject]), nil
+	return slices.Clone(v.facts.subjects[subject].sourceFiles), nil
 }
 
 // TestVariantLedger returns the declaration ledger over subject's package
@@ -530,9 +202,6 @@ func (v *Snapshot) TestVariantLedger(subject Subject) (TestVariantLedger, error)
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return TestVariantLedger{}, err
 	}
-	// Clone, not a shallow struct copy: declarations carry reference-list
-	// slices, and a shallow copy would alias them into the view's internal
-	// ledger, breaking caller ownership.
 	return v.facts.testVariantLedgers[subject.Package].Clone(), nil
 }
 
@@ -572,48 +241,22 @@ func (v *Snapshot) fingerprintLocked(subject Subject, cl closure.Closure) Finger
 			ResultKind:         SourceResult,
 		}
 	}
-	d := v.facts.discharges[subject]
+	entry := v.facts.subjects[subject]
 	return Fingerprint{
 		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
 		ToolchainContent: cl.ToolchainContent, AdmissionPolicy: cl.AdmissionPolicy,
-		Guards: v.guards(), PurityAssertion: v.facts.purity[subject],
-		DynamicStateVouches:      v.facts.vouchDischarges[subject],
-		SingleSubjectDischarges:  d.singleSubject,
-		PackageProcessDischarges: d.packageProcess,
+		Guards: v.guards(), PurityAssertion: entry.purity,
+		DynamicStateVouches:      entry.vouchDischarges,
+		SingleSubjectDischarges:  entry.discharges.singleSubject,
+		PackageProcessDischarges: entry.discharges.packageProcess,
 		DynamicStateStrategy:     DynamicStateStrategy, ClosureStrategy: ClosureStrategy,
 		ResultKind: v.kind,
 	}
 }
 
-// captureObserved returns maximal closure evidence plus a caller-selected,
-// attributable observation proof for subject.
-func (v *Snapshot) captureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	ctx, done := v.session.beginOperation(ctx)
-	defer done(&opErr)
-	if err := v.requireMembers([]Subject{subject}); err != nil {
-		return Fingerprint{}, err
-	}
-	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
-		return Fingerprint{}, err
-	}
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return Fingerprint{}, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
-	}
-	if v.sealed {
-		return Fingerprint{}, errViewSealed
-	}
-	v.capturedObserved[subject] = true
-	return v.observedFingerprintLocked(subject), nil
-}
-
-// CaptureObservedBatch captures observation proof evidence for every
+// captureObservedBatch captures observation proof evidence for every
 // subject, sharing one proof analysis across the set.
-func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fingerprint, opErr error) {
+func (v *Snapshot) captureObservedBatch(ctx context.Context) (fps map[Subject]Fingerprint, opErr error) {
 	if v == nil || v.facts == nil || v.session == nil {
 		return nil, errors.New("gofresh: uninitialized snapshot")
 	}
@@ -632,14 +275,16 @@ func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fi
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
-		v.capturedObserved[subject] = true
+		tx := v.txState[subject]
+		tx.capturedObserved = true
+		v.txState[subject] = tx
 		result[subject] = v.observedFingerprintLocked(subject)
 	}
 	return result, nil
 }
 
 func (v *Snapshot) observedFingerprintLocked(subject Subject) Fingerprint {
-	disposition := v.observable[subject]
+	disposition := v.txState[subject].observable
 	singleSubject := v.effectiveExecutionModel().singleSubject()
 	observable := disposition.Observable
 	reason := disposition.Reason
@@ -667,25 +312,6 @@ func (v *Snapshot) observedFingerprintLocked(subject Subject) Fingerprint {
 	return fingerprint
 }
 
-// AttachObservation binds sealed, process-backed runtime evidence to a captured
-// observation proof. The returned fingerprint is ready for producer validation.
-func (v *Snapshot) AttachObservation(subject Subject, fingerprint Fingerprint, observation Observation) (Fingerprint, error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	return v.attachObservation(subject, fingerprint, observation, true)
-}
-
-// attachObservation checks the producing form the unit prepared. The ordinary
-// form carries identity-only evidence without synthesizing an observation proof.
-func (v *Snapshot) attachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation, observed bool) (Fingerprint, error) {
-	state, err := runtimeinput.CompletedState(observation)
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return v.attachRuntimeState(subject, fingerprint, &state, observed)
-}
-
 // attachRuntimeState validates the exact prepared fingerprint even when no
 // observation was selected. Nil state supplies no runtime evidence or assertion.
 func (v *Snapshot) attachRuntimeState(subject Subject, fingerprint Fingerprint, state *runtimeinput.State, observed bool) (Fingerprint, error) {
@@ -701,82 +327,30 @@ func (v *Snapshot) attachRuntimeState(subject Subject, fingerprint Fingerprint, 
 	if observed {
 		want = v.observedFingerprintLocked(subject)
 	}
-	if (observed && !v.capturedObserved[subject]) || fingerprint != want {
+	tx := v.txState[subject]
+	if (observed && !tx.capturedObserved) || fingerprint != want {
 		return Fingerprint{}, errors.New("gofresh: observation does not match captured subject proof")
 	}
 	if state == nil {
 		return fingerprint, nil
 	}
-	if _, attached := v.attachedObservations[subject]; attached {
+	if tx.hasAttached {
 		return Fingerprint{}, errors.New("gofresh: runtime observation already attached for subject")
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	v.attachedObservations[subject] = *state
+	tx.attached = *state
+	tx.hasAttached = true
+	v.txState[subject] = tx
 	return fingerprint, nil
 }
 
-// Check compares recorded against subject's current facts under this Snapshot's
-// result kind and the caller's context. Under a deferred-close engine the
-// verdict is provisional until the view validates (withDeferredCheckClose).
-func (v *Snapshot) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
-	verdicts, err := v.CheckBatch(ctx, map[Subject]Fingerprint{subject: recorded})
-	if err != nil {
-		return Verdict{}, err
-	}
-	return verdicts[subject], nil
-}
-
-// CheckBatch checks a caller-supplied recording set under the shared
-// evidence ladder (REQ-fresh-hierarchical-check). Under a deferred-close
-// engine the verdicts are provisional until the view validates
-// (withDeferredCheckClose).
-func (v *Snapshot) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	return v.checkMap(ctx, recorded, false, v.session.deferredCheckClose)
-}
-
-// CheckObserved explicitly checks a fingerprint under its recorded observation
-// assertion and proof. Ordinary Check never infers this policy from evidence.
-// A persisted inert endpoint retains original support and requires the current
-// proof and outcome inventory when observation is needed to establish validity.
-// It is the single-record form of CheckObservedBatch, so both share one window
-// semantics: a runtime input moving mid-check stales a record whose verdict is
-// not already stale, and demonstrated staleness is preferred over
-// unverifiability. Under a deferred-close engine the verdict is
-// provisional until the view validates (withDeferredCheckClose).
-func (v *Snapshot) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (verdict Verdict, opErr error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return Verdict{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	ctx, done := v.session.beginOperation(ctx)
-	defer done(&opErr)
-	verdicts, err := v.CheckObservedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
-	if err != nil {
-		return Verdict{}, err
-	}
-	return verdicts[subject], nil
-}
-
-// CheckObservedBatch checks a caller-supplied recording set under the explicit
-// observed policy, sharing one drift bracket pair, one runtime-input
-// observation window, and one drift-forced precise analysis across the set.
-// Every subject's verdict equals a single CheckObserved of its recording over
-// the same view; an unavailable shared analysis degrades only the drifted
-// subjects, and caller cancellation returns the context error. Under a
-// deferred-close engine the verdicts are provisional until the view
-// validates (withDeferredCheckClose).
-func (v *Snapshot) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	return v.checkMap(ctx, recorded, true, v.session.deferredCheckClose)
-}
-
 func (v *Snapshot) purityMatches(recorded Fingerprint, subject Subject) PurityAuthority {
-	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(v.facts.purity[subject])}
+	var current string
+	if v.facts != nil {
+		current = v.facts.subjects[subject].purity
+	}
+	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(current)}
 }
 
 func (v *Snapshot) currentRuntimeEndpoint(ctx context.Context, recorded Fingerprint, shared map[string]runtimeEval) (runtimeinput.State, error) {
@@ -786,8 +360,6 @@ func (v *Snapshot) currentRuntimeEndpoint(ctx context.Context, recorded Fingerpr
 	if recorded.RuntimeInputs == "" {
 		return runtimeinput.State{}, nil
 	}
-	// An unevaluable runtime-input guard is absence of proof: Stale, never
-	// valid (REQ-guard-completeness).
 	if cached, ok := shared[recorded.RuntimeInputs]; ok {
 		return cached.state, nil
 	}
@@ -808,71 +380,10 @@ func (v *Snapshot) currentRuntimeEndpoint(ctx context.Context, recorded Fingerpr
 	return eval.state, nil
 }
 
-// scopeSubjects derives one view scope — the deduplicated subjects,
-// their closure requests, and their unique packages, in first-seen
-// order — the single recipe every view construction and derivation
-// shares, so two scopes over one subject set can never disagree.
-func scopeSubjects(subjects []Subject) (unique []Subject, requests []closure.Subject, packages []string, err error) {
-	seen := make(map[Subject]bool, len(subjects))
-	seenPackage := make(map[string]bool, len(subjects))
-	for _, subject := range subjects {
-		if subject.Package == "" || subject.Symbol == "" {
-			return nil, nil, nil, fmt.Errorf("gofresh: invalid empty subject %+v", subject)
-		}
-		if seen[subject] {
-			continue
-		}
-		seen[subject] = true
-		unique = append(unique, subject)
-		requests = append(requests, closure.Subject{Package: subject.Package, Symbol: subject.Symbol})
-		if !seenPackage[subject.Package] {
-			seenPackage[subject.Package] = true
-			packages = append(packages, subject.Package)
-		}
-	}
-	return unique, requests, packages, nil
-}
-
-// sortedUniqueUnion folds per-subject source-identity lists into the
-// observation's canonical union form — sorted, deduplicated — the one
-// recipe construction and sibling derivation share, so a derived
-// union always compares equal to a freshly observed one on an
-// unchanged tree.
-func sortedUniqueUnion(groups [][]string) []string {
-	seen := map[string]bool{}
-	var union []string
-	for _, group := range groups {
-		for _, path := range group {
-			if !seen[path] {
-				seen[path] = true
-				union = append(union, path)
-			}
-		}
-	}
-	sort.Strings(union)
-	return union
-}
-
-// Sibling derives a view over a subset of this view's subjects that
-// shares this view's single observation: every fact the sibling serves —
-// closures, guards, purity, source identities, digests, ledgers, analysis cuts, and
-// captured observation proofs — is the parent's, so no generation can
-// mix (REQ-fresh-coherent-view), and the guards remain the family's one
-// capture (REQ-guard-view-lifetime). What the sibling owns is its
-// producer transaction: fresh runtime-observation attachment state and
-// its own validation seal, so a caller running one producer transaction
-// per measured subset — a mutation campaign's per-target attach and
-// validate cycles — pays the expensive observation once. Validation on
-// a sibling re-observes the tree for comparison exactly as on any view;
-// only the recorded facts are shared. Every requested subject must
-// belong to the parent view. A sealed parent still derives — the
-// sibling's own validation is its drift gate, and the facts are
-// construction-time either way. Inherited captured-proof flags commit
-// the sibling to the observed validation arm: a sibling of an observed
-// parent validates through attachment, exactly as the parent would.
-// Applicability checks for the subset are inherited as separate validation
-// obligations over historical records, never as producing attachments.
-func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
+// sibling derives a view over a subset of this view's subjects that
+// shares this view's single observation (REQ-fresh-coherent-view,
+// REQ-guard-view-lifetime) while owning a fresh transaction.
+func (v *Snapshot) sibling(subjects []Subject) (*Snapshot, error) {
 	if v == nil || v.facts == nil {
 		return nil, errors.New("gofresh: uninitialized snapshot")
 	}
@@ -896,43 +407,24 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 	if v.parent != nil {
 		rootParent = v.parent
 	}
-	// The narrowed union follows the observation's own recipe (sorted
-	// unique union of the subset's per-subject identities), so a
-	// validation-time observation over the subset compares equal on an
-	// unchanged tree.
-	sourceFilesBySubject := make(map[Subject][]string, len(unique))
-	maximal := make(map[Subject]subjectFacts, len(unique))
-	observable := make(map[Subject]observability.Observability, len(unique))
-	purity := make(map[Subject]string, len(unique))
-	vouchDischarges := make(map[Subject]string, len(unique))
-	discharges := make(map[Subject]attestationDischarges, len(unique))
-	cut := make(map[Subject]bool, len(unique))
-	capturedObserved := make(map[Subject]bool, len(unique))
+	entries := make(map[Subject]subjectEntry, len(unique))
+	txState := make(map[Subject]subjectTxState, len(unique))
 	ledgers := make(map[string]testvariant.TestVariantLedger, len(packages))
 	groups := make([][]string, 0, len(unique))
+	hasCachedObservable := false
 	for _, subject := range unique {
-		sourceFilesBySubject[subject] = v.facts.sourceFilesBySubject[subject]
-		groups = append(groups, v.facts.sourceFilesBySubject[subject])
-		if contribution, ok := v.facts.maximal[subject]; ok {
-			maximal[subject] = contribution
-		}
-		if proof, ok := v.observable[subject]; ok {
-			observable[subject] = proof
-		}
-		if assertion, ok := v.facts.purity[subject]; ok {
-			purity[subject] = assertion
-		}
-		if dischargesVal, ok := v.facts.vouchDischarges[subject]; ok {
-			vouchDischarges[subject] = dischargesVal
-		}
-		if d, ok := v.facts.discharges[subject]; ok {
-			discharges[subject] = d
-		}
-		if v.facts.cut[subject] {
-			cut[subject] = true
-		}
-		if v.capturedObserved[subject] {
-			capturedObserved[subject] = true
+		entry := v.facts.subjects[subject]
+		entries[subject] = entry
+		groups = append(groups, entry.sourceFiles)
+		if parentTx := v.txState[subject]; parentTx.hasObservable || parentTx.capturedObserved {
+			if parentTx.hasObservable {
+				hasCachedObservable = true
+			}
+			txState[subject] = subjectTxState{
+				observable:       parentTx.observable,
+				hasObservable:    parentTx.hasObservable,
+				capturedObserved: parentTx.capturedObserved,
+			}
 		}
 	}
 	sourceFiles := sortedUniqueUnion(groups)
@@ -941,37 +433,24 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 			ledgers[pkg] = ledger
 		}
 	}
-	var applicabilityChecks []applicabilityCheck
-	for _, check := range v.applicabilityChecks {
-		if _, ok := maximal[check.subject]; ok {
-			applicabilityChecks = append(applicabilityChecks, check)
-		}
-	}
 	var siblingCut error
-	if len(observable) > 0 {
+	if hasCachedObservable {
 		siblingCut = v.cutUnavailable
 	}
 	shell := v.cloneShell(unique, requests, packages, &observationFacts{
-		snapshot:             v.facts.snapshot,
-		reader:               v.facts.reader,
-		maximal:              maximal,
-		source:               v.facts.source,
-		guards:               v.facts.guards,
-		purity:               purity,
-		vouchDischarges:      vouchDischarges,
-		discharges:           discharges,
-		cut:                  cut,
-		sourceFiles:          sourceFiles,
-		sourceFilesBySubject: sourceFilesBySubject,
-		fileDigests:          v.facts.fileDigests,
-		testVariantLedgers:   ledgers,
-		modelProjections:     restrictModelProjections(v.facts.modelProjections, v.facts.hasProjection, unique),
-		hasProjection:        v.facts.hasProjection,
+		snapshot:           v.facts.snapshot,
+		reader:             v.facts.reader,
+		subjects:           entries,
+		source:             v.facts.source,
+		guards:             v.facts.guards,
+		sourceFiles:        sourceFiles,
+		fileDigests:        v.facts.fileDigests,
+		testVariantLedgers: ledgers,
+		modelProjections:   restrictModelProjections(v.facts.modelProjections, v.facts.hasProjection, unique),
+		hasProjection:      v.facts.hasProjection,
 	})
 	shell.parent = rootParent
-	shell.observable = observable
-	shell.capturedObserved = capturedObserved
-	shell.applicabilityChecks = applicabilityChecks
+	shell.txState = txState
 	shell.cutUnavailable = siblingCut
 	return shell, nil
 }
@@ -1016,280 +495,12 @@ func (v *Snapshot) compareObservationContext(ctx context.Context, observation ob
 	return compareObservations(ctx, v.subjects, v.facts, v.guards(), observation, false)
 }
 
-// takeCut adopts the other observation's fail-closed shape for a subject
-// it cut: the undischarged downgrade and Stage-A-only discharges.
-func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
-	base := f.maximal[subject]
-	base.sharedState = other.maximal[subject].sharedState
-	f.maximal[subject] = base
-	if d := other.discharges[subject]; d != (attestationDischarges{}) {
-		if f.discharges == nil {
-			f.discharges = map[Subject]attestationDischarges{}
-		}
-		f.discharges[subject] = d
-	} else {
-		delete(f.discharges, subject)
-	}
-	if f.cut == nil {
-		f.cut = map[Subject]bool{}
-	}
-	f.cut[subject] = true
-	takeModelCut(f, other, subject)
-}
-
-// analysisScope is the pass's analysis identity outside the source
-// closure under guards: the strategy versions, the code guards, the
-// execution attestations — each changes what a derived fact records,
-// so attested and unattested sessions never serve each other's facts
-// (REQ-closure-dynamic-state-memo) — and the caller's vouch set.
-func (s *Session) analysisScope(guards guard.Guards) closure.AnalysisScope {
-	return closure.AnalysisScope{
-		ProofStrategy: ObservationRTA, FactStrategy: DynamicStateStrategy,
-		Toolchain: guards.Toolchain, BuildConfig: guards.BuildConfig,
-		SingleSubject: s.executionModel.singleSubject(), PackageProcess: s.executionModel.packageProcess(),
-		Vouches: slices.Clone(s.sortedVouches),
-	}
-}
-
-// SubjectScope states what a membership refusal tested. A declaration outside
-// a selected view can still exist in source; these refusals do not conflate it
-// with a missing declaration.
-type SubjectScope uint8
-
-const (
-	SelectedSource SubjectScope = iota
-	SelectedView
-	ParentView
-)
-
-// UnknownSubjectsError names every missing member once, in request order (or
-// package/symbol lexical order for map-backed requests). SelectedSource means
-// declarations were absent from the source scan, including a formerly held
-// subject disappearing during re-observation. Other scopes concern selection
-// alone and make no assertion about source existence.
-type UnknownSubjectsError struct {
-	Subjects []Subject
-	Scope    SubjectScope
-}
-
-func (e *UnknownSubjectsError) Error() string {
-	noun := "subjects"
-	if len(e.Subjects) == 1 {
-		noun = "subject"
-	}
-	names := make([]string, 0, len(e.Subjects))
-	for _, s := range e.Subjects {
-		names = append(names, s.Package+"."+s.Symbol)
-	}
-	where := "not found in selected source"
-	switch e.Scope {
-	case SelectedView:
-		where = "not in this analysis view"
-	case ParentView:
-		where = "not in the parent view"
-	}
-	return fmt.Sprintf("gofresh: %s %s %s", noun, strings.Join(names, ", "), where)
-}
-
-func requireSubjects(subjects []Subject, contains func(Subject) bool, scope SubjectScope) error {
-	seen := make(map[Subject]bool, len(subjects))
-	var unknown []Subject
-	for _, subject := range subjects {
-		if !seen[subject] && !contains(subject) {
-			unknown = append(unknown, subject)
-		}
-		seen[subject] = true
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	return &UnknownSubjectsError{Subjects: unknown, Scope: scope}
-}
-
 // requireMembers judges selection, not whether today's source declares a name.
 // The immutable closure inventory is the shared membership authority for every
 // projection, attachment and check over a constructed view.
 func (v *Snapshot) requireMembers(subjects []Subject) error {
 	return requireSubjects(subjects, func(s Subject) bool {
-		_, ok := v.facts.maximal[s]
+		_, ok := v.facts.subjects[s]
 		return ok
 	}, SelectedView)
-}
-
-func orderedRecordedSubjects(recorded map[Subject]Fingerprint) []Subject {
-	ordered := make([]Subject, 0, len(recorded))
-	for subject := range recorded {
-		ordered = append(ordered, subject)
-	}
-	slices.SortFunc(ordered, func(a, b Subject) int {
-		if order := cmp.Compare(a.Package, b.Package); order != 0 {
-			return order
-		}
-		return cmp.Compare(a.Symbol, b.Symbol)
-	})
-	return ordered
-}
-
-// RecordedRefusalKind identifies the preparation tier refusing a record batch.
-type RecordedRefusalKind uint8
-
-const (
-	RecordShapeRefusal RecordedRefusalKind = iota + 1
-	RecordKindRefusal
-)
-
-// RecordedFailure attributes one record's preparation failure. Shape refusals
-// carry the fingerprint validator's error; kind refusals carry the recorded kind.
-type RecordedFailure struct {
-	Subject Subject
-	Shape   error
-	Kind    Kind
-}
-
-// RecordedBatchError reports every failure in the first refusing preparation
-// tier, in request order (package/symbol order for map-backed APIs). All shape failures precede every view-kind
-// mismatch; every kind mismatch precedes membership. No partial verdict exists.
-type RecordedBatchError struct {
-	Tier     RecordedRefusalKind
-	ViewKind Kind
-	Failures []RecordedFailure
-}
-
-func (e *RecordedBatchError) Error() string {
-	parts := make([]string, 0, len(e.Failures))
-	for _, failure := range e.Failures {
-		if e.Tier == RecordShapeRefusal {
-			parts = append(parts, fmt.Sprintf("%s.%s: %v", failure.Subject.Package, failure.Subject.Symbol, failure.Shape))
-		} else {
-			parts = append(parts, fmt.Sprintf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", failure.Kind, failure.Subject.Package, failure.Subject.Symbol, e.ViewKind))
-		}
-	}
-	return strings.Join(parts, "; ")
-}
-
-// Unwrap exposes the original fingerprint shape errors without making their
-// diagnostic wording the batch's refusal classification.
-func (e *RecordedBatchError) Unwrap() []error {
-	var errors []error
-	for _, failure := range e.Failures {
-		if failure.Shape != nil {
-			errors = append(errors, failure.Shape)
-		}
-	}
-	return errors
-}
-
-// subjectFacts separates immutable maximal inputs from consumer-tier obligations.
-// The obligations are independent: selecting one diagnostic must not erase the
-// others. They describe the construction's conservative analysis, never a later
-// producing unit's or historical candidate's admission.
-type subjectFacts struct {
-	source      closure.MaximalFacts
-	staticDecl  bool
-	sourceOnly  bool
-	openWorld   *subjectRefusal
-	sharedState *subjectRefusal
-	ambiguous   *subjectRefusal
-	external    bool
-}
-
-// Presence carries the obligation; even an empty diagnostic cannot remove it.
-// A refusal is immutable after construction and may be shared with siblings.
-type subjectRefusal struct {
-	reason  string
-	culprit Subject
-}
-
-func sameRefusal(a, b *subjectRefusal) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-// closure is the ordinary verdict ladder's projection. A caller may refine its
-// local decision using separately admitted evidence, but cannot write it back to
-// these facts. The source inventory and every consumer-tier obligation survive
-// even when a higher-priority diagnostic is selected here.
-func (f subjectFacts) closure() closure.Closure {
-	c := f.source.Closure()
-	if (f.sourceOnly || f.staticDecl) && c.Hash != "" {
-		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = false, 0, "", closure.Subject{}
-	}
-	if f.openWorld != nil {
-		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.OpenWorldRefusal, f.openWorld.reason, closure.Subject{}
-	}
-	if f.sharedState != nil {
-		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.SharedDynamicStateRefusal, f.sharedState.reason, closure.Subject{
-			Package: f.sharedState.culprit.Package,
-			Symbol:  f.sharedState.culprit.Symbol,
-		}
-	}
-	if f.ambiguous != nil {
-		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.AmbiguousSubjectRefusal, f.ambiguous.reason, closure.Subject{}
-	}
-	if f.external {
-		c.External, c.Unverifiable, c.Reason, c.Culprit = true, true, "external directive", closure.Subject{}
-	}
-	return c
-}
-
-// equal compares base observations, not evidence-dependent decisions. A budget
-// cut can change only the shared-state discharge; all other obligations must
-// still agree, including ones hidden by the selected diagnostic.
-func (f subjectFacts) equal(other subjectFacts, cut bool) bool {
-	return f.source.Equal(other.source) && f.staticDecl == other.staticDecl && f.sourceOnly == other.sourceOnly &&
-		sameRefusal(f.openWorld, other.openWorld) &&
-		(cut || sameRefusal(f.sharedState, other.sharedState)) &&
-		sameRefusal(f.ambiguous, other.ambiguous) && f.external == other.external
-}
-
-func diffSubjectFacts(first, second subjectFacts, cut bool) (diffField, firstVal, secondVal string) {
-	if !first.source.Equal(second.source) {
-		c1 := first.source.Closure()
-		c2 := second.source.Closure()
-		switch {
-		case c1.Hash != c2.Hash:
-			return "closure_hash", c1.Hash, c2.Hash
-		case c1.TestVariants != c2.TestVariants:
-			return "closure_test_variants", c1.TestVariants, c2.TestVariants
-		case c1.ToolchainContent != c2.ToolchainContent:
-			return "closure_toolchain_content", c1.ToolchainContent, c2.ToolchainContent
-		case c1.AdmissionPolicy != c2.AdmissionPolicy:
-			return "closure_admission_policy", c1.AdmissionPolicy, c2.AdmissionPolicy
-		case c1.Unverifiable != c2.Unverifiable:
-			return "closure_unverifiable", strconv.FormatBool(c1.Unverifiable), strconv.FormatBool(c2.Unverifiable)
-		case c1.Reason != c2.Reason:
-			return "closure_reason", c1.Reason, c2.Reason
-		default:
-			return "closure_effects", fmt.Sprintf("%+v", first.source), fmt.Sprintf("%+v", second.source)
-		}
-	}
-	if !sameRefusal(first.openWorld, second.openWorld) {
-		return "open_world", formatRefusal(first.openWorld), formatRefusal(second.openWorld)
-	}
-	if !cut && !sameRefusal(first.sharedState, second.sharedState) {
-		return "shared_state", formatRefusal(first.sharedState), formatRefusal(second.sharedState)
-	}
-	if !sameRefusal(first.ambiguous, second.ambiguous) {
-		return "ambiguous", formatRefusal(first.ambiguous), formatRefusal(second.ambiguous)
-	}
-	if first.external != second.external {
-		return "external", strconv.FormatBool(first.external), strconv.FormatBool(second.external)
-	}
-	return "closure", fmt.Sprintf("%+v", first), fmt.Sprintf("%+v", second)
-}
-
-func formatRefusal(r *subjectRefusal) string {
-	if r == nil {
-		return ""
-	}
-	if r.culprit.Package != "" || r.culprit.Symbol != "" {
-		return r.culprit.Package + "." + r.culprit.Symbol + ": " + r.reason
-	}
-	return r.reason
-}
-
-func (f *observationFacts) closure(subject Subject) closure.Closure {
-	return f.maximal[subject].closure()
 }

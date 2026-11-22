@@ -86,10 +86,6 @@ func withPackageProcessExecution() option {
 	}
 }
 
-func withDeferredCheckClose() option {
-	return func(e *Session) { e.deferredCheckClose = true }
-}
-
 func withDir(dir string) option {
 	return func(e *Session) { e.dir = dir }
 }
@@ -158,6 +154,16 @@ func newEngineContext(ctx context.Context, opts ...option) (eng *Session, err er
 		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
 	}
 	e.dir = root
+	buildEnv, err := gotool.EnvForCommand(normalized, root)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: build environment: %w", err)
+	}
+	e.build = BuildDescription{
+		Directory:   root,
+		Environment: slices.Clone(buildEnv),
+		Flags:       slices.Clone(e.buildFlags),
+		Inputs:      append([]string{}, e.buildInputs...),
+	}
 	if e.evidenceRoot != "" {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -203,6 +209,13 @@ func (e *Session) captureFor(ctx context.Context, subject Subject, moduleDir str
 	if err != nil {
 		return Fingerprint{}, err
 	}
+	if kind == Measurement {
+		binding, err := view.BindRuntime(ctx, RuntimeDescription{Directory: moduleDir})
+		if err != nil {
+			return Fingerprint{}, err
+		}
+		return binding.CurrentFacts(ctx, subject)
+	}
 	return view.Capture(ctx, subject)
 }
 
@@ -214,18 +227,69 @@ func (e *Session) check(ctx context.Context, recorded Fingerprint, subject Subje
 	if err != nil {
 		return Verdict{}, err
 	}
-	return view.Check(ctx, recorded, subject)
-}
-
-func (e *Session) checkObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := recorded.Validate(); err != nil {
-		return Verdict{}, err
-	}
-	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	binding, err := view.BindRuntime(ctx, RuntimeDescription{Directory: moduleDir})
 	if err != nil {
 		return Verdict{}, err
 	}
-	return view.CheckObserved(ctx, recorded, subject)
+	return binding.Check(ctx, subject, recorded)
+}
+
+func (e *Session) checkObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	return e.check(ctx, recorded, subject, moduleDir)
+}
+
+func bindViewForTest(t testing.TB, ctx context.Context, v *Snapshot) *RuntimeBinding {
+	t.Helper()
+	b, err := v.BindRuntime(ctx, RuntimeDescription{Directory: v.moduleDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func checkViewForTest(ctx context.Context, v *Snapshot, subject Subject, recorded Fingerprint) (Verdict, error) {
+	verdicts, err := v.checkMap(ctx, map[Subject]Fingerprint{subject: recorded})
+	if err != nil {
+		return Verdict{}, err
+	}
+	return verdicts[subject], nil
+}
+
+func captureObservedForTest(ctx context.Context, v *Snapshot, subject Subject) (fp Fingerprint, opErr error) {
+	if v == nil || v.facts == nil || v.session == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	ctx, done := v.session.beginOperation(ctx)
+	defer done(&opErr)
+	if err := v.requireMembers([]Subject{subject}); err != nil {
+		return Fingerprint{}, err
+	}
+	if err := v.ensureObservable(ctx, []Subject{subject}); err != nil {
+		return Fingerprint{}, err
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return Fingerprint{}, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
+	}
+	if v.sealed {
+		return Fingerprint{}, errViewSealed
+	}
+	tx := v.txState[subject]
+	tx.capturedObserved = true
+	v.txState[subject] = tx
+	return v.observedFingerprintLocked(subject), nil
+}
+
+func attachObservedForTest(v *Snapshot, subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
+	if v == nil || v.facts == nil || v.session == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return v.attachRuntimeState(subject, fingerprint, &state, true)
 }
 
 func hermeticEnvRunner() gotool.Runner {
@@ -678,24 +742,29 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 	if scan.external[subject] {
 		maximal.external = true
 	}
-	purity := map[Subject]string{}
+	var purity string
 	if !scan.external[subject] && scan.ambiguous[subject] == "" {
 		switch caller, directive := e.assumePure(subject), scan.directivePure(subject); {
 		case caller && directive:
-			purity[subject] = "caller assertion and source directive"
+			purity = "caller assertion and source directive"
 		case caller:
-			purity[subject] = "caller assertion"
+			purity = "caller assertion"
 		case directive:
-			purity[subject] = "source directive"
+			purity = "source directive"
 		}
 	}
+	e.build = BuildDescription{Directory: dir, Environment: []string{}, Inputs: []string{}}
 	req := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 	v := newSnapshotShell(e, []Subject{subject}, []closure.Subject{req}, []string{subject.Package}, dir, CodeResult, &observationFacts{
-		maximal:            map[Subject]subjectFacts{subject: maximal},
+		subjects: map[Subject]subjectEntry{
+			subject: {
+				maximal:         maximal,
+				purity:          purity,
+				vouchDischarges: scan.vouchDischarges[subject],
+				discharges:      scan.discharges[subject],
+			},
+		},
 		guards:             guard.Guards{Toolchain: "inmem-toolchain", BuildConfig: "inmem-buildconfig"},
-		purity:             purity,
-		vouchDischarges:    scan.vouchDischarges,
-		discharges:         scan.discharges,
 		testVariantLedgers: map[string]testvariant.TestVariantLedger{subject.Package: {}},
 	})
 	return v, pkgs, true
@@ -711,11 +780,11 @@ func inMemoryCaptureCheck(t *testing.T, dir string, subject Subject, opts ...opt
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := v.Check(context.Background(), fp, subject)
+	verdicts, err := v.checkMap(context.Background(), map[Subject]Fingerprint{subject: fp})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fp, verdict, true
+	return fp, verdicts[subject], true
 }
 
 func inMemoryExplainViewForSubject(t *testing.T, dir string, subject Subject, pkgPath, varName string) (Chain, bool) {
@@ -728,14 +797,14 @@ func inMemoryExplainViewForSubject(t *testing.T, dir string, subject Subject, pk
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := v.Check(context.Background(), fp, subject)
+	verdicts, err := v.checkMap(context.Background(), map[Subject]Fingerprint{subject: fp})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Ground.Cause.Kind == SharedDynamicStateCause {
-		parsed, ok := CulpritFromReason(verdict.Reason)
-		if !ok || verdict.Ground.Cause.Culprit != parsed {
-			t.Fatalf("Verdict.Ground.Cause.Culprit = %+v, CulpritFromReason(%q) = (%+v, %v)", verdict.Ground.Cause.Culprit, verdict.Reason, parsed, ok)
+	verdict := verdicts[subject]
+	if verdict.Ground.Cause.Kind == SharedDynamicStateCause && verdict.Ground.Cause.Condition == Refused {
+		if verdict.Ground.Cause.Culprit == (Subject{}) {
+			t.Fatalf("SharedDynamicStateCause verdict missing Culprit: %+v", verdict)
 		}
 	} else if verdict.Ground.Cause.Culprit != (Subject{}) {
 		t.Fatalf("non-shared-state verdict carried culprit: %+v", verdict.Ground.Cause)
@@ -1142,7 +1211,11 @@ func captureCheckFP(t *testing.T, dir string, subject Subject, opts ...option) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(ctx, fingerprint, subject)
+	binding, err := view.BindRuntime(ctx, RuntimeDescription{Directory: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := binding.Check(ctx, subject, fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}

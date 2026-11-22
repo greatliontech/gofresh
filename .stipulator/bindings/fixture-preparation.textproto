@@ -33,8 +33,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
-  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  content_hash: "fc0ce91ae82e76fd52d3aed4b90a71024055d784b64c261c4fc014229091c412"
+  source_hash: "588757301f7c58860d0f80199e8a4ba964a92d714950687d7cd83a05b1a5b8b1"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/observability.TestPreparedBuildsOwnSSAAndPreserveTypedInputs"
   role: BINDING_ROLE_TESTS
@@ -43,8 +43,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-coherent-view"
-  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
-  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  content_hash: "fc0ce91ae82e76fd52d3aed4b90a71024055d784b64c261c4fc014229091c412"
+  source_hash: "588757301f7c58860d0f80199e8a4ba964a92d714950687d7cd83a05b1a5b8b1"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/observability.TestPreparedCapturesContainersAndNewGenerations"
   role: BINDING_ROLE_TESTS
@@ -73,8 +73,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-context"
-  content_hash: "2ec34b1b5d9dfa90b796b555dd94d2fc01662f829be4755cdf9c221b95d2d4ad"
-  source_hash: "918fc44cbcc3bf90e394247c7c6bcdbd7ebf7445354281a5073c1228599ead8c"
+  content_hash: "0db9a030aa76f855bea7646e5feaccc340eb8deb4c390de8c7f15917e2868db6"
+  source_hash: "b3501c9dd2ee298d21339d275018ab9d2d9823f7b785aab2ec238ee24e42c79f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/observability.TestFixturePreparationLifetimeAndFailureIsolation"
   role: BINDING_ROLE_TESTS

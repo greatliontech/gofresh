@@ -2,6 +2,7 @@ package gofresh
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,10 +87,7 @@ func ReadAllEnviron() []string {
 		}, SessionPolicy{})
 
 		// 1. Audited toolchain selection emits selection_resolved with audited=true.
-		sel, err := ResolveToolchainSelection(ctx, BuildDescription{
-			Directory:   dir,
-			Environment: env,
-		})
+		sel, err := sess.ToolchainSelection(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -107,6 +105,12 @@ func ReadAllEnviron() []string {
 			return ok && cb && ev.StringField("dir") == sess.dir
 		})
 
+		cancelledCtx, cancel := context.WithCancel(ctx)
+		cancel()
+		if _, err := sess.Snapshot(cancelledCtx, allSubjects, CodeResult); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Snapshot(cancelledCtx) = %v, want context.Canceled", err)
+		}
+
 		snap, err := sess.Snapshot(ctx, allSubjects, CodeResult)
 		if err != nil {
 			t.Fatal(err)
@@ -114,6 +118,14 @@ func ReadAllEnviron() []string {
 		testenv.RequireTraceEvent(t, rec, trace.DomainView, "pass_summary", func(ev trace.Event) bool {
 			n, ok := ev.IntField("subjects")
 			return ok && n == int64(len(allSubjects))
+		})
+		testenv.RequireTraceEvent(t, rec, trace.DomainDynstate, "dynstate.factof.done", func(ev trace.Event) bool {
+			return ev.Target == "example.com/witness/dyn"
+		})
+		testenv.RequireTraceEvent(t, rec, trace.DomainDynstate, "dynstate.compose.done", func(ev trace.Event) bool {
+			dg, ok := ev.BoolField("downgraded")
+			culprits, okC := ev.IntField("culprits")
+			return ev.Target == "example.com/witness/dyn" && ok && dg && okC && culprits >= 1
 		})
 
 		// PureAdd must be verifiable with refusal=0 and empty culprit.
@@ -141,9 +153,9 @@ func ReadAllEnviron() []string {
 				ev.StringField("culprit") == "example.com/witness/dep.State"
 		})
 
-		// Trigger observability analysis on ReadEnv and ReadAllEnviron via CaptureObservedBatch.
+		// Trigger observability analysis on ReadEnv and ReadAllEnviron via captureObservedBatch.
 		rec.Reset()
-		fps, err := snap.CaptureObservedBatch(ctx)
+		fps, err := snap.captureObservedBatch(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,8 +175,12 @@ func ReadAllEnviron() []string {
 		if err != nil {
 			t.Fatal(err)
 		}
+		rb, err := snap.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
+		if err != nil {
+			t.Fatal(err)
+		}
 		rec.Reset()
-		if v, err := snap.Check(ctx, plainFPs[subjPure], subjPure); err != nil || v.Status != Valid {
+		if v, err := rb.Check(ctx, subjPure, plainFPs[subjPure]); err != nil || v.Status != Valid {
 			t.Fatalf("Check(PureAdd) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
@@ -173,7 +189,7 @@ func ReadAllEnviron() []string {
 		})
 
 		rec.Reset()
-		if v, err := snap.Check(ctx, plainFPs[subjGlobal], subjGlobal); err != nil || v.Status != Unverifiable {
+		if v, err := rb.Check(ctx, subjGlobal, plainFPs[subjGlobal]); err != nil || v.Status != Unverifiable {
 			t.Fatalf("Check(MutateGlobal) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
@@ -187,8 +203,8 @@ func ReadAllEnviron() []string {
 		})
 
 		rec.Reset()
-		if v, err := snap.CheckObserved(ctx, fps[subjEnviron], subjEnviron); err != nil || v.Status != Unverifiable {
-			t.Fatalf("CheckObserved(ReadAllEnviron) = %+v, %v", v, err)
+		if v, err := rb.Check(ctx, subjEnviron, fps[subjEnviron]); err != nil || v.Status != Unverifiable {
+			t.Fatalf("Check(ReadAllEnviron) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
 			cause, _ := ev.IntField("cause")
@@ -201,7 +217,7 @@ func ReadAllEnviron() []string {
 		staleClosure := plainFPs[subjPure]
 		staleClosure.MaximalClosure = "deadbeef"
 		rec.Reset()
-		if v, err := snap.Check(ctx, staleClosure, subjPure); err != nil || v.Status != Stale {
+		if v, err := rb.Check(ctx, subjPure, staleClosure); err != nil || v.Status != Stale {
 			t.Fatalf("Check(staleClosure) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
@@ -216,7 +232,7 @@ func ReadAllEnviron() []string {
 		staleTV := plainFPs[subjPure]
 		staleTV.TestVariantClosure = "deadbeef"
 		rec.Reset()
-		if v, err := snap.Check(ctx, staleTV, subjPure); err != nil || v.Status != Stale {
+		if v, err := rb.Check(ctx, subjPure, staleTV); err != nil || v.Status != Stale {
 			t.Fatalf("Check(staleTV) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
@@ -231,7 +247,7 @@ func ReadAllEnviron() []string {
 		staleRT := plainFPs[subjPure]
 		staleRT.RuntimeDigest = "deadbeef"
 		rec.Reset()
-		if v, err := snap.Check(ctx, staleRT, subjPure); err != nil || v.Status != Stale {
+		if v, err := rb.Check(ctx, subjPure, staleRT); err != nil || v.Status != Stale {
 			t.Fatalf("Check(staleRT) = %+v, %v", v, err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainSession, "check_verdict", func(ev trace.Event) bool {
@@ -250,10 +266,15 @@ func ReadAllEnviron() []string {
 			testenv.AllowTwoPassDiff(),
 		)
 		degradedEnv := gotool.SetEnv(gotool.SetEnv(os.Environ(), "PWD", dir), "GOFLAGS", "-tags")
-		sel, err := ResolveToolchainSelection(ctx, BuildDescription{
+		degradedSess, err := NewSession(ctx, BuildDescription{
 			Directory:   dir,
 			Environment: degradedEnv,
-		})
+			Inputs:      []string{},
+		}, SessionPolicy{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sel, err := degradedSess.ToolchainSelection(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -265,7 +286,7 @@ func ReadAllEnviron() []string {
 			return ok && !audited && strings.Contains(ev.StringField("degradation"), "-tags (from $GOFLAGS)")
 		})
 
-		// Verify two_pass_diff on closure_test_variants change during Validate.
+		// Verify two_pass_diff on closure_test_variants change during validate.
 		env := gotool.SetEnv(os.Environ(), "PWD", dir)
 		sess, err := NewSession(ctx, BuildDescription{
 			Directory:   dir,
@@ -282,8 +303,8 @@ func ReadAllEnviron() []string {
 		rec.Reset()
 		write("pure/pure_test.go", strings.Replace(testSource, "return 42", "return 43", 1))
 		t.Cleanup(func() { write("pure/pure_test.go", testSource) })
-		if err := snap.Validate(ctx); !errors.Is(err, ErrViewChanged) {
-			t.Fatalf("Validate after test_variant edit = %v, want ErrViewChanged", err)
+		if err := snap.validate(ctx); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("validate after test_variant edit = %v, want ErrViewChanged", err)
 		}
 		testenv.RequireTraceEvent(t, rec, trace.DomainView, "two_pass_diff", func(ev trace.Event) bool {
 			return ev.Target == "example.com/witness/pure.PureAdd" && ev.StringField("diff_field") == "closure_test_variants"
@@ -402,7 +423,7 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			obsFPs, err := snap.CaptureObservedBatch(ctx)
+			obsFPs, err := snap.captureObservedBatch(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -410,7 +431,15 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			bracket, err := CaptureBracket(ctx, baseDir, []string{"."})
+			rb, err := snap.BindRuntime(ctx, RuntimeDescription{Directory: baseDir, Environment: env})
+			if err != nil {
+				t.Fatal(err)
+			}
+			built, err := snap.BindBuilt(subjEnv.Package, "fuzz-bin")
+			if err != nil {
+				t.Fatal(err)
+			}
+			u, err := rb.Begin(subjEnv)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -418,18 +447,26 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 			if traced {
 				logText += "getenv GOFRESH_TRACE\ngetenv GOFRESH_TRACE_FILE\n"
 			}
-			obs, err := FromTestLog([]byte(logText), baseDir, baseDir, env, WithCompletedProcess("worker"), WithBracket(bracket))
+			logPath := filepath.Join(t.TempDir(), "fuzz.testlog")
+			finalEnv, err := u.Execute(ctx, built, ProcessDescription{
+				Identity: "worker",
+				Capture:  logPath,
+			}, func(_ context.Context, c Contribution) (Terminal, error) {
+				if err := os.WriteFile(c.Capture(), []byte(logText), 0o644); err != nil {
+					return Terminal{}, err
+				}
+				return Terminal{Kind: NormalCompletion}, nil
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			attachedEnvFP, err := snap.AttachObservation(subjEnv, obsFPs[subjEnv], obs)
-			if err != nil {
-				t.Fatal(err)
-			}
-			obsFPs[subjEnv] = attachedEnvFP
+			acct, _ := u.Account()
+			obsFPs[subjEnv] = finalEnv.Fingerprint
 
 			fpBytes := make(map[Subject][]byte, len(subjects))
 			obsFpBytes := make(map[Subject][]byte, len(subjects))
+			plainCands := make([]Candidate, 0, len(subjects))
+			obsCands := make([]Candidate, 0, len(subjects))
 			for _, s := range subjects {
 				b1, err := json.Marshal(fps[s])
 				if err != nil {
@@ -441,18 +478,26 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 					t.Fatal(err)
 				}
 				obsFpBytes[s] = b2
+				plainCands = append(plainCands, Candidate{Subject: s, Recorded: fps[s]})
+				obsCands = append(obsCands, Candidate{Subject: s, Recorded: obsFPs[s]})
 			}
 			ledger, err := snap.TestVariantLedger(subjPure)
 			if err != nil {
 				t.Fatal(err)
 			}
-			verdicts, err := snap.CheckBatch(ctx, fps)
+			plainChecked, err := rb.CheckBatchWithLedgers(ctx, plainCands, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			obsVerdicts, err := snap.CheckObservedBatch(ctx, obsFPs)
+			obsChecked, err := rb.CheckBatchWithLedgers(ctx, obsCands, nil)
 			if err != nil {
 				t.Fatal(err)
+			}
+			verdicts := make(map[Subject]Verdict, len(subjects))
+			obsVerdicts := make(map[Subject]Verdict, len(subjects))
+			for i, s := range subjects {
+				verdicts[s] = plainChecked[i].Verdict
+				obsVerdicts[s] = obsChecked[i].Verdict
 			}
 			explainChain, err := snap.ExplainDynamicState(ctx, subjImpure.Package, "shared")
 			if err != nil {
@@ -479,7 +524,7 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 				fpBytes:     fpBytes,
 				obsFpBytes:  obsFpBytes,
 				ledger:      ledger,
-				obsState:    obs.State,
+				obsState:    acct.Inputs,
 				verdicts:    verdicts,
 				obsVerdicts: obsVerdicts,
 				explain:     explainChain,

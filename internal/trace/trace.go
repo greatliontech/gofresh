@@ -1,5 +1,6 @@
 // Package trace provides structured, zero-disabled-cost diagnostic tracing
-// across gofresh's toolchain, closure, view, and session subsystems.
+// across gofresh's toolchain, closure, dynstate, runtimeinput, cache, view,
+// and session subsystems.
 //
 // Tracing is activated either via the GOFRESH_TRACE environment variable
 // (writing to os.Stderr or GOFRESH_TRACE_FILE) or programmatically in tests

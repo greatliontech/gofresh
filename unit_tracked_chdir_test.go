@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 )
 
@@ -166,44 +167,9 @@ func TestPureRelativeFileSibling(t *testing.T) {
 	}
 	relFP := batchFinal.Subjects[1].Fingerprint
 
-	// Also verify ProducerFrame.ObserveInputs + PrepareTrackedChdirSupport + AbsoluteObservation
-	// (gomutant's exact oracle pipeline) on the real testlog produced above!
-	frame := CaptureProducerFrame(t.Context(), root, pkgDir, FrameOptions{})
-	if frame.Reason() != "" {
-		t.Fatalf("CaptureProducerFrame: %s", frame.Reason())
-	}
-	chdirCap, err := snapshot.PrepareTrackedChdirSupport(t.Context(), frame, pkg)
-	if err != nil {
-		t.Fatalf("PrepareTrackedChdirSupport: %v", err)
-	}
-	runtimeEnv, err := gotool.EnvForCommand(env, pkgDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	obs, obsReason, err := frame.ObserveInputs(t.Context(), capturePath, ProducerIngest{
-		Identity:     capturePath,
-		Env:          runtimeEnv,
-		TrackedChdir: chdirCap,
-		ScratchRoot:  scratchRoot,
-	})
-	if err != nil || obsReason != "" {
-		t.Fatalf("ObserveInputs: reason=%q err=%v", obsReason, err)
-	}
-	st, err := CompletedObservationState(obs)
-	if err != nil || st.Unverifiable {
-		t.Fatalf("CompletedObservationState = %+v, err=%v; want verifiable", st, err)
-	}
-	moduleEnv, err := gotool.EnvForCommand(env, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	absObs, err := AbsoluteObservation(obs, root, moduleEnv)
-	if err != nil {
-		t.Fatalf("AbsoluteObservation: %v", err)
-	}
-	absSt, err := CompletedObservationState(absObs)
-	if err != nil || absSt.Unverifiable {
-		t.Fatalf("AbsoluteObservation state = %+v, err=%v; want verifiable", absSt, err)
+	acct, ok := batchUnit.Account()
+	if !ok || acct.Inputs.Unverifiable {
+		t.Fatalf("batch Account.Inputs = %+v (ok=%v), want verifiable", acct.Inputs, ok)
 	}
 
 	// Mutating fixture.txt must invalidate relFP with RuntimeInputsCause!
@@ -232,7 +198,10 @@ func TestPureRelativeFileSibling(t *testing.T) {
 	}
 
 	// 3. Negative end-to-end control: adding a reachable raw os.Chdir test in the
-	// binary revokes TrackedChdirSupport, sealing working-directory change!
+	// binary revokes tracked-chdir support, sealing working-directory change!
+	if err := os.WriteFile(filepath.Join(pkgDir, "fixture.txt"), []byte("initial-fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	rawChdirSrc := cleanTestSrc + `
 func TestRawOSChdir(t *testing.T) {
 	_ = os.Chdir(".")
@@ -253,23 +222,27 @@ func TestRawOSChdir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badFrame := CaptureProducerFrame(t.Context(), root, pkgDir, FrameOptions{})
-	badCap, err := badSnap.PrepareTrackedChdirSupport(t.Context(), badFrame, pkg)
+	badBind := bindTestRuntime(t, badSnap, RuntimeDescription{Directory: pkgDir})
+	badBuilt, err := badSnap.BindBuilt(pkg, "bad-cmd-bin")
 	if err != nil {
-		t.Fatalf("PrepareTrackedChdirSupport on raw os.Chdir binary: %v", err)
+		t.Fatal(err)
 	}
-	badObs, badReason, err := badFrame.ObserveInputs(t.Context(), capturePath, ProducerIngest{
-		Identity:     capturePath,
-		Env:          runtimeEnv,
-		TrackedChdir: badCap,
-		ScratchRoot:  scratchRoot,
-	})
-	if err != nil || badReason != "" {
-		t.Fatalf("bad ObserveInputs: reason=%q err=%v", badReason, err)
+	badUnit, err := badBind.BeginIdentity(subRel)
+	if err != nil {
+		t.Fatal(err)
 	}
-	badSt, err := CompletedObservationState(badObs)
-	if err != nil || !badSt.Unverifiable {
-		t.Fatalf("expected raw os.Chdir binary to revoke TrackedChdirSupport and seal Unverifiable, got %+v (err=%v)", badSt, err)
+	if _, err := badUnit.Execute(t.Context(), badBuilt, ProcessDescription{
+		Identity:    "bad-chdir",
+		Capture:     capturePath,
+		ScratchRoot: scratchRoot,
+	}, func(context.Context, Contribution) (Terminal, error) {
+		return Terminal{Kind: NormalCompletion}, nil
+	}); err != nil {
+		t.Fatalf("badUnit.Execute: %v", err)
+	}
+	badAcct, ok := badUnit.Account()
+	if !ok || !badAcct.Inputs.Unverifiable {
+		t.Fatalf("expected raw os.Chdir binary to revoke tracked-chdir support and seal Unverifiable, got %+v (ok=%v)", badAcct.Inputs, ok)
 	}
 }
 
@@ -306,13 +279,13 @@ func TestPrepareTrackedChdirSupportCutUnavailableAndProgressAccounting(t *testin
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	frame := CaptureProducerFrame(t.Context(), root, root, FrameOptions{})
+	frame := runtimeinput.CaptureProducerFrame(t.Context(), root, root, runtimeinput.FrameOptions{})
 
 	// Cancelled call emits "cancelled" progress phase.
 	cancelCtx, cancel := context.WithCancel(t.Context())
 	cancel()
 	phases = nil
-	if _, err := snapshot.PrepareTrackedChdirSupport(cancelCtx, frame, "example.com/cutchdir"); !errors.Is(err, context.Canceled) {
+	if _, err := snapshot.prepareTrackedChdirSupport(cancelCtx, frame, "example.com/cutchdir"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	if !slices.Contains(phases, "cancelled") {
@@ -320,37 +293,37 @@ func TestPrepareTrackedChdirSupportCutUnavailableAndProgressAccounting(t *testin
 	}
 
 	// Normal call populates persisted proofs memo, and a fresh Snapshot's
-	// PrepareTrackedChdirSupport emits "served" via beginOperation + accountPass.
-	if _, err := snapshot.PrepareTrackedChdirSupport(t.Context(), frame, "example.com/cutchdir"); err != nil {
-		t.Fatalf("PrepareTrackedChdirSupport: %v", err)
+	// prepareTrackedChdirSupport emits "served" via beginOperation + accountPass.
+	if _, err := snapshot.prepareTrackedChdirSupport(t.Context(), frame, "example.com/cutchdir"); err != nil {
+		t.Fatalf("prepareTrackedChdirSupport: %v", err)
 	}
 	snapshot2, err := session.Snapshot(t.Context(), []Subject{subPure, subChdir}, CodeResult)
 	if err != nil {
 		t.Fatalf("Snapshot 2: %v", err)
 	}
 	phases = nil
-	if _, err := snapshot2.PrepareTrackedChdirSupport(t.Context(), frame, "example.com/cutchdir"); err != nil {
-		t.Fatalf("warm PrepareTrackedChdirSupport: %v", err)
+	if _, err := snapshot2.prepareTrackedChdirSupport(t.Context(), frame, "example.com/cutchdir"); err != nil {
+		t.Fatalf("warm prepareTrackedChdirSupport: %v", err)
 	}
 	if !slices.Contains(phases, "served") {
-		t.Fatalf("expected served progress phase on warm PrepareTrackedChdirSupport, got %v", phases)
+		t.Fatalf("expected served progress phase on warm prepareTrackedChdirSupport, got %v", phases)
 	}
 
 	// Simulate an analysis-budget cut recorded during ensureObservable on a
-	// snapshot with hasObserved == false && hasApplicability == false: both
-	// Validate and Sibling.Validate must surface ErrAnalysisUnavailable.
+	// snapshot with hasObserved == false: both validate and sibling.validate
+	// must surface ErrAnalysisUnavailable.
 	snapshot.mu.Lock()
 	snapshot.cutUnavailable = fmt.Errorf("simulated cut: %w", ErrAnalysisUnavailable)
 	snapshot.mu.Unlock()
 
-	sibling, err := snapshot.Sibling([]Subject{subPure})
+	sibling, err := snapshot.sibling([]Subject{subPure})
 	if err != nil {
-		t.Fatalf("Sibling: %v", err)
+		t.Fatalf("sibling: %v", err)
 	}
-	if err := sibling.Validate(t.Context()); !errors.Is(err, ErrAnalysisUnavailable) {
-		t.Fatalf("sibling.Validate = %v, want ErrAnalysisUnavailable", err)
+	if err := sibling.validate(t.Context()); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("sibling.validate = %v, want ErrAnalysisUnavailable", err)
 	}
-	if err := snapshot.Validate(t.Context()); !errors.Is(err, ErrAnalysisUnavailable) {
-		t.Fatalf("snapshot.Validate = %v, want ErrAnalysisUnavailable", err)
+	if err := snapshot.validate(t.Context()); !errors.Is(err, ErrAnalysisUnavailable) {
+		t.Fatalf("snapshot.validate = %v, want ErrAnalysisUnavailable", err)
 	}
 }

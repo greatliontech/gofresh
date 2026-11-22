@@ -195,15 +195,16 @@ func (a *outflowAnalyzer) evalFree(ctx *outflowEvalCtx, v *flowir.Value) (resOK 
 		litCtx := ctx
 		if ctx.insMode {
 			litCtx = &outflowEvalCtx{
-				insMode:      false,
-				resolved:     ctx.resolved,
-				localFree:    map[types.Object]int{},
-				provingDepth: map[types.Object]int{},
-				fnDeps:       ctx.fnDeps,
-				useDeps:      ctx.useDeps,
-				paramDeps:    ctx.paramDeps,
-				methodDeps:   ctx.methodDeps,
-				onRefusal:    ctx.onRefusal,
+				insMode:       false,
+				resolved:      ctx.resolved,
+				localFree:     map[types.Object]int{},
+				provingDepth:  map[types.Object]int{},
+				reachVisiting: ctx.reachVisiting,
+				fnDeps:        ctx.fnDeps,
+				useDeps:       ctx.useDeps,
+				paramDeps:     ctx.paramDeps,
+				methodDeps:    ctx.methodDeps,
+				onRefusal:     ctx.onRefusal,
 			}
 		}
 		wants := map[syntaxutil.ParamKey]bool{}
@@ -234,7 +235,7 @@ func (a *outflowAnalyzer) evalFree(ctx *outflowEvalCtx, v *flowir.Value) (resOK 
 						Type: fv.Type(),
 					},
 				}
-				if !a.checkPlainCallReachArgSeen(litCtx, fvVal, nil, nil, false, map[types.Object]bool{}) {
+				if !a.checkPlainCallReachArg(litCtx, fvVal, nil, nil, false) {
 					return false, math.MaxInt
 				}
 			}
@@ -309,7 +310,7 @@ func (a *outflowAnalyzer) evalFree(ctx *outflowEvalCtx, v *flowir.Value) (resOK 
 					return false, math.MaxInt
 				}
 				if !isVP {
-					if !a.checkPlainCallReachArgSeen(ctx, arg, v, nil, false, map[types.Object]bool{}) {
+					if !a.checkPlainCallReachArg(ctx, arg, v, nil, false) {
 						return false, math.MaxInt
 					}
 					perArg[i] = a.collectMutableArgRoots(arg)
@@ -334,13 +335,12 @@ func (a *outflowAnalyzer) evalFree(ctx *outflowEvalCtx, v *flowir.Value) (resOK 
 	return false, math.MaxInt
 }
 
-func (a *outflowAnalyzer) checkPlainCallReachArgSeen(
+func (a *outflowAnalyzer) checkPlainCallReachArg(
 	ctx *outflowEvalCtx,
 	arg *flowir.Value,
 	currentCall *flowir.Value,
 	skipInsertionRoot types.Object,
 	allowInsParam bool,
-	visiting map[types.Object]bool,
 ) bool {
 	if isPureFreshDataValue(a.settledGlobals, arg) {
 		return true
@@ -362,7 +362,7 @@ func (a *outflowAnalyzer) checkPlainCallReachArgSeen(
 				return pv.Place.Obj != nil && a.settledGlobals.hasUnembedded(pv.Place.Obj)
 			}
 			if pv.Place.Root == flowir.RootTransient && pv.Place.Base != nil {
-				return a.checkPlainCallReachArgSeen(ctx, pv.Place.Base, currentCall, skipInsertionRoot, allowInsParam, visiting)
+				return a.checkPlainCallReachArg(ctx, pv.Place.Base, currentCall, skipInsertionRoot, allowInsParam)
 			}
 			if pv.Place.Obj != nil {
 				obj := pv.Place.Obj
@@ -370,7 +370,8 @@ func (a *outflowAnalyzer) checkPlainCallReachArgSeen(
 					return false
 				}
 				isInsParam := allowInsParam && a.params[obj]
-				if visiting[obj] {
+				vk := reachVisitKey{obj: obj, allowInsParam: allowInsParam}
+				if ctx.reachVisiting[vk] {
 					return isInsParam
 				}
 				root := a.aliasFind(obj)
@@ -402,20 +403,20 @@ func (a *outflowAnalyzer) checkPlainCallReachArgSeen(
 						}
 					}
 				}
-				visiting[obj] = true
-				defer delete(visiting, obj)
+				ctx.reachVisiting[vk] = true
+				defer delete(ctx.reachVisiting, vk)
 				for _, src := range a.localSources[obj] {
-					if !a.checkPlainCallReachArgSeen(ctx, src, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+					if !a.checkPlainCallReachArg(ctx, src, currentCall, skipInsertionRoot, allowInsParam) {
 						return false
 					}
 				}
 				for _, st := range a.sharedWrites[root] {
-					if !a.checkPlainCallReachArgSeen(ctx, st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+					if !a.checkPlainCallReachArg(ctx, st, currentCall, skipInsertionRoot, allowInsParam) {
 						return false
 					}
 				}
 				for _, st := range a.sharedInsertionWrites[rRoot] {
-					if !a.checkPlainCallReachArgSeen(ctx, st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+					if !a.checkPlainCallReachArg(ctx, st, currentCall, skipInsertionRoot, allowInsParam) {
 						return false
 					}
 				}
@@ -451,7 +452,7 @@ func (a *outflowAnalyzer) computeResolvedUses(insMode bool) resolvedInsertionSta
 					break
 				}
 				if arg != nil && arg.Type != nil && typeHandsOutReachOrAddr(arg.Type) &&
-					!a.checkPlainCallReachArgSeen(stepCtx, arg, use.call, rRoot, insMode, map[types.Object]bool{}) {
+					!a.checkPlainCallReachArg(stepCtx, arg, use.call, rRoot, insMode) {
 					allFree = false
 					break
 				}
@@ -525,7 +526,7 @@ func (a *outflowAnalyzer) evaluateParams(insResolved resolvedInsertionState) {
 					break
 				}
 				if stored != nil && stored.Type != nil && typeHandsOutReachOrAddr(stored.Type) &&
-					!a.checkPlainCallReachArgSeen(insCtx, stored, nil, nil, true, map[types.Object]bool{}) {
+					!a.checkPlainCallReachArg(insCtx, stored, nil, nil, true) {
 					okIns = false
 					break
 				}

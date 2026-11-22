@@ -906,27 +906,6 @@ func TestBracketMovementSurvivesComposition(t *testing.T) {
 		return observation
 	}
 	assertMoved(t, moved, nil)
-	abs, err := Absolute(moved, dir, nil)
-	abs = assertMoved(t, abs, err)
-	rel, err := Relative(abs, dir, nil)
-	rel = assertMoved(t, rel, err)
-	if rel.State != moved.State {
-		t.Fatal("identity roundtrip changed evidence")
-	}
-	adopted, err := Adopt(moved.Manifest, dir, "adoption", nil)
-	assertMoved(t, adopted, err)
-	empty, err := Merge(dir, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	incomplete, err := Incomplete(dir, "interrupted", "unknown sibling", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, inputs := range [][]Observation{{moved, empty}, {empty, moved}, {incomplete, moved}, {moved, incomplete}, {moved, moved}} {
-		merged, err := Merge(dir, nil, inputs...)
-		assertMoved(t, merged, err)
-	}
 	tampered := moved
 	tampered.BracketMoved = false
 	if _, err := CompletedState(tampered); err == nil {
@@ -939,9 +918,6 @@ func TestBracketMovementSurvivesComposition(t *testing.T) {
 	current, err := Current(t.Context(), moved.Manifest, dir, nil)
 	if err != nil || !current.BracketMoved {
 		t.Fatalf("restored value erased movement: %+v %v", current, err)
-	}
-	if _, err := Adopt(moved.Manifest, dir, "restored", nil); err == nil {
-		t.Fatal("adoption accepted changed values")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

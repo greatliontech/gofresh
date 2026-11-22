@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -145,11 +144,7 @@ func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordChec
 // runtimeMotion preserves demonstrated staleness even if an input returns to its
 // recorded value. A newly deciding refusal starts with no accepted authority.
 func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State) Verdict {
-	return v.runtimeMotionAt(ctx, candidate, prior, before, after, nil)
-}
-
-func (v *Snapshot) runtimeMotionAt(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State, ep *runtimeEndpoint) Verdict {
-	verdict, _ := v.runtimeMotionAtWithMovers(ctx, candidate, prior, nil, before, after, ep)
+	verdict, _ := v.runtimeMotionAtWithMovers(ctx, candidate, prior, nil, before, after, nil)
 	return verdict
 }
 
@@ -168,12 +163,12 @@ func (v *Snapshot) runtimeMotionAtWithMovers(ctx context.Context, candidate Cand
 // checkRecords is the one ordered checking kernel. Callers prepare the whole
 // batch before entering. Current proofs are subject-scoped; admission, runtime
 // spans, selected obligations and answers are always indexed by record.
-func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, opErr error) {
-	results, _, _, opErr = v.checkRecordsWithEndpoints(ctx, records, deferClose, retain)
+func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck) (results []recordResult, opErr error) {
+	results, _, _, opErr = v.checkRecordsWithEndpoints(ctx, records)
 	return results, opErr
 }
 
-func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, before, after runtimeEndpoint, opErr error) {
+func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []recordCheck) (results []recordResult, before, after runtimeEndpoint, opErr error) {
 	ctx, done := v.session.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
@@ -186,13 +181,11 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 	positives := make([]ObservationAuthority, len(records))
 	var outcomeSets map[string]map[string]bool
 	singleSubject := v.effectiveExecutionModel().singleSubject()
-	hasRuntime := false
 	for i, record := range records {
 		if record.terminalStale.Status != "" {
 			results[i].evaluated = true
 			results[i].verdict = record.terminalStale
 			results[i].movedInputs = slices.Clone(record.terminalMovers)
-			hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
 			continue
 		}
 		cl := v.facts.closure(record.Subject)
@@ -205,7 +198,6 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 			continue
 		}
 		results[i].evaluated = true
-		hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
 		if record.observed {
 			positives[i] = admittedObservationWithSupport(record.Recorded, record.Subject, cl, singleSubject, func(target string) bool {
 				encoded := record.Recorded.RuntimeInputs
@@ -264,7 +256,7 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 			} else {
 				positives[i] = ObservationAuthority{}
 				v.mu.RLock()
-				proof := v.observable[record.Subject]
+				proof := v.txState[record.Subject].observable
 				v.mu.RUnlock()
 				if analysisUnavailable(proof.Reason) {
 					results[i].unavailable = fmt.Errorf("%w: applicability for %s.%s: %s", ErrAnalysisUnavailable, record.Subject.Package, record.Subject.Symbol, proof.Reason)
@@ -283,9 +275,6 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 	if err != nil {
 		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
-	if err := v.closeCheckWindow(ctx, hasRuntime, deferClose); err != nil {
-		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
-	}
 	for i, record := range records {
 		result := &results[i]
 		result.before, result.after = before.states[i], after.states[i]
@@ -294,11 +283,6 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 			result.verdict = v.judgmentFor(record.Subject, movedVerdict)
 			result.movedInputs = movers
 			result.selected = selected[i] && positives[i].CurrentApplicability && result.verdict.Status == Valid
-			if retain && result.selected {
-				if err := v.retainApplicabilityCheck(ctx, record.Recorded, record.Subject, true); err != nil {
-					return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
-				}
-			}
 		}
 		if trace.AnyEnabled() {
 			target := record.Subject.Package + "." + record.Subject.Symbol
@@ -315,7 +299,7 @@ func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []reco
 	return results, before, after, ctx.Err()
 }
 
-func (v *Snapshot) checkMap(ctx context.Context, recorded map[Subject]Fingerprint, observed, deferClose bool) (map[Subject]Verdict, error) {
+func (v *Snapshot) checkMap(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil checking context")
 	}
@@ -328,9 +312,9 @@ func (v *Snapshot) checkMap(ctx context.Context, recorded map[Subject]Fingerprin
 	}
 	records := make([]recordCheck, len(candidates))
 	for i, candidate := range candidates {
-		records[i] = recordCheck{Candidate: candidate, observed: observed}
+		records[i] = recordCheck{Candidate: candidate, observed: true}
 	}
-	results, err := v.checkRecords(ctx, records, deferClose, true)
+	results, err := v.checkRecords(ctx, records)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +450,7 @@ func (u *CheckingUnit) round(ctx context.Context, prepare func() ([]checkingSlot
 	for i := range slots {
 		records[i] = slots[i].record
 	}
-	results, err := u.view.checkRecords(work, records, true, false)
+	results, err := u.view.checkRecords(work, records)
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.busy, u.cancel = false, nil
@@ -575,10 +559,27 @@ func (u *CheckingUnit) Close(ctx context.Context) (checked []CheckedCandidate, o
 	return results, nil
 }
 
+func (u *CheckingUnit) needsSeededCloseView() bool {
+	for _, slot := range u.slots {
+		if slot.result.selected {
+			return true
+		}
+	}
+	return false
+}
+
 func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
-	current, err := u.view.newSeededValidationView(ctx)
-	if err != nil {
-		return nil, err
+	var current *Snapshot
+	if u.needsSeededCloseView() {
+		var err error
+		current, err = u.view.newSeededValidationView(ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		u.view.mu.RLock()
+		current = u.view.cloneShell(u.view.subjects, u.view.requests, u.view.packages, u.view.facts)
+		u.view.mu.RUnlock()
 	}
 	checked, unavailable, err := u.closeSlots(ctx, current)
 	if err != nil {
@@ -601,6 +602,8 @@ func (u *CheckingUnit) closeSlots(ctx context.Context, current *Snapshot) ([]Che
 			records[i].terminalStale = slot.result.verdict
 			records[i].terminalMovers = slices.Clone(slot.result.movedInputs)
 			staleSlots++
+		} else if slot.result.verdict.Status != Valid {
+			records[i].observed = false
 		}
 	}
 	if staleSlots > 0 && trace.Enabled(ctx, trace.DomainSession, u.view.moduleDir) {
@@ -609,7 +612,7 @@ func (u *CheckingUnit) closeSlots(ctx context.Context, current *Snapshot) ([]Che
 			trace.Int("terminal_stale_slots", staleSlots),
 		)
 	}
-	results, before, after, err := current.checkRecordsWithEndpoints(ctx, records, true, false)
+	results, before, after, err := current.checkRecordsWithEndpoints(ctx, records)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -711,53 +714,6 @@ func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates [
 	return results, nil
 }
 
-// checkInertTestVariantExtension explicitly licenses an inert delta from prior
-// to this view's ledger, then checks every remaining guard under ordinary or
-// observed policy. The caller vouches that prior is the complete ledger paired
-// with recorded's effective compartment, core, listing/build configuration,
-// toolchain and derivation. Historical provenance is caller-trusted, not
-// hash-authenticated. Only Valid returns an updated fingerprint and
-// independently owned ledger. Producing constituents are never refreshed.
-// withDeferredCheckClose makes the returned judgment and pair provisional
-// until this view successfully validates.
-func (v *Snapshot) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return Fingerprint{}, TestVariantLedger{}, Verdict{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
-		if err == nil {
-			verdict = v.judgmentFor(subject, verdict)
-		}
-		return Fingerprint{}, TestVariantLedger{}, verdict, err
-	}
-	if ctx == nil {
-		return refuse(Verdict{}, errors.New("gofresh: nil analysis context"))
-	}
-	if err := ctx.Err(); err != nil {
-		return refuse(Verdict{}, err)
-	}
-	if err := v.prepareCandidates([]Candidate{{subject, recorded}}); err != nil {
-		return refuse(Verdict{}, err)
-	}
-	candidate, ledger, rejected, err := v.prepareInertExtension(recorded, prior, subject)
-	if err != nil || rejected.Status != "" {
-		return refuse(rejected, err)
-	}
-	var verdict Verdict
-	if observed {
-		verdict, err = v.CheckObserved(ctx, candidate, subject)
-	} else {
-		verdict, err = v.Check(ctx, candidate, subject)
-	}
-	if err != nil || verdict.Status != Valid {
-		return refuse(verdict, err)
-	}
-	if err := v.retainApplicabilityCheck(ctx, candidate, subject, observed); err != nil {
-		return refuse(Verdict{}, err)
-	}
-	return candidate, ledger, verdict, nil
-}
-
 // prepareInertExtension licenses only the compartment substitution. It observes
 // no runtime inputs or proof and preserves every original producing constituent.
 // The caller has admitted shape, kind and membership for the entire batch first.
@@ -797,96 +753,18 @@ func (v *Snapshot) prepareInertExtension(recorded Fingerprint, prior TestVariant
 	return candidate, ledger, Verdict{}, nil
 }
 
-// Applicability obligations are checks of historical evidence, never producer
-// attachments. Keeping them separate prevents validation from treating a reuse
-// check as a newly completed execution or requiring a new process receipt.
-type applicabilityCheck struct {
-	recorded Fingerprint
-	subject  Subject
-	observed bool
-}
-
-func (v *Snapshot) retainApplicabilityCheck(ctx context.Context, rec Fingerprint, subject Subject, observed bool) error {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if v.sealed {
-		return errViewSealed
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	check := applicabilityCheck{rec, subject, observed}
-	if !slices.Contains(v.applicabilityChecks, check) {
-		v.applicabilityChecks = append(v.applicabilityChecks, check)
-	}
-	return nil
-}
-
-func (v *Snapshot) currentApplicabilityObservable(subject Subject, outcomeMethod string) bool {
-	ok, _ := v.currentApplicabilityObservableMode(subject, outcomeMethod)
-	return ok
-}
-
 func (v *Snapshot) currentApplicabilityObservableMode(subject Subject, outcomeMethod string) (ok, reqSingleSubject bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	p := v.observable[subject]
+	p := v.txState[subject].observable
 	if !p.Observable {
 		return false, false
 	}
 	if p.RequiresSingleSubject && !v.effectiveExecutionModel().singleSubject() {
 		return false, false
 	}
-	if outcomeMethod == outcome.StaticMethod {
+	if outcomeMethod == runtimeinput.StaticOutcomeMethod {
 		return p.EffectFree, p.RequiresSingleSubject
 	}
-	return p.OutcomeMethod == outcome.Method, p.RequiresSingleSubject
-}
-
-func (v *Snapshot) validateApplicabilityChecks(ctx context.Context) error {
-	// Validate has sealed registration before reading these obligations.
-	v.mu.RLock()
-	checks := append([]applicabilityCheck(nil), v.applicabilityChecks...)
-	v.mu.RUnlock()
-	if len(checks) == 0 {
-		return nil
-	}
-	current, err := v.newSeededValidationView(ctx)
-	if err != nil {
-		return err
-	}
-	return v.validateApplicabilityBatches(ctx, current, checks)
-}
-
-// applicabilityRecords preserves every historical variant and its policy in one
-// ordered batch, sharing endpoint observations across subjects and policies.
-func applicabilityRecords(checks []applicabilityCheck) []recordCheck {
-	records := make([]recordCheck, len(checks))
-	for i, check := range checks {
-		records[i] = recordCheck{Candidate: Candidate{check.subject, check.recorded}, observed: check.observed}
-	}
-	return records
-}
-
-func (v *Snapshot) validateApplicabilityBatches(ctx context.Context, current *Snapshot, checks []applicabilityCheck) error {
-	var unavailable error
-	records := applicabilityRecords(checks)
-	results, err := current.checkRecords(ctx, records, true, false)
-	if err := deferValidationUnavailability(err, &unavailable); err != nil {
-		return err
-	}
-	for i, result := range results {
-		if result.verdict.Status == Valid {
-			continue
-		}
-		if result.verdict.Status == Unverifiable && result.unavailable != nil {
-			if unavailable == nil {
-				unavailable = result.unavailable
-			}
-			continue
-		}
-		subject := checks[i].subject
-		return fmt.Errorf("%w: applicability for %s.%s: %s", ErrViewChanged, subject.Package, subject.Symbol, result.verdict.Reason)
-	}
-	return v.closeValidationReobservation(ctx, current, unavailable)
+	return p.OutcomeMethod == runtimeinput.OutcomeMethod, p.RequiresSingleSubject
 }

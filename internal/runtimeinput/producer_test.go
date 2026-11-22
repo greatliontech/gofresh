@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
 func producerModule(t *testing.T) (string, string) {
@@ -683,7 +682,7 @@ func supportedIngest(t *testing.T, frame ProducerFrame, identity string, env []s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ProducerIngest{Identity: identity, Env: env, Completion: completion, Outcome: outcome.Prepare(binding, []string{supportedSubject}, "")}
+	return ProducerIngest{Identity: identity, Env: env, Completion: completion, Outcome: PrepareOutcomeSupport(binding, []string{supportedSubject}, "")}
 }
 
 func TestProducerRequiresIndependentExecutionPremises(t *testing.T) {
@@ -704,7 +703,7 @@ func TestProducerRequiresIndependentExecutionPremises(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			in.Outcome = outcome.Prepare(binding, []string{supportedSubject}, "file outcomes not supported")
+			in.Outcome = PrepareOutcomeSupport(binding, []string{supportedSubject}, "file outcomes not supported")
 		}, "", "file outcomes not supported"},
 		{"wrong process", func(in *ProducerIngest) { in.Identity = "other" }, "", "completion receipt belongs"},
 		{"wrong environment", func(in *ProducerIngest) { in.Env = producerEnv(dir, "OUTCOME=changed") }, "", "completion receipt belongs"},
@@ -847,7 +846,7 @@ func TestIdentityFacadePreservesGuardsWithoutGrantingOutcomes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, support := range []OutcomeSupport{{}, outcome.Prepare(binding, []string{supportedSubject}, "unsupported file inventory")} {
+	for _, support := range []OutcomeSupport{{}, PrepareOutcomeSupport(binding, []string{supportedSubject}, "unsupported file inventory")} {
 		withoutSupport := in
 		withoutSupport.Outcome = support
 		got, reason, err := frame.ObserveInputs(context.Background(), writeTestlog(t, "open fixture\n"), withoutSupport)
@@ -1020,7 +1019,7 @@ func FuzzOutcomeBindingRetainsEnvironmentBytes(f *testing.F) {
 		// NUL is outside the environment grammar; every other byte, including
 		// invalid UTF-8, remains in the generated value domain.
 		a, b = strings.ReplaceAll(a, "\x00", "\x01"), strings.ReplaceAll(b, "\x00", "\x01")
-		frame := ProducerFrame{span: new(outcome.Span)}
+		frame := ProducerFrame{span: new(outcomeSpan)}
 		first, err := frame.OutcomeBinding("worker", []string{"VALUE=" + a, "OTHER=fixed"})
 		if err != nil {
 			t.Fatal(err)
@@ -1060,25 +1059,8 @@ func TestOutcomeSupportSurvivesWithoutPromotion(t *testing.T) {
 	if err != nil || current != obs.State {
 		t.Fatalf("current=%+v %v; want %+v", current, err, obs.State)
 	}
-	abs, err := Absolute(obs, root, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rel, err := Relative(abs, root, env)
-	if err != nil || rel.State != obs.State {
-		t.Fatalf("conversion=%+v %v", rel, err)
-	}
-	adopted, err := Adopt(obs.Manifest, root, "adopted", env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	empty, err := Merge(root, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	merged, err := Merge(root, env, empty, obs, adopted)
-	if err != nil || merged.State != obs.State {
-		t.Fatalf("supported union=%+v %v", merged, err)
+	if !HasOutcomeSupport(obs.Manifest, supportedSubject) {
+		t.Fatal("supported observation lost outcome support")
 	}
 	plain, err := FromTestLog([]byte("getenv OUTCOME\n"), root, dir, env, WithCompletedProcess("identity-only"), WithBracket(*frame.bracket))
 	if err != nil {
@@ -1089,30 +1071,14 @@ func TestOutcomeSupportSurvivesWithoutPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, other := range []Observation{plain, incomplete} {
-		for _, pair := range [][]Observation{{obs, other}, {other, obs}} {
-			union, err := Merge(root, env, pair...)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if HasOutcomeSupport(union.Manifest, supportedSubject) {
-				t.Fatal("merge upgraded unsupported child")
-			}
-			reentered, err := Adopt(union.Manifest, root, "again", env)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if HasOutcomeSupport(reentered.Manifest, supportedSubject) {
-				t.Fatal("adoption upgraded unsupported union")
-			}
+		if HasOutcomeSupport(other.Manifest, supportedSubject) {
+			t.Fatalf("unsupported observation upgraded to outcome support: %+v", other)
 		}
 	}
 	if HasOutcomeSupport(obs.Manifest, strings.Repeat("b", 64)) {
 		t.Fatal("another subject borrowed support")
 	}
 	old := base64.RawURLEncoding.EncodeToString([]byte(`{"v":1}`))
-	if _, err := Adopt(old, root, "old", env); err == nil {
-		t.Fatal("adopted old manifest")
-	}
 	if HasOutcomeSupport(old, supportedSubject) {
 		t.Fatal("old manifest gained support")
 	}
@@ -1147,11 +1113,11 @@ func TestProducerCancellationReachesClosingBracket(t *testing.T) {
 func TestOutcomeManifestRefusesInconsistentSupport(t *testing.T) {
 	for _, m := range []manifest{
 		{Version: 1},
-		{Version: manifestVersion, Outcome: outcome.Method},
+		{Version: manifestVersion, Outcome: OutcomeMethod},
 		{Version: manifestVersion, Subjects: []string{supportedSubject}},
 		{Version: manifestVersion, Outcome: "unknown", Subjects: []string{supportedSubject}},
-		{Version: manifestVersion, Outcome: outcome.Method, Subjects: []string{"not a digest"}},
-		{Version: manifestVersion, Outcome: outcome.Method, Subjects: []string{supportedSubject}, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "file"}, Digest: testEntryDigest}}},
+		{Version: manifestVersion, Outcome: OutcomeMethod, Subjects: []string{"not a digest"}},
+		{Version: manifestVersion, Outcome: OutcomeMethod, Subjects: []string{supportedSubject}, Paths: []pathInput{{pathID: pathID{Kind: pathRel, Path: "file"}, Digest: testEntryDigest}}},
 	} {
 		if _, err := encode(m); err == nil {
 			t.Fatalf("encoded inconsistent support: %+v", m)
@@ -1171,7 +1137,7 @@ func TestManifestDigestPinsTheWireFold(t *testing.T) {
 	if got := manifestDigest(plain); got != "d18d3f32277111a932627632314b8d4c" {
 		t.Fatalf("identity-only wire digest = %q", got)
 	}
-	supported := manifest{Version: manifestVersion, Outcome: outcome.Method, Subjects: []string{supportedSubject}, Env: []envInput{{Name: "A", Digest: testEntryDigest}}}
+	supported := manifest{Version: manifestVersion, Outcome: OutcomeMethod, Subjects: []string{supportedSubject}, Env: []envInput{{Name: "A", Digest: testEntryDigest}}}
 	if got := manifestDigest(supported); got != "bcc147977722ca16ce145847c2ab6a41" {
 		t.Fatalf("supported wire digest = %q", got)
 	}
@@ -1185,23 +1151,16 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 	f.Add(byte(4), byte(0), byte(3), []byte("movement beside support and empty evidence"))
 	f.Add(byte(2), byte(4), byte(1), []byte("movement beside incomplete evidence"))
 	f.Fuzz(func(t *testing.T, left, right, third byte, data []byte) {
-		makeObservation := func(mode byte, index int) (Observation, string) {
-			if mode%5 == 3 {
-				obs, err := Merge(".", []string{})
-				if err != nil {
-					t.Fatal(err)
-				}
-				return obs, ""
-			}
+		for index, mode := range []byte{left, right, third} {
 			key := sha256.Sum256(append([]byte{byte(index)}, data...))
 			subject := hex.EncodeToString(key[:])
 			m := manifest{Version: manifestVersion}
-			switch mode % 5 {
+			switch mode % 4 {
 			case 0:
-				m.Outcome, m.Subjects = outcome.Method, []string{subject}
+				m.Outcome, m.Subjects = OutcomeMethod, []string{subject}
 			case 2:
 				m.Unverifiable = []string{"operation-outcome support unavailable"}
-			case 4:
+			case 3:
 				m.BracketMoved = true
 				m.Unverifiable = []string{"observation bracket moved: data"}
 			}
@@ -1217,43 +1176,25 @@ func FuzzOutcomeEvidenceMergePreservesSupport(f *testing.F) {
 			if err != nil || again != state.Manifest {
 				t.Fatalf("noncanonical roundtrip: %v", err)
 			}
-			return newObservation(state, fmt.Sprintf("process-%d", index), "fixture"), subject
-		}
-		a, keyA := makeObservation(left, 0)
-		b, keyB := makeObservation(right, 1)
-		c, keyC := makeObservation(third, 2)
-		ab, err := Merge(".", []string{}, a, b)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ba, err := Merge(".", []string{}, b, a)
-		if err != nil || ba.State != ab.State {
-			t.Fatalf("commutativity: %v", err)
-		}
-		idempotent, err := Merge(".", []string{}, ab, ab)
-		if err != nil || idempotent.State != ab.State {
-			t.Fatalf("idempotence: %v", err)
-		}
-		lhs, err := Merge(".", []string{}, ab, c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bc, err := Merge(".", []string{}, b, c)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rhs, err := Merge(".", []string{}, a, bc)
-		if err != nil || lhs.State != rhs.State {
-			t.Fatalf("associativity: %v", err)
-		}
-		if lhs.BracketMoved != (left%5 == 4 || right%5 == 4 || third%5 == 4) {
-			t.Fatal("merge promoted or lost demonstrated movement")
-		}
-		eligible := func(mode byte) bool { return mode%5 == 0 || mode%5 == 3 }
-		want := eligible(left) && eligible(right) && eligible(third)
-		for _, key := range []string{keyA, keyB, keyC} {
-			if HasOutcomeSupport(lhs.Manifest, key) != (want && key != "") {
-				t.Fatal("merge promoted or lost outcome support")
+			obs := newObservation(state, fmt.Sprintf("process-%d", index))
+			completed, err := CompletedState(obs)
+			if err != nil || completed != state {
+				t.Fatalf("CompletedState = (%+v, %v), want %+v", completed, err, state)
+			}
+			current, err := Current(context.Background(), state.Manifest, ".", []string{})
+			if err != nil || current != state {
+				t.Fatalf("Current = (%+v, %v), want %+v", current, err, state)
+			}
+			if current.BracketMoved != (mode%4 == 3) {
+				t.Fatal("Current promoted or lost demonstrated movement")
+			}
+			if HasOutcomeSupport(current.Manifest, subject) != (mode%4 == 0) {
+				t.Fatal("manifest promoted or lost outcome support")
+			}
+			tampered := obs
+			tampered.BracketMoved = !tampered.BracketMoved
+			if _, err := CompletedState(tampered); err == nil {
+				t.Fatal("CompletedState accepted tampered observation")
 			}
 		}
 	})

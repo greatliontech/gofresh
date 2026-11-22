@@ -61,7 +61,7 @@ Version 4 records demonstrated bracket movement independently of inferred
 unverifiability. Version 3 retained truthful observed PWD, but represented known
 movement only among diagnostic unverifiable reasons; it cannot establish the
 new guard distinction. Version 2 could additionally omit an observed PWD read.
-Checking, adoption, conversion, merge and outcome-support admission reject every
+Checking and outcome-support admission reject every
 earlier generation rather than inferring guard facts from diagnostic text,
 adding a directory, or upgrading a version from current analysis. The enclosing
 native fingerprint can retain the
@@ -80,11 +80,7 @@ subject package, subject symbol, maximal closure, test-variant closure, toolchai
 guard, build guard, selected toolchain content identity, admission-policy identity,
 and observation-proof strategy.
 All strings use the manifest's canonical JSON escaping. The support fields
-participate in the combined digest before input entries. They are preserved by
-identity conversion and adoption; merge retains them only when every contributing
-process has supported evidence, unioning the subject identities. A zero-process
-merge is neutral when merged with process-backed evidence, but cannot supply a
-process receipt or supported subject by itself.
+participate in the combined digest before input entries.
 An applicability transformation checks support against the original recorded
 fingerprint before applying its independently justified change; it does not
 rewrite the support identity to claim a different producing test variant.
@@ -148,25 +144,22 @@ moved-input identities from the deciding endpoint without post-window re-reads.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
-while merge or a current check observes inputs — the
-classification roots' resolution inputs and their consumer-held memo included (one
+while a current check observes inputs — the
+classification roots' resolution inputs and their session-held memo included (one
 judged run — the consumer's one verb invocation, a long-lived server's per-request
 operation — never a process), as
-REQ-inputs-guard-covered states. Merge revalidates
-every completed child state against its one merge-time view before unioning their
-identities, rejecting children finalized under values that no longer agree; Gofresh
+REQ-inputs-guard-covered states. Gofresh
 also re-observes around a check to detect ordinary drift. It cannot prove the absence
 of a mutation-and-restore interval within one observation or construct an atomic
 snapshot spanning process environment, several files, and directory trees; allowing
 such an interval forfeits the proof that the digest describes the run or check.
-Every environment-aware finalization, merge, absolute conversion,
+Every environment-aware finalization
 and current check uses the same complete process environment as the producing or
-checking process; ambient convenience operations use the ambient environment at the
-operation. Mixing an explicitly configured process with ambient environment hashing
+checking process. Mixing an explicitly configured process with ambient environment hashing
 is not coherent evidence.
 
-**REQ-inputs-context** (behavior): Producer finalization, adoption, identity
-conversion, merge and current checks MUST observe their owning unit's supplied
+**REQ-inputs-context** (behavior): Producer finalization
+and current checks MUST observe their owning unit's supplied
 phase context before and between environment identities, path identities,
 directory members and file-read chunks, returning the context error without a
 partial state. An unbounded caller context is an explicit lifetime choice,
@@ -174,30 +167,11 @@ never an implicit replacement for a cancelled operation. Separately bounded
 closing phases follow REQ-fresh-context without concealing the original
 interruption.
 
-**REQ-inputs-merge** (behavior): A caller combining observations from several
-processes MUST be able to merge their independently completed states as a deterministic
-manifest set union, with no shared mutable manifest or cross-process lock. Before
-union, each child's recorded digest and disposition are re-evaluated against the same
-merge-time module view; a structurally unfinished or malformed child, or any
-disagreement, is refused, while a finalized state explicitly recording observation
-incompleteness is accepted as unverifiable evidence. Every
-environment identity, path identity, and unverifiable reason from every accepted
-child appears once in the canonical result. Merge is commutative, associative, and
-idempotent; its digest is computed from the merged manifest against that current
-view. Merging zero states deliberately produces the encoded observation-free
-manifest, while an empty, malformed, or unsupported manifest supplied in a state is
-refused rather than treated as no observation. This set union does not prove
-that every result-contributing process supplied evidence: the independently
-established roster and terminal dispositions of REQ-fresh-unit-roster govern
-that claim. Deduplicating input identities never deduplicates distinct actual
-executions out of the unit's obligations.
-
-**REQ-inputs-incomplete** (behavior): A caller whose producing process did not
-complete normal observation finalization MUST be able to construct a canonical
+**REQ-inputs-incomplete** (behavior): A producing execution that did not
+complete normal observation finalization MUST finalize to a canonical
 runtime-input state carrying a non-empty attributable incompleteness reason, no
-fabricated identities, and an unverifiable disposition. The state participates in
-ordinary deterministic merge, so one incomplete process makes the merged evidence
-unverifiable without being confused with an explicit completed empty observation.
+fabricated identities, and an unverifiable disposition distinct from a completed
+empty observation.
 
 **REQ-inputs-observation-class** (behavior): A path entry's digest MUST bind
 exactly the surface the recorded operations could expose. An identity only ever
@@ -208,9 +182,7 @@ the checkout that measured it while guarding nothing a subject could branch on
 (the same rationale the walk states for a directory object's own size and
 mtime). An identity a recorded stat observed is metadata-bound — the returned
 metadata includes the modification time, so its digest binds the full object
-state. A stat observed after an open upgrades the one entry in place; a merge
-of observations that saw the same identity in different classes keeps the
-metadata-bound class; identity-kind conversions preserve the class unchanged.
+state. A stat observed after an open upgrades the one entry in place.
 The stat record's completeness is a
 checked producer-implementation property: the class split is complete only when
 fd-based stat surfaces whose result escapes to the caller (os.File.Stat on
@@ -231,29 +203,14 @@ drops is exactly what it must keep. Content-bound evidence therefore
 revalidates in any checkout of the same content, and only records whose
 subjects could actually observe machine circumstance stay pinned to it.
 
-**REQ-inputs-absolute-identities** (behavior): A caller combining process
-observations rooted at different module directories MUST be able to revalidate each
-completed state against its original module view and convert every module-relative
-path identity to the equivalent clean absolute identity without changing environment
-identities or suppressing unverifiability. Any dynamic unverifiable disposition from
-the original module-relative interpretation is carried into the converted manifest;
-conversion may strengthen the disposition when absolute directory semantics are more
-conservative, but never weakens it. The converted states then participate in ordinary
-merge under any caller root without interpreting one module's relative path under
-another module.
-
-**REQ-inputs-relative-identities** (behavior): A caller persisting a completed
-state anchored at one module MUST be able to revalidate it and convert every
-path identity lexically under the module directory to the equivalent
-module-relative identity — external identities unchanged — without changing
-environment identities, observation classes, or suppressing unverifiability;
-the dynamic unverifiable disposition carries exactly as absolute conversion
-carries it, and a state that moved since observation refuses conversion. The
-converted state is the portable persisted form: its identities and
-content-bound digests revalidate under any checkout of the same content, so
-persisted evidence is keyed by what was measured, never by the checkout root
-that measured it. The two conversions are inverses on states: converting to
-relative and back under the same module reproduces the absolute state.
+**REQ-inputs-relative-identities** (behavior): Observation finalization anchored
+at an evidence root MUST record every observed path inside that root as its
+canonical slash-separated relative identity — external identities remaining clean
+absolute paths — without altering environment identities, observation classes, or
+unverifiability dispositions. The resulting manifest is the portable persisted
+form: its relative identities and content-bound digests revalidate under any
+checkout of the same content, so persisted evidence is keyed by what was
+measured rather than by the checkout root that measured it.
 
 **REQ-inputs-evidence-root** (behavior): An engine MUST re-hash a subject's recorded
 relative runtime-input identities under the root its producer anchored the
@@ -270,27 +227,6 @@ checkout-free), so a wrong containing root is the caller's soundness responsibil
 exactly as an exclusion is: it normally stales, and binds falsely only where a
 same-named file of identical content sits under it. Package loading, Go commands,
 closure analysis, and guard observation stay at the module directory.
-
-**REQ-inputs-adoption** (behavior): A caller holding a persisted encoded manifest
-MUST be able to re-admit it as a completed observation under an attributable
-process identity of the caller's choosing. Adoption validates the manifest
-against the one canonical encoding, re-evaluates every recorded identity's
-digest against the adoption-time module view and environment, and refuses any
-disagreement naming the moved inputs — a persisted union whose evidence the
-current view contradicts never re-enters silently. The adopted state
-participates in ordinary merge, and its digest semantics are identical to a
-fresh observation of the same identities under the same view, so a consumer
-re-executing a subset of contributing processes widens a persisted union by
-merging the adopted state with the fresh completed observations. Adoption
-re-admits recorded evidence; it observes nothing new and confers no
-completeness beyond what the persisted manifest recorded. Its trust posture is
-the caller-trusted persistence class recorded fingerprints already occupy on
-the check path: the manifest's producer-provenance is unauthenticatable, no
-observation bracket backs the re-admitted values (value-binding governs fresh
-observation only), and a caller who fabricates persisted evidence deceives
-only itself — exactly as with a fabricated recorded fingerprint. An adopted
-observation's process identity therefore attributes the adoption, never a
-verified producing process.
 
 **REQ-inputs-evidence-not-proof** (invariant): A runtime-input manifest MUST be
 treated as evidence of the identities it observed, never as proof that every
@@ -345,39 +281,38 @@ paths needed for that relation cannot be replaced by a name or digest-approved
 summary. These obligations apply to outcome-bearing support, not to every
 source-derived certificate, identity-only guard or explicit purity judgment.
 
-These premises govern the producer facade as well as any lower-level construction
+These premises govern producing-unit finalization as well as any internal construction
 that grants completion-bearing outcome support.
-The facade owns assembly and validation of the conjunction, not invention of a
+Finalization owns assembly and validation of the conjunction, not invention of a
 premise absent from its inputs. Process health describes execution completion;
 it is not an alias for operation-outcome support. Empty effect sets and supported
 deterministic operations can have sound outcome derivations, but the derivation
-must be established by the admitted method, never guessed from an empty log.
+has to be established by the admitted method, never guessed from an empty log.
 
 Identity-only finalization is a separate operation: it retains observed input
 identities, guarded values and classification refusals without claiming outcome
 agreement. Its manifest has no outcome-support fields. A usable input guard,
 absence of input-classification refusals, and finalized process provenance are
 not observation completion. This data remains useful for detecting input drift,
-but cannot authorize observation-based reuse; conversion, adoption and merge do
-not promote it. A producer requesting completion-bearing evidence without a
+but cannot authorize observation-based reuse. A producer requesting completion-bearing evidence without a
 required premise receives explicitly incomplete evidence naming that premise.
 
 Explicit purity remains the separate caller-responsible override in the freshness
 contract. It may affect the final verdict without relabeling an incomplete
 observation as complete or an assertion as verified evidence.
 
-**REQ-inputs-identity-facade** (behavior): The shared producer facade MUST also
+**REQ-inputs-identity-facade** (behavior): Producing units MUST also
 provide explicit identity-only finalization for a normally completed process,
 using the same receipt binding, frame, capture validation, environment,
-classifications, bracket and cancellation rules. This operation preserves
+classifications, bracket and cancellation rules. This mode preserves
 observed identities for drift detection without claiming outcome agreement and
-never emits outcome-support fields, even if a caller supplies a capability.
+never emits outcome-support fields, even if a capability is prepared.
 Missing, mismatched or abnormal completion remains explicitly incomplete.
-The facade returns the capture's incompleteness reason separately from finalized
+Finalization returns the capture's incompleteness reason separately from finalized
 guard state: an unguardable observed identity and a failed capture may both be
 unverifiable, but only the latter reports capture incompleteness. A consumer can
-preserve this distinction without parsing diagnostic text or reconstructing the
-facade's capture checks.
+preserve this distinction without parsing diagnostic text or reconstructing
+internal capture checks.
 
 **REQ-inputs-bound-outcomes** (invariant): Supported observation construction MUST
 match independently prepared outcome support and a normal-completion receipt to
@@ -449,17 +384,14 @@ observation only through a construction path gated by the caller's verified norm
 termination of that producing process, its evidence that every behavior-affecting
 admitted-operation outcome agreed with the guarded value, and an observation bracket
 satisfying REQ-inputs-value-binding. EOF, including EOF exactly at a line boundary,
-is neither termination nor outcome evidence. Exactly one completed
-or incomplete observation is required for every process contributing to the result. A
-producer requesting that completion claim without every gate is represented
-through the incomplete-observation constructor. Identity-only guard data carries
-no such claim; merge cannot supply its missing outcome support. Merge refuses
-unfinalized or inconsistent producer evidence, and an explicitly incomplete child
-keeps the deterministic union unverifiable.
+is neither termination nor outcome evidence. A completed or incomplete observation
+is required for any contributing process that requires runtime observation. A
+producer requesting that completion claim without every gate finalizes to an
+incomplete observation. Identity-only guard data carries no such claim and never
+supplies outcome support.
 
 **REQ-inputs-value-binding** (invariant): A completed observation of newly read
-values — evidence originating from a producing process's testlog rather than
-re-admitted persisted evidence (REQ-inputs-adoption) — MUST obey these binding
+values originating from a producing process's testlog MUST obey these binding
 and failure obligations:
 
 - **capture-and-revalidation** — An observation bracket is captured before the
@@ -508,9 +440,7 @@ and failure obligations:
   Captured fact values and their availability are integrity-bound together.
   It is never inferred from diagnostic text, waived by purity or cleared by later
   agreement with the recorded digest. Process facts remain constructible, but
-  movement supplies no reusable evidence and checks stale. Conversion, adoption
-  and merge preserve the typed failure; any accepted contributing child's movement
-  remains present, including beside incomplete or zero-process evidence.
+  movement supplies no reusable evidence and checks stale.
 - **attribution** — Every constructed reason is manifest-representable by
   construction. Filesystem-derived names, including moved members, escaped links
   and unhashable paths, are quoted when they contain framing bytes or invalid UTF-8,
@@ -686,7 +616,7 @@ toolchain's GOROOT; the producing environment's GOMODCACHE covering its
 version-addressed extracted module trees while its `cache/` download subtree (version
 lists, lock files: mutable metadata no guard pins) stays observed; and the producing
 environment's GOCACHE, its discovered `fuzz` corpus excepted — each resolved by the
-producer facade from the process environment the ingest carries, as the toolchain
+unit producer frame from the producing unit's process environment, as the toolchain
 reports it for that environment in the package directory the process ran in (the
 same environment the producing run used, by construction; a setting that is unset,
 disabled, or not a clean absolute path declares no root of its class; a root that
@@ -741,8 +671,8 @@ path that reached it.
 **REQ-inputs-ephemeral-root** (behavior): Observation construction from a
 test-harness log MUST classify under the producing environment's ephemeral temp
 roots — what the run's own temp-directory resolution named: TMPDIR when set, the
-platform default otherwise, resolved by the producer facade from the process
-environment the ingest carries, or the per-run scratch root a producer minted for
+platform default otherwise, resolved by the unit producer frame from the producing
+unit's process environment, or the per-run scratch root a producer minted for
 the process and declares explicitly; declaring the filesystem root ephemeral does
 not erase an environment-variable read or replace the value returned by it, even
 when that value is a per-run name; and the go command's own
@@ -844,11 +774,12 @@ scratch disciplines no sound flow analysis can follow.
 explicit existing regular file MUST judge eligibility for raw-byte observation
 under these obligations:
 
-- **producing-context** — The query uses the session's and producer facade's effective-root
+- **producing-context** — The session's preflight query uses the session's and unit producer frame's effective-root
   resolution, exclusions and path-value classifications. It distinguishes
   raw-byte-eligible, recordless, projected and unverifiable paths; every non-raw
-  result names its reason, and an absent result grants nothing. The caller supplies
-  the same absolute evidence-root and process directories, complete process
+  result names its reason, and an absent result grants nothing. The session supplies
+  its configured evidence root, command-preparation hook, and classification-root
+  memo while the caller supplies the same package directory, complete process
   environment with matching PWD, exclusions
   and minted scratch root as the actual producer. A build or analysis environment
   cannot substitute for a different process environment.
@@ -873,9 +804,9 @@ under these obligations:
   supplies its observations and ordinary closing checks. A manifest's content can
   be such an input; its recorded bytes do not confer authority on assertions inside it.
 
-**REQ-inputs-producer-facade** (behavior): The library MUST expose one
-producer facade owning the completed-observation conjunction every
-external producer previously hand-assembled: frame capture resolves the
+**REQ-inputs-producer-facade** (behavior): Producing-unit registration and
+closing MUST enforce the completed-observation conjunction across frame capture
+and test-log finalization: frame capture resolves the
 tree root and package directory through symlinks before the containment
 check and before framing, declares the package directory
 module-relative beside the caller's reviewed bracket paths under the
@@ -1062,14 +993,7 @@ attribution never moves a measurement's manifest, digest, or reason
 between checkouts of one tree, and a state derived from a recorded
 manifest carries no attribution (the refused path's own spelling stays
 the classifier's: an in-module path refused absolute still names its
-checkout).
-An identity conversion (REQ-inputs-relative-identities) converts the
-directory the attribution names as it converts the manifest's identities —
-relative to the root the conversion is given (the module directory, or the
-evidence root a producer framed its observations at) in the portable form; a
-directory outside that root unchanged; absolute again in the absolute form —
-so a persisted record names the producing package the same in every
-checkout. The hashing pass's resolved-target refusal carries its attribution
+checkout). The hashing pass's resolved-target refusal carries its attribution
 in the reason itself — its target is state, whole in the reason, reproduced
 by every derivation — and never on the observation's field. The process's
 own attribution stays REQ-inputs-incomplete's; the field case is a

@@ -175,7 +175,7 @@ func TestExternal(t *testing.T) {
 	// Trigger observability batch to verify PureComposed and TestInPkg are EffectFree
 	// while UseLinkname is refused for reaching runtime.nanotime via //go:linkname.
 	rec.Reset()
-	fps, err := snap.CaptureObservedBatch(ctx)
+	fps, err := snap.captureObservedBatch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,18 +250,26 @@ func TestTwoPassCompareObservationsFieldPerturbationAndTOCTOU(t *testing.T) {
 	makeBaseFacts := func() observationFacts {
 		return observationFacts{
 			guards: baseGuards,
-			maximal: map[Subject]subjectFacts{
+			subjects: map[Subject]subjectEntry{
 				subj: {
-					source: baseMaximal.Clone(),
+					maximal: subjectFacts{
+						source: baseMaximal.Clone(),
+					},
+					vouchDischarges: "vouch-1",
+					discharges:      attestationDischarges{singleSubject: "ss-1", packageProcess: "pp-1"},
+					sourceFiles:     []string{"/repo/pkg/a.go"},
 				},
 			},
-			purity:               map[Subject]string{subj: ""},
-			vouchDischarges:      map[Subject]string{subj: "vouch-1"},
-			discharges:           map[Subject]attestationDischarges{subj: {singleSubject: "ss-1", packageProcess: "pp-1"}},
-			cut:                  map[Subject]bool{},
-			sourceFiles:          []string{"/repo/pkg/a.go"},
-			sourceFilesBySubject: map[Subject][]string{subj: {"/repo/pkg/a.go"}},
-			fileDigests:          map[string]string{"/repo/pkg/a.go": "dig-1"},
+			sourceFiles: []string{"/repo/pkg/a.go"},
+			fileDigests: map[string]string{"/repo/pkg/a.go": "dig-1"},
+		}
+	}
+
+	mutateEntry := func(fn func(*subjectEntry)) func(*observationFacts) {
+		return func(cur *observationFacts) {
+			e := cur.subjects[subj]
+			fn(&e)
+			cur.subjects[subj] = e
 		}
 	}
 
@@ -282,170 +290,142 @@ func TestTwoPassCompareObservationsFieldPerturbationAndTOCTOU(t *testing.T) {
 		{
 			name:         "closure_hash",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Identity.Hash = "hash-2"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Identity.Hash = "hash-2"
+			}),
 			wantField: "closure_hash",
 		},
 		{
 			name:         "closure_test_variants",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Identity.TestVariants = "tv-2"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Identity.TestVariants = "tv-2"
+			}),
 			wantField: "closure_test_variants",
 		},
 		{
 			name:         "closure_toolchain_content",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Identity.ToolchainContent = "tc-2"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Identity.ToolchainContent = "tc-2"
+			}),
 			wantField: "closure_toolchain_content",
 		},
 		{
 			name:         "closure_admission_policy",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Identity.AdmissionPolicy = "ap-2"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Identity.AdmissionPolicy = "ap-2"
+			}),
 			wantField: "closure_admission_policy",
 		},
 		{
 			name:         "closure_unverifiable",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Effects = []closure.Blocker{{Kind: closure.BlockerNetwork, Reason: "reaches net"}}
-				sf.source.Diagnostic = "reaches net"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Effects = []closure.Blocker{{Kind: closure.BlockerNetwork, Reason: "reaches net"}}
+				e.maximal.source.Diagnostic = "reaches net"
+			}),
 			wantField: "closure_unverifiable",
 		},
 		{
 			name:         "closure_reason",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.source.Diagnostic = "import candidate diagnostic"
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Diagnostic = "import candidate diagnostic"
+			}),
 			wantField: "closure_reason",
 		},
 		{
 			name:         "closure_effects_with_same_closure_projection",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				// Both base and cur have 1+ effects and identical Diagnostic, so Closure() is identical
-				// while MaximalFacts.Equal is false due to a second blocker in Effects.
-				sf := cur.maximal[subj]
-				sf.source.Effects = []closure.Blocker{
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.source.Effects = []closure.Blocker{
 					{Kind: closure.BlockerNetwork, Reason: "reaches net"},
 					{Kind: closure.BlockerEnvironment, Reason: "reaches os.Getenv"},
 				}
-				sf.source.Diagnostic = "reaches net"
-				cur.maximal[subj] = sf
-			},
+				e.maximal.source.Diagnostic = "reaches net"
+			}),
 			wantField: "closure_effects",
 		},
 		{
 			name:         "open_world",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.openWorld = &subjectRefusal{reason: "parameter fn of func() int"}
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.openWorld = &subjectRefusal{reason: "parameter fn of func() int"}
+			}),
 			wantField: "open_world",
 		},
 		{
 			name:         "shared_state",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.sharedState = &subjectRefusal{reason: "mutates global", culprit: Subject{Package: "example.com/pkg", Symbol: "G"}}
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.sharedState = &subjectRefusal{reason: "mutates global", culprit: Subject{Package: "example.com/pkg", Symbol: "G"}}
+			}),
 			wantField: "shared_state",
 		},
 		{
 			name:         "ambiguous",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.ambiguous = &subjectRefusal{reason: "ambiguous method"}
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.ambiguous = &subjectRefusal{reason: "ambiguous method"}
+			}),
 			wantField: "ambiguous",
 		},
 		{
 			name:         "external",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				sf := cur.maximal[subj]
-				sf.external = true
-				cur.maximal[subj] = sf
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.maximal.external = true
+			}),
 			wantField: "external",
 		},
 		{
 			name:         "purity",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				cur.purity[subj] = "source directive"
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.purity = "source directive"
+			}),
 			wantField: "purity",
 		},
 		{
 			name:         "vouch_discharges",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				cur.vouchDischarges[subj] = "vouch-2"
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.vouchDischarges = "vouch-2"
+			}),
 			wantField: "vouch_discharges",
 		},
 		{
 			name:         "single_subject_discharges",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				d := cur.discharges[subj]
-				d.singleSubject = "ss-2"
-				cur.discharges[subj] = d
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.discharges.singleSubject = "ss-2"
+			}),
 			wantField: "single_subject_discharges",
 		},
 		{
 			name:         "package_process_discharges",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				d := cur.discharges[subj]
-				d.packageProcess = "pp-2"
-				cur.discharges[subj] = d
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.discharges.packageProcess = "pp-2"
+			}),
 			wantField: "package_process_discharges",
 		},
 		{
 			name:         "subject_source_files_construction",
 			construction: true,
-			mutate: func(cur *observationFacts) {
-				cur.sourceFilesBySubject[subj] = []string{"/repo/pkg/a.go", "/repo/pkg/b.go"}
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.sourceFiles = []string{"/repo/pkg/a.go", "/repo/pkg/b.go"}
+			}),
 			wantField: "subject_source_files",
 		},
 		{
 			name:         "subject_source_files_validation",
 			construction: false,
-			mutate: func(cur *observationFacts) {
-				cur.sourceFilesBySubject[subj] = []string{"/repo/pkg/a.go", "/repo/pkg/b.go"}
-			},
+			mutate: mutateEntry(func(e *subjectEntry) {
+				e.sourceFiles = []string{"/repo/pkg/a.go", "/repo/pkg/b.go"}
+			}),
 			wantField: "subject_source_files",
 		},
 		{
@@ -471,10 +451,10 @@ func TestTwoPassCompareObservationsFieldPerturbationAndTOCTOU(t *testing.T) {
 			ctx, rec := testenv.WithTraceGate(t, t.Context(), testenv.AllowTwoPassDiff())
 			base := makeBaseFacts()
 			if tc.wantField == "closure_effects" {
-				sf := base.maximal[subj]
-				sf.source.Effects = []closure.Blocker{{Kind: closure.BlockerNetwork, Reason: "reaches net"}}
-				sf.source.Diagnostic = "reaches net"
-				base.maximal[subj] = sf
+				e := base.subjects[subj]
+				e.maximal.source.Effects = []closure.Blocker{{Kind: closure.BlockerNetwork, Reason: "reaches net"}}
+				e.maximal.source.Diagnostic = "reaches net"
+				base.subjects[subj] = e
 			}
 			cur := makeBaseFacts()
 			tc.mutate(&cur)
@@ -588,16 +568,20 @@ func TestWorkspaceSymlinkedPWDAndCorruptedCacheResilience(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fps, err := snap1.CaptureObservedBatch(ctx)
+		fp1, err := snap1.Capture(ctx, subj)
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdicts1, err := snap1.CheckBatch(ctx, fps)
+		rb1, err := snap1.BindRuntime(ctx, RuntimeDescription{Directory: modADir, Environment: env})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if verdicts1[subj].Status != Valid {
-			t.Fatalf("initial workspace verdict = %+v, want Valid", verdicts1[subj])
+		verdict1, err := rb1.Check(ctx, subj, fp1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict1.Status != Valid {
+			t.Fatalf("initial workspace verdict = %+v, want Valid", verdict1)
 		}
 
 		// Mutate sibling workspace module modB and verify modA.CallB turns Stale.
@@ -606,12 +590,16 @@ func TestWorkspaceSymlinkedPWDAndCorruptedCacheResilience(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdicts2, err := snap2.CheckBatch(ctx, fps)
+		rb2, err := snap2.BindRuntime(ctx, RuntimeDescription{Directory: modADir, Environment: env})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if verdicts2[subj].Status != Stale || verdicts2[subj].Ground.Cause.Kind != ClosureCause {
-			t.Fatalf("workspace verdict after modB edit = %+v, want Stale/ClosureCause", verdicts2[subj])
+		verdict2, err := rb2.Check(ctx, subj, fp1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict2.Status != Stale || verdict2.Ground.Cause.Kind != ClosureCause {
+			t.Fatalf("workspace verdict after modB edit = %+v, want Stale/ClosureCause", verdict2)
 		}
 	})
 
@@ -663,33 +651,37 @@ func TestReadFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, err := snap.captureObserved(ctx, subj)
+		rb, err := snap.BindRuntime(ctx, RuntimeDescription{Directory: symRepo, Environment: env})
 		if err != nil {
 			t.Fatal(err)
 		}
-		bracket, err := CaptureBracket(ctx, symRepo, []string{"."})
+		built, err := snap.BindBuilt(subj.Package, "symrepo-bin")
 		if err != nil {
 			t.Fatal(err)
 		}
-		obs, err := FromTestLog([]byte("# test log\nopen fixture.txt\n"), symRepo, symRepo, env,
-			WithCompletedProcess("worker"), WithBracket(bracket))
+		u, err := rb.Begin(subj)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if obs.State.Unverifiable {
-			t.Fatalf("Observation under symlinked PWD & TMPDIR is unverifiable: %+v", obs.State)
-		}
-		attachedFP, err := snap.AttachObservation(subj, fp, obs)
+		logPath := filepath.Join(t.TempDir(), "sym.testlog")
+		final, err := u.Execute(ctx, built, ProcessDescription{
+			Identity: "worker",
+			Capture:  logPath,
+		}, func(_ context.Context, c Contribution) (Terminal, error) {
+			if err := os.WriteFile(c.Capture(), []byte("# test log\nopen fixture.txt\n"), 0o644); err != nil {
+				return Terminal{}, err
+			}
+			return Terminal{Kind: NormalCompletion}, nil
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		fps := map[Subject]Fingerprint{subj: attachedFP}
-		verdicts1, err := snap.CheckObservedBatch(ctx, fps)
-		if err != nil {
-			t.Fatal(err)
+		acct, ok := u.Account()
+		if !ok || acct.Inputs.Unverifiable {
+			t.Fatalf("Observation under symlinked PWD & TMPDIR is unverifiable: %+v", acct.Inputs)
 		}
-		if verdicts1[subj].Status != Valid {
-			t.Fatalf("initial verdict under symlinked PWD = %+v, want Valid", verdicts1[subj])
+		if final.Verdict.Status != Valid {
+			t.Fatalf("initial verdict under symlinked PWD = %+v, want Valid", final.Verdict)
 		}
 
 		// Mutating fixture.txt must invalidate the recorded fingerprint (never swallowed by TMPDIR scratch).
@@ -700,12 +692,16 @@ func TestReadFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verdicts2, err := snap2.CheckObservedBatch(ctx, fps)
+		rb2, err := snap2.BindRuntime(ctx, RuntimeDescription{Directory: symRepo, Environment: env})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if verdicts2[subj].Status != Stale || verdicts2[subj].Ground.Cause.Kind != RuntimeInputsCause {
-			t.Fatalf("verdict after fixture.txt edit = %+v, want Stale/RuntimeInputsCause", verdicts2[subj])
+		verdict2, err := rb2.Check(ctx, subj, final.Fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict2.Status != Stale || verdict2.Ground.Cause.Kind != RuntimeInputsCause {
+			t.Fatalf("verdict after fixture.txt edit = %+v, want Stale/RuntimeInputsCause", verdict2)
 		}
 	})
 
@@ -741,7 +737,7 @@ func TestReadFixture(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fps1, err := snap1.CaptureObservedBatch(ctx1)
+		fps1, err := snap1.captureObservedBatch(ctx1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -779,19 +775,23 @@ func TestReadFixture(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Snapshot after cache corruption failed: %v", err)
 		}
-		fps2, err := snap2.CaptureObservedBatch(ctx2)
+		fps2, err := snap2.captureObservedBatch(ctx2)
 		if err != nil {
-			t.Fatalf("CaptureObservedBatch after cache corruption failed: %v", err)
+			t.Fatalf("captureObservedBatch after cache corruption failed: %v", err)
 		}
 		if fps1[subj] != fps2[subj] {
 			t.Fatalf("fingerprint after cache corruption recovery differed:\ngot  %+v\nwant %+v", fps2[subj], fps1[subj])
 		}
-		verdicts, err := snap2.CheckBatch(ctx2, fps1)
+		bind2, err := snap2.BindRuntime(ctx2, RuntimeDescription{Directory: dir, Environment: env})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if verdicts[subj].Status != Valid {
-			t.Fatalf("verdict after cache corruption recovery = %+v, want Valid", verdicts[subj])
+		verdict, err := bind2.Check(ctx2, subj, fps1[subj])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Valid {
+			t.Fatalf("verdict after cache corruption recovery = %+v, want Valid", verdict)
 		}
 	})
 }
@@ -905,37 +905,38 @@ func TestObservedTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	captured, err := snap1.CaptureObservedBatch(ctx1)
+	bind1, err := snap1.BindRuntime(ctx1, RuntimeDescription{Directory: filepath.Join(dir, "object"), Environment: env})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bracket, err := CaptureBracket(ctx1, dir, []string{"."})
+	built1, err := snap1.BindBuilt(pkg, "object.test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	obs, err := FromTestLog([]byte("# test log\n"), dir, dir, env,
-		WithCompletedProcess("worker"), WithBracket(bracket))
+	u1, err := bind1.BeginPackage(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
-	attached := make(map[Subject]Fingerprint, len(subjects))
-	for _, s := range subjects {
-		fp := captured[s]
+	logPath := filepath.Join(t.TempDir(), "object.testlog")
+	fin1, err := u1.Execute(ctx1, built1, ProcessDescription{
+		Identity: "worker",
+		Capture:  logPath,
+	}, func(_ context.Context, c Contribution) (Terminal, error) {
+		if err := os.WriteFile(c.Capture(), []byte("# test log\n"), 0o600); err != nil {
+			return Terminal{}, err
+		}
+		return Terminal{Kind: NormalCompletion}, nil
+	})
+	if err != nil {
+		t.Fatalf("u1.Execute: %v", err)
+	}
+	cands := make([]Candidate, 0, len(fin1.Subjects))
+	for _, sub := range fin1.Subjects {
+		fp := sub.Fingerprint
 		if !fp.ObservationProof.Observable {
-			t.Fatalf("%s.%s ObservationProof = %+v, want Observable", s.Package, s.Symbol, fp.ObservationProof)
+			t.Fatalf("%s.%s ObservationProof = %+v, want Observable", sub.Subject.Package, sub.Subject.Symbol, fp.ObservationProof)
 		}
-		sib, err := snap1.Sibling([]Subject{s})
-		if err != nil {
-			t.Fatal(err)
-		}
-		afp, err := sib.AttachObservation(s, fp, obs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := sib.Validate(ctx1); err != nil {
-			t.Fatalf("%s.%s Validate failed: %v", s.Package, s.Symbol, err)
-		}
-		attached[s] = afp
+		cands = append(cands, Candidate{Subject: sub.Subject, Recorded: fp})
 	}
 
 	sess2, ctx2, _ := newTracedSession(t, BuildDescription{
@@ -947,13 +948,17 @@ func TestObservedTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdicts, err := snap2.CheckObservedBatch(ctx2, attached)
+	bind2, err := snap2.BindRuntime(ctx2, RuntimeDescription{Directory: dir, Environment: env})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range subjects {
-		if v := verdicts[s]; v.Status != Valid {
-			t.Errorf("%s.%s CheckObservedBatch verdict = %+v, want Valid", s.Package, s.Symbol, v)
+	checked, err := bind2.CheckBatchWithLedgers(ctx2, cands, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range checked {
+		if c.Verdict.Status != Valid {
+			t.Errorf("%s.%s CheckBatchWithLedgers verdict = %+v, want Valid", c.Subject.Package, c.Subject.Symbol, c.Verdict)
 		}
 	}
 }

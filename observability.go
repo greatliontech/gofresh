@@ -42,12 +42,12 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	v.mu.RLock()
 	observableRequests := make([]closure.Subject, 0, len(subjects))
 	for _, subject := range subjects {
-		if v.facts.maximal[subject].staticDecl {
+		if v.facts.subjects[subject].maximal.staticDecl {
 			v.mu.RUnlock()
 			return fmt.Errorf("gofresh: non-callable declaration %s.%s has no runtime execution", subject.Package, subject.Symbol)
 		}
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
-		if _, ok := v.observable[subject]; !ok {
+		if !v.txState[subject].hasObservable {
 			observableRequests = append(observableRequests, request)
 		}
 	}
@@ -142,7 +142,10 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	}
 	for _, request := range observableRequests {
 		subject := Subject{Package: request.Package, Symbol: request.Symbol}
-		v.observable[subject] = observableComputed[request]
+		tx := v.txState[subject]
+		tx.observable = observableComputed[request]
+		tx.hasObservable = true
+		v.txState[subject] = tx
 	}
 	v.mu.Unlock()
 	return ctx.Err()
@@ -151,11 +154,6 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 func compatibleObservationProof(recorded Fingerprint, subject Subject) bool {
 	compatible, _, _ := compatibleObservationProofFull(recorded, subject)
 	return compatible
-}
-
-func compatibleObservationProofMode(recorded Fingerprint, subject Subject) (compatible, effectFree bool) {
-	compatible, effectFree, _ = compatibleObservationProofFull(recorded, subject)
-	return compatible, effectFree
 }
 
 func compatibleObservationProofFull(recorded Fingerprint, subject Subject) (compatible, effectFree, reqSingleSubject bool) {

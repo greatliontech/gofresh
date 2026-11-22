@@ -16,7 +16,6 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/jsonrecord"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -127,11 +126,6 @@ func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir str
 func currentWithMoversAndNormalizedEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, []string, error) {
 	state, _, movers, err := currentManifestAndMovers(ctx, encoded, moduleDir, "", env, true)
 	return state, movers, err
-}
-
-func currentAndManifestWithModuleRoot(ctx context.Context, encoded, moduleDir, moduleRoot string, env []string) (State, manifest, error) {
-	state, m, _, err := currentManifestAndMovers(ctx, encoded, moduleDir, moduleRoot, env, false)
-	return state, m, err
 }
 
 func currentManifestAndMovers(ctx context.Context, encoded, moduleDir, moduleRoot string, env []string, computeMovers bool) (State, manifest, []string, error) {
@@ -530,10 +524,10 @@ func validateManifest(m manifest) error {
 	if m.Version != manifestVersion {
 		return fmt.Errorf("runtimeinputs: unsupported manifest version %d", m.Version)
 	}
-	if (m.Outcome == "") != (len(m.Subjects) == 0) || m.Outcome != "" && m.Outcome != outcome.Method {
+	if (m.Outcome == "") != (len(m.Subjects) == 0) || m.Outcome != "" && m.Outcome != OutcomeMethod {
 		return errors.New("runtimeinputs: unsupported or incomplete outcome evidence")
 	}
-	if m.Outcome == outcome.Method && len(m.Paths) != 0 {
+	if m.Outcome == OutcomeMethod && len(m.Paths) != 0 {
 		return errors.New("runtimeinputs: immutable-environment support carries path inputs")
 	}
 	for _, subject := range m.Subjects {

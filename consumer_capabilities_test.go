@@ -468,13 +468,13 @@ func TestWithExecutionProjectionEquivalenceAndZeroSpawns(t *testing.T) {
 			}
 		}
 
-		// Commutativity law: WithExecution(m).Sibling(sub) == Sibling(sub).WithExecution(m)
+		// Commutativity law: WithExecution(m).sibling(sub) == sibling(sub).WithExecution(m)
 		subList := []Subject{sClean, sOnlyRead}
-		lhs, err := tc.projected.Sibling(subList)
+		lhs, err := tc.projected.sibling(subList)
 		if err != nil {
 			t.Fatal(err)
 		}
-		sibFirst, err := baseSnap.Sibling(subList)
+		sibFirst, err := baseSnap.sibling(subList)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -551,12 +551,12 @@ func TestWithExecutionProjectionEquivalenceAndZeroSpawns(t *testing.T) {
 func TestZeroOverheadPureUnitNeedsObservationExcludedEnvAndMovedInputs(t *testing.T) {
 	isolateProofCache(t)
 	dir := writeModuleTree(t, map[string]string{
-		"go.mod":                   "module example.com/unitcaps\n\ngo 1.26\n",
-		"purepkg/pure.go":          "package purepkg\n\nfunc PureAdd(a, b int) int { return a + b }\n",
-		"purepkg/pure_test.go":     "package purepkg\n\nimport \"testing\"\n\nfunc TestPure(t *testing.T) {\n\tif PureAdd(2, 3) != 5 {\n\t\tt.Fatal()\n\t}\n}\n",
-		"obspkg/obs.go":            "package obspkg\n\nimport \"os\"\n\nfunc ReadMode() string { return os.Getenv(\"APP_MODE\") }\n",
-		"obspkg/obs_test.go":       "package obspkg\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestObs(t *testing.T) {\n\t_ = os.Getenv(\"GOCOVERDIR\")\n\t_ = ReadMode()\n}\n",
-		"purepkg/fixture.txt":      "v1\n",
+		"go.mod":               "module example.com/unitcaps\n\ngo 1.26\n",
+		"purepkg/pure.go":      "package purepkg\n\nfunc PureAdd(a, b int) int { return a + b }\n",
+		"purepkg/pure_test.go": "package purepkg\n\nimport \"testing\"\n\nfunc TestPure(t *testing.T) {\n\tif PureAdd(2, 3) != 5 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"obspkg/obs.go":        "package obspkg\n\nimport \"os\"\n\nfunc ReadMode() string { return os.Getenv(\"APP_MODE\") }\n",
+		"obspkg/obs_test.go":   "package obspkg\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestObs(t *testing.T) {\n\t_ = os.Getenv(\"GOCOVERDIR\")\n\t_ = ReadMode()\n}\n",
+		"purepkg/fixture.txt":  "v1\n",
 	})
 
 	purePkg := "example.com/unitcaps/purepkg"
@@ -1057,7 +1057,11 @@ func TestSourceResultScanDriftAndBrokenPackageRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	realVerdict, err := realSnap.Check(ctx, realFP, Subject{Package: "example.com/srcaba", Symbol: "Real"})
+	realBind, err := realSnap.BindRuntime(ctx, RuntimeDescription{Directory: abaDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	realVerdict, err := realBind.Check(ctx, Subject{Package: "example.com/srcaba", Symbol: "Real"}, realFP)
 	if err != nil || realVerdict.Status != Valid {
 		t.Fatalf("clean Real SourceResult check = (%+v, %v), want Valid", realVerdict, err)
 	}
@@ -1182,7 +1186,7 @@ func TestWithExecutionSecondaryModelCutAndStageADischargePreservation(t *testing
 		if err != nil {
 			t.Fatalf("PackageExecution Snapshot with Pass-2 secondary cut: %v", err)
 		}
-		if pkgSnap.facts.cut[sCalc] {
+		if pkgSnap.facts.subjects[sCalc].cut {
 			t.Fatal("primary PackageExecution snapshot unexpectedly marked sCalc cut")
 		}
 		soloSnap, projErr := pkgSnap.WithExecution(SingleSubjectExecution)

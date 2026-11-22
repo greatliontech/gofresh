@@ -229,7 +229,7 @@ type packageScanEntry struct {
 
 // attestationDischarges holds the positive execution-model attestations'
 // load-bearing discharge sets for one subject: carried as one comparable value
-// across subjectScan, observationFacts, and Snapshot.Sibling so no attestation axis
+// across subjectScan, observationFacts, and Snapshot.sibling so no attestation axis
 // can be omitted when copying or clearing subject facts.
 type attestationDischarges struct {
 	singleSubject  string
@@ -401,11 +401,6 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry, activeM
 	if scan.hasModel[activeModel] && scan.byModel[activeModel] != nil {
 		scan.activateModel(activeModel)
 	}
-}
-
-// scanFromEntries builds a scan entirely from served entries.
-func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
-	return scanFromEntriesForModel(served, GeneralExecution)
 }
 
 func scanFromEntriesForModel(served map[string]packageScanEntry, activeModel ExecutionModel) *subjectScan {

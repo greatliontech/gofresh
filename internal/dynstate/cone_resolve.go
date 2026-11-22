@@ -90,7 +90,13 @@ type EnvAuditResolution struct {
 // facts of that package's own test-binary graph (REQ-closure-shared-dynamic-state,
 // REQ-closure-scan-memo).
 func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) ConeState {
+	return ComposeCtx(nil, meta, allFacts, viewPackage, vouches, singleSubject, packageProcess)
+}
+
+// ComposeCtx runs Compose under ctx-scoped trace.DomainDynstate emission.
+func ComposeCtx(ctx context.Context, meta []GraphPackage, allFacts map[string][]Fact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) ConeState {
 	return AnalyzeCone(ConeQuery{
+		Ctx:            ctx,
 		Meta:           meta,
 		Facts:          allFacts,
 		ViewPackage:    viewPackage,

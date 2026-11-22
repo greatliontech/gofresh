@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/version"
-	"os/exec"
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -93,49 +92,6 @@ type ToolchainSelection struct {
 	ToolchainContent string
 	AdmissionPolicy  string
 	SelectionNotice  string
-}
-
-func firstPrepare(prepare []func(*exec.Cmd)) func(*exec.Cmd) {
-	var active []func(*exec.Cmd)
-	for _, fn := range prepare {
-		if fn != nil {
-			active = append(active, fn)
-		}
-	}
-	if len(active) == 0 {
-		return nil
-	}
-	if len(active) == 1 {
-		return active[0]
-	}
-	return func(cmd *exec.Cmd) {
-		for _, fn := range active {
-			fn(cmd)
-		}
-	}
-}
-
-// ResolveToolchainSelection resolves the toolchain content, admission policy,
-// and selection-audit notice for build under an optional command-preparation hook.
-func ResolveToolchainSelection(ctx context.Context, build BuildDescription, prepare ...func(*exec.Cmd)) (ToolchainSelection, error) {
-	refreshTraceFromEnv()
-	if ctx == nil {
-		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
-	}
-	if err := ctx.Err(); err != nil {
-		return ToolchainSelection{}, err
-	}
-	if build.Directory == "" {
-		return ToolchainSelection{}, errors.New("gofresh: toolchain selection requires a build directory")
-	}
-	if build.Environment == nil {
-		return ToolchainSelection{}, errors.New("gofresh: build environment must be explicitly provided")
-	}
-	reader, err := primedBuildReader(build, prepare)
-	if err != nil {
-		return ToolchainSelection{}, err
-	}
-	return resolveToolchainSelection(ctx, reader, build.Flags...)
 }
 
 func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {

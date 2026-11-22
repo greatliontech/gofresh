@@ -12,8 +12,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -39,7 +39,7 @@ type Observability struct {
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
 // set or admitted environment lookups under an unchanged complete inherited
 // environment. Its implementation semantics are audited for Linux only.
-const ImmutableEnvironmentOutcomes = outcome.Method
+const ImmutableEnvironmentOutcomes = runtimeinput.OutcomeMethod
 
 const maxAttributedSubjects = subjectMaskBits
 

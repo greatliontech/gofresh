@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -70,6 +68,21 @@ func TestInertApplicabilityRecordGrammar(t *testing.T) {
 	}
 }
 
+func extendInertForTest(ctx context.Context, v *Snapshot, f Fingerprint, l TestVariantLedger, s Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+	cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+	if _, err := cu.CheckBatch(ctx, []Candidate{{Subject: s, Recorded: f}}); err != nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
+	}
+	ext, err := cu.ExtendInertBatch(ctx, []InertRequest{{Index: 0, PriorLedger: l}})
+	if err != nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, err
+	}
+	if ext[0].Extension != nil {
+		return ext[0].Extension.Fingerprint, ext[0].Extension.Ledger, ext[0].Verdict, nil
+	}
+	return Fingerprint{}, TestVariantLedger{}, ext[0].Verdict, nil
+}
+
 func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 	for name, change := range map[string]func(*Snapshot, *Fingerprint, *TestVariantLedger){
 		"core":                      func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "moved" },
@@ -93,29 +106,29 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 			l.Declarations = []TestVariantDeclaration{{File: "p_test.go", Kind: "func", Name: "Removed", Hash: "h"}}
 		},
 		"external": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
-			for s := range v.facts.maximal {
+			for s, entry := range v.facts.subjects {
 				c := v.facts.closure(s)
 				c.External = true
-				v.facts.maximal[s] = testSubjectFacts(c)
+				entry.maximal = testSubjectFacts(c)
+				v.facts.subjects[s] = entry
 			}
 		},
 		"unverifiable": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
-			for s := range v.facts.maximal {
+			for s, entry := range v.facts.subjects {
 				c := v.facts.closure(s)
 				c.Unverifiable = true
 				c.Reason = "file dependence"
-				v.facts.maximal[s] = testSubjectFacts(c)
+				entry.maximal = testSubjectFacts(c)
+				v.facts.subjects[s] = entry
 			}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			for _, observed := range []bool{false, true} {
-				v, f, s, l := applicabilityFixture(t)
-				change(v, &f, &l)
-				updated, ledger, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, observed)
-				if err != nil || verdict.Status == Valid || updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
-					t.Fatalf("refusal leaked pair: %+v %+v %+v %v", updated, ledger, verdict, err)
-				}
+			v, f, s, l := applicabilityFixture(t)
+			change(v, &f, &l)
+			updated, ledger, verdict, err := extendInertForTest(context.Background(), v, f, l, s)
+			if err != nil || verdict.Status == Valid || updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
+				t.Fatalf("refusal leaked pair: %+v %+v %+v %v", updated, ledger, verdict, err)
 			}
 		})
 	}
@@ -124,11 +137,13 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 		if pure {
 			c := v.facts.closure(s)
 			c.Unverifiable = true
-			v.facts.maximal[s] = testSubjectFacts(c)
-			v.facts.purity = map[Subject]string{s: "caller assertion"}
+			entry := v.facts.subjects[s]
+			entry.maximal = testSubjectFacts(c)
+			entry.purity = "caller assertion"
+			v.facts.subjects[s] = entry
 			f.PurityAssertion = "caller assertion"
 		}
-		updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false)
+		updated, _, verdict, err := extendInertForTest(context.Background(), v, f, l, s)
 		if err != nil || verdict.Status != Valid {
 			t.Fatalf("independently valid ordinary case needs no outcome support: %+v %v", verdict, err)
 		}
@@ -161,7 +176,7 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 		}
 		current.FileHeaders[0].Bindings.References = []string{"BenchmarkEnv", "TestSibling"}
 		v.facts.testVariantLedgers[s.Package] = current
-		updated, gotLedger, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, prior, s, false)
+		updated, gotLedger, verdict, err := extendInertForTest(context.Background(), v, f, prior, s)
 		if err != nil || verdict.Status != Valid || updated.EffectiveTestVariantClosure() != "B" || !reflect.DeepEqual(gotLedger, current) {
 			t.Fatalf("sibling test edit/removal should be inert for %v: verdict=%+v err=%v", s, verdict, err)
 		}
@@ -170,23 +185,37 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 
 func TestInertExtensionHonorsSealAndCancellation(t *testing.T) {
 	v, f, s, l := applicabilityFixture(t)
-	v.sealed = true
-	if fp, _, _, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false); !errors.Is(err, errViewSealed) || fp != (Fingerprint{}) {
-		t.Fatalf("sealed publication: %v", err)
+	cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+	if _, err := cu.CheckBatch(context.Background(), []Candidate{{Subject: s, Recorded: f}}); err != nil {
+		t.Fatal(err)
 	}
-	v.sealed = false
+	cu.Abort()
+	if ext, err := cu.ExtendInertBatch(context.Background(), []InertRequest{{Index: 0, PriorLedger: l}}); !errors.Is(err, errUnitClosed) || ext != nil {
+		t.Fatalf("aborted publication: %+v %v", ext, err)
+	}
+	v2, f2, s2, l2 := applicabilityFixture(t)
+	cu2 := &CheckingUnit{view: v2, gate: make(chan struct{}, 1)}
+	if _, err := cu2.CheckBatch(context.Background(), []Candidate{{Subject: s2, Recorded: f2}}); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if fp, _, _, err := v.checkInertTestVariantExtension(ctx, f, l, s, false); !errors.Is(err, context.Canceled) || fp != (Fingerprint{}) {
-		t.Fatalf("cancelled publication: %v", err)
+	if ext, err := cu2.ExtendInertBatch(ctx, []InertRequest{{Index: 0, PriorLedger: l2}}); !errors.Is(err, context.Canceled) || ext != nil {
+		t.Fatalf("cancelled publication: %+v %v", ext, err)
 	}
 }
 
 func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
-	for _, observed := range []bool{false, true} {
+	for _, cancelClose := range []bool{false, true} {
 		v, f, s, l := applicabilityFixture(t)
-		v.session.deferredCheckClose = true
 		f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
+		v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
+			return runtimeinput.State{OK: true, Digest: "digest"}, nil
+		}
+		cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+		if _, err := cu.CheckBatch(context.Background(), []Candidate{{Subject: s, Recorded: f}}); err != nil {
+			t.Fatal(err)
+		}
 		entered, release := make(chan struct{}), make(chan struct{})
 		first := true
 		v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
@@ -199,22 +228,28 @@ func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() {
-			updated, ledger, _, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, observed)
-			if updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
-				done <- errors.New("published a pair after seal")
+			ext, err := cu.ExtendInertBatch(context.Background(), []InertRequest{{Index: 0, PriorLedger: l}})
+			if ext != nil {
+				done <- errors.New("published an extension across concurrent close")
 				return
 			}
 			done <- err
 		}()
 		<-entered
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if err := v.Validate(ctx); !errors.Is(err, context.Canceled) {
-			t.Fatalf("validation did not seal: %v", err)
+		closeCtx := context.Background()
+		wantCloseErr := ErrUnitIncomplete
+		if cancelClose {
+			var cancel context.CancelFunc
+			closeCtx, cancel = context.WithCancel(context.Background())
+			cancel()
+			wantCloseErr = context.Canceled
+		}
+		if _, err := cu.Close(closeCtx); !errors.Is(err, wantCloseErr) {
+			t.Fatalf("concurrent close error = %v, want %v", err, wantCloseErr)
 		}
 		close(release)
-		if err := <-done; !errors.Is(err, errViewSealed) {
-			t.Fatalf("extension crossed validation: %v", err)
+		if err := <-done; !errors.Is(err, errUnitClosed) {
+			t.Fatalf("extension crossed concurrent close: %v", err)
 		}
 	}
 }
@@ -222,17 +257,22 @@ func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
 func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 	for _, state := range []runtimeinput.State{{}, {OK: true, Digest: "moved"}, {OK: true, Digest: "digest", Unverifiable: true, Reason: "incomplete"}} {
 		v, f, s, l := applicabilityFixture(t)
-		v.session.deferredCheckClose = true
 		f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
 		v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) { return state, nil }
-		if updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, true); err != nil || verdict.Status == Valid || updated != (Fingerprint{}) {
+		if updated, _, verdict, err := extendInertForTest(context.Background(), v, f, l, s); err != nil || verdict.Status == Valid || updated != (Fingerprint{}) {
 			t.Fatalf("runtime refusal: %+v %v", verdict, err)
 		}
 	}
-	// A manifest changes between the two observations even under deferred close.
+	// A manifest changing between the two observations of an extension round fails closed.
 	v, f, s, l := applicabilityFixture(t)
-	v.session.deferredCheckClose = true
 	f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
+	v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
+		return runtimeinput.State{OK: true, Digest: "digest"}, nil
+	}
+	cu := &CheckingUnit{view: v, gate: make(chan struct{}, 1)}
+	if _, err := cu.CheckBatch(context.Background(), []Candidate{{Subject: s, Recorded: f}}); err != nil {
+		t.Fatal(err)
+	}
 	calls := 0
 	v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
 		calls++
@@ -241,8 +281,9 @@ func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 		}
 		return runtimeinput.State{OK: true, Digest: "moved"}, nil
 	}
-	if updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
-		t.Fatalf("moving input served: %+v %v", verdict, err)
+	ext, err := cu.ExtendInertBatch(context.Background(), []InertRequest{{Index: 0, PriorLedger: l}})
+	if err != nil || len(ext) != 1 || ext[0].Verdict.Status != Stale || ext[0].Extension != nil {
+		t.Fatalf("moving input served: %+v %v", ext, err)
 	}
 }
 
@@ -460,30 +501,6 @@ func TestAnalysisBoundPreservesDeadlineContract(t *testing.T) {
 	})
 }
 
-func TestApplicabilityBatchesPreserveRecordsAndPolicies(t *testing.T) {
-	r := rand.New(rand.NewSource(18341))
-	for draw := 0; draw < 300; draw++ {
-		var checks []applicabilityCheck
-		want := map[applicabilityCheck]int{}
-		for n := r.Intn(30); n > 0; n-- {
-			check := applicabilityCheck{Fingerprint{RuntimeInputs: fmt.Sprint(r.Intn(5)), RuntimeDigest: fmt.Sprint(r.Intn(5))}, Subject{"p", fmt.Sprint(r.Intn(5))}, r.Intn(2) == 0}
-			checks = append(checks, check)
-			want[check]++
-		}
-		got := map[applicabilityCheck]int{}
-		for i, record := range applicabilityRecords(checks) {
-			check := applicabilityCheck{record.Recorded, record.Subject, record.observed}
-			got[check]++
-			if check != checks[i] {
-				t.Fatalf("draw %d changed candidate order at %d", draw, i)
-			}
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("draw %d lost or changed historical evidence/policy: got %v want %v", draw, got, want)
-		}
-	}
-}
-
 type applicabilityValidationFixture struct {
 	engine     *engine
 	dir, input string
@@ -517,17 +534,17 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	f := applicabilityValidationFixture{engine: engine, dir: dir, subjects: subjects}
 	producer := f.view(t)
 	observation := supportedObservation(t, producer, dir, dir, "environment subjects", "getenv OUTCOME_VALUE\n")
-	recorded, err := producer.CaptureObservedBatch(ctx)
+	recorded, err := producer.captureObservedBatch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, subject := range subjects {
-		recorded[subject], err = producer.AttachObservation(subject, recorded[subject], observation)
+		recorded[subject], err = attachObservedForTest(producer, subject, recorded[subject], observation)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := producer.Validate(ctx); err != nil {
+	if err := producer.validate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	f.recorded = recorded
@@ -550,15 +567,15 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Fatal(err)
 	}
 	fileProducer := f.view(t)
-	fileRecord, err := fileProducer.captureObserved(ctx, subjects[2])
+	fileRecord, err := captureObservedForTest(ctx, fileProducer, subjects[2])
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.fileRecord, err = fileProducer.AttachObservation(subjects[2], fileRecord, fileObservation)
+	f.fileRecord, err = attachObservedForTest(fileProducer, subjects[2], fileRecord, fileObservation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fileProducer.Validate(ctx); err != nil {
+	if err := fileProducer.validate(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(source+"\nfunc TestArithmetic(t *testing.T) {}\n"), 0600); err != nil {
@@ -576,11 +593,24 @@ func (f applicabilityValidationFixture) view(t *testing.T) *Snapshot {
 	return v
 }
 
-func (f applicabilityValidationFixture) extend(t *testing.T, v *Snapshot, subject Subject, record Fingerprint, observed bool) {
+func (f applicabilityValidationFixture) checkingUnit(t *testing.T) *CheckingUnit {
 	t.Helper()
-	_, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), record, f.ledger, subject, observed)
-	if err != nil || verdict.Status != Valid {
-		t.Fatalf("retain %s: %+v %v", subject.Symbol, verdict, err)
+	cu, err := bindViewForTest(t, context.Background(), f.view(t)).BeginCheck(f.subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cu
+}
+
+func (f applicabilityValidationFixture) extend(t *testing.T, cu *CheckingUnit, subject Subject, record Fingerprint) {
+	t.Helper()
+	checked, err := cu.CheckBatch(context.Background(), []Candidate{{Subject: subject, Recorded: record}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ext, err := cu.ExtendInertBatch(context.Background(), []InertRequest{{Index: checked[0].Index, PriorLedger: f.ledger}})
+	if err != nil || len(ext) != 1 || ext[0].Verdict.Status != Valid || ext[0].Extension == nil {
+		t.Fatalf("retain %s: %+v %v", subject.Symbol, ext, err)
 	}
 }
 

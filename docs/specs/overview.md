@@ -74,9 +74,9 @@ optional explicitly licensed applicability endpoint distinct from the producing
 compartment.
 
 **observation-completeness assertion** (term): an attributable caller declaration
-that every process contributing to a subject's result ran under the recognized
-observation harness; that exactly one completed or incomplete observation was attached
-for each such process; and that every behavior-affecting outcome of an admitted
+that the producing process contributing to a subject's result ran under the recognized
+observation harness; that its completed or incomplete observation was finalized
+for that process; and that every behavior-affecting outcome of an admitted
 operation agreed with the guarded value recorded for it, with any exceptional or
 partial outcome not derivable from that value making the process observation
 incomplete. It vouches for how the run was observed, not for which effects the subject
@@ -238,8 +238,8 @@ producing proof from a later analysis; re-execution produces new evidence.
 
 **REQ-fresh-evidence-support** (invariant, refines REQ-fresh-observation-conjunction):
 Observation-based reuse MUST retain the distinction between verified evidence,
-explicit caller assertions and missing support through construction, attachment,
-conversion, merge, persistence and checking; an attribution string or integrity
+explicit caller assertions and missing support through construction, unit
+finalization, persistence and checking; an attribution string or integrity
 seal cannot supply an unestablished producer premise. Re-admission of existing
 records preserves their established support class or refuses reuse, and a change
 to the completion construction or its compatibility rules requires a distinguishable
@@ -261,13 +261,13 @@ inert-test-variant applicability endpoint names the effective compartment instea
 of the producing compartment. Extension is an explicit consumer-selected check,
 never an automatic consequence of a ledger diff. It accepts the recording and
 its paired prior effective ledger, derives the current ledger from the checking
-view, requires unchanged core, listing/build configuration, toolchain and
+unit's snapshot, requires unchanged core, listing/build configuration, toolchain and
 derivations, an inert delta, and every remaining applicable guard. Only a valid
-check returns a complete replacement fingerprint and companion ledger. Under
-deferred check closing, that result is provisional until successful validation
-of the same view. Validation re-establishes selected applicability checks,
-including their current observation proof and outcome inventory when needed;
-registration cannot race past the validation seal.
+check returns a complete replacement fingerprint and companion ledger. Within an
+open checking unit, round answers remain provisional until closing validation
+succeeds and re-establishes every slot's applicability obligations, including
+current observation proof and outcome inventory when needed; late requests
+cannot race past the unit's closing transition.
 
 The historical ledger's pairing and provenance are caller-trusted persisted
 evidence, just as the recorded fingerprint is. No hash authenticates that
@@ -297,10 +297,10 @@ distinct facts. Re-keying compatibility is not completion compatibility.
 recognized persisted outcome support for the recorded subject's support identity
 in addition to the observation conjunction. Preparation derives those identities
 from the captured subject and code guards, before the contributing execution;
-the analysis view retains the selected proof-validation obligation. Support for
+the producing unit retains the selected proof-validation obligation. Support for
 another subject or another closure/build cannot qualify a recording, and a
-manifest without support fields cannot be upgraded through attachment, adoption,
-conversion or merging with a supported process. Ordinary input guards remain
+manifest without support fields cannot be upgraded through unit finalization,
+applicability extension, or checking. Ordinary input guards remain
 available for evidence without outcome support, while explicit purity remains
 the separate caller-responsible override.
 
@@ -443,20 +443,19 @@ used by one fingerprint or verdict MUST belong to the same analysis view — nev
 mixture of cached metadata from an earlier tree with bytes or environment values
 from a later one — because a mixed generation can agree with a recording while
 describing no build that existed. Analysis state does not cross view
-generations: constructing a current-tree view re-observes the tree and
-environment rather than inheriting first-use state from an older view,
-while sibling views derived from one parent share that parent's single
-observation by contract (REQ-fresh-producer-view's sibling clause) —
-one generation, never a mixture. The complete process environment used
-for Go commands and package loading is immutable analysis configuration: by default
-the environment captured when the engine is constructed, or an explicit complete
-environment supplied by the caller. Values the go command additionally reads from
+generations: constructing a current-tree snapshot re-observes the tree and
+environment rather than inheriting first-use state from an older snapshot,
+while sibling views derived for unit scopes or execution-model projections share
+that snapshot's single observation by contract (REQ-fresh-producer-view's sibling
+clause) — one generation, never a mixture. The complete process environment used
+for Go commands and package loading is immutable session configuration supplied
+explicitly by the caller. Values the go command additionally reads from
 its environment file are not immutable: a later analysis bracket may reuse the
-view's construction-time reading only for module-cache resolution, must
-revalidate build-flag values live before any load whose derivations persist,
+view's construction-time reading only for module-cache resolution, revalidates
+build-flag values live before any load whose derivations persist,
 and relies on its closing observation's fresh reading to refuse any
 guard-covered drift. Every source load, Go invocation, purity scan,
-and compilation-guard observation in the view uses that same environment, so workspace mode,
+and compilation-guard observation in the session uses that same environment, so workspace mode,
 persistent Go configuration, toolchain selection, and source selection cannot differ
 between the closure and the binary the guards describe. The host process selects the
 `go` launcher before that complete environment is inherited, matching Go's command
@@ -468,7 +467,7 @@ path that could select a different automatic workspace. External
 and absent driver configuration is pinned off only in the internal package-loader
 environment, without changing the caller environment observed by commands, guards,
 or runtime inputs, because the ordinary Go loader is the source model the closure and
-guards represent. In the explicit built-artifact form, a runtime binding
+guards represent. A runtime binding
 composes those shared source/build facts with its own immutable runtime
 environment and applicable runtime-side guards. Recording-time runtime guard
 observations require agreement independently of the source/build generation;
@@ -480,38 +479,35 @@ runtime-input and precise-analysis windows to detect ordinary drift — any chan
 persisting to an observation makes the check fail with the view-changed error —
 but, like producer validation, it cannot prove the absence of a
 mutation-and-restore interval between agreeing observations. Observations split
-by purpose: an observation that becomes the record — view construction —
+by purpose: an observation that becomes the record — snapshot construction —
 requires the agreement pair, because a torn recorded fact describes no build
-that existed; a comparison-only observation — validation against already
+that existed; a comparison-only observation — closing validation against already
 captured facts — requires no agreement pair: a single observation suffices —
 or, for an analysis bracket or a runtime-input window, it opens on
 already-agreed facts and reads only at close — because a torn read can only compare unequal and
 refuse, and an equal torn read is exactly the excluded restore interval.
-A caller whose check verdicts are consumed only under a later successful
-validation of the same view can defer each check's closing base
-observation to that validation: the validation's one comparison
-observation closes every deferred interval at once — a change persisting
-to it refuses there, and the refusal discards the provisional verdicts
-with it — while the change-and-restore residual widens from each check's
-own close to the validation, carried by the same caller-owned
-execution-span exclusion that producer validation states
+Within a checking unit, round evaluations remain provisional until the unit's
+closing validation: that single comparison observation closes every round's base
+interval at once — a change persisting to it refuses there and discards the
+provisional judgments with it — while the change-and-restore residual spans the
+unit's open-to-close interval under the caller's hold-still obligation
 (REQ-fresh-producer-view).
 
-**REQ-fresh-producer-view** (behavior): A caller producing results for several
+**REQ-fresh-producer-view** (behavior): A caller producing results for one or more
 subjects MUST persist fingerprints captured before execution, with runtime-input
-evidence attached afterward, only when their shared producer analysis view still
-validates against the source, build inputs, guards, purity assertions, and every
-closure tier captured after execution. An applicability extension is instead a
-check of an existing result: validation retains its historical evidence and
-rechecks its current applicability obligations without requiring or inventing a
-new execution receipt. Subset sibling views inherit those obligations for their
-subjects. The caller owns execution and excludes source or build-input mutation
-through preparation, producing execution and closing validation, preserving
-validated dependencies through publication or judgment consumption as
-REQ-fresh-unit-exclusion requires; validation detects ordinary
-drift but cannot prove the absence of a change-and-restore interval the caller
-allowed. Beside the caller's context error (REQ-fresh-context), a validation
-has three typed refusals, each matched by identity: a
+evidence finalized afterward, only when the producing unit's closing validation
+still agrees with the source, build inputs, guards, purity assertions, and every
+closure tier captured after execution. An applicability extension in a checking
+unit is instead a check of an existing result: closing validation retains its
+historical evidence and rechecks its current applicability obligations without
+requiring or inventing a new execution receipt. Unit-scoped subset views inherit
+those immutable facts for their subjects. The caller owns execution and excludes
+source or build-input mutation through preparation, producing execution and
+closing validation, preserving validated dependencies through publication or
+judgment consumption as REQ-fresh-unit-exclusion requires; validation detects
+ordinary drift but cannot prove the absence of a change-and-restore interval the
+caller allowed. Beside the caller's context error (REQ-fresh-context), closing
+validation has three typed refusals, each matched by identity: a
 subject the view held that the source no longer declares is the unknown-subjects
 value (REQ-fresh-preparation); an observation proof the analysis could not
 re-derive is the analysis-unavailable refusal; and drift is the view-changed
@@ -526,21 +522,19 @@ content drift keeps the bare refusal, naming being advisory where detection
 is the comparison itself. The naming is advisory prose for a human or an
 error-wrapping consumer, never a machine grammar; construction-time
 agreement refusals name identically — the construction race is the one
-refusal with no reproduction path afterward. A view also derives sibling
-views over subsets of its subjects: a sibling's recorded facts are
-exclusively the parent's one observation — closures, guards, purity,
+refusal with no reproduction path afterward. Internal unit-scoped sibling
+views derive over subsets of a snapshot's subjects: a sibling's recorded facts
+are exclusively the parent's one observation — closures, guards, purity,
 source identities, digests, ledgers, analysis-cut provenance, and captured
 observation proofs —
-so derivation itself observes nothing, and a caller whose parent
-captured proofs batch-wide runs one producer transaction per measured
-subset for one observation; the sibling owns its transaction
-(runtime-evidence attachment and its own validation seal, with a sealed
-parent still free to derive). Comparison-side observation is unchanged:
-a sibling's validation re-observes the tree exactly as any view's, an
-observed capture over a subject whose proof the parent never captured
-computes it fresh, and a subject outside the parent refuses.
-For a runtime-bound view, the inherited observation includes the same runtime
-binding and applicable guards. A snapshot observed under a test-binary execution
+so derivation itself observes nothing, and each producing or checking unit runs
+an independent transaction over one shared observation without sealing the
+parent snapshot or sibling units. Comparison-side observation is unchanged:
+closing validation re-observes the tree, an observed preparation over a subject
+whose proof the parent never captured computes it fresh, and a subject outside
+the parent refuses.
+For a runtime-bound unit, the inherited observation includes that runtime
+binding and its applicable guards. A snapshot observed under a test-binary execution
 model (package-process or single-subject) also projects sibling snapshots across
 general, package-process, and single-subject execution models over that same
 source/build observation without re-reading source, reloading packages, or
@@ -552,33 +546,20 @@ sibling derivation: it retains the source/build generation but establishes its
 own applicable runtime-side guard observation. Neither operation transfers
 attachments, selected execution support or a closing seal between transactions.
 
-**REQ-fresh-runtime-producer** (behavior, refines REQ-fresh-producer-view): The
-caller-managed producer form MUST select a nonempty subject subset under a
-runtime binding without re-observing source/build facts. It retains source-derived
-observability proofs and their pre-execution provenance and validation obligations,
-but uses the selected binding's runtime environment and guards. It refuses subjects
-outside the source snapshot and owns independent attachment and closing state,
-including when the source transaction has already closed. Selection supplies no
-build declaration, execution receipt or outcome support; identity-only observations
-cannot acquire supported authority through this form. The caller still owns the
-complete contributing execution scope and the producing exclusion span. The
-explicit built-artifact unit form separately owns registration and finalization
-under REQ-fresh-built-unit.
-
-**REQ-fresh-context** (behavior): Context-bound engine preparation,
-analysis-view construction, checking —
-maximal and observed alike — and producer validation MUST honor caller
+**REQ-fresh-context** (behavior): Context-bound session construction,
+snapshot and runtime-binding observation, checking-unit rounds and closing,
+and producing-unit registration and closing MUST honor caller
 cancellation before and between source, guard, runtime-input, precise-analysis,
 and comparison observations, returning the context error rather than a partial
-view, verdict, or successful validation. One operation observes one caller
+snapshot, verdict, or successful close. One operation observes one caller
 context for each entry: no cancelled entry continues under a private
 uncancellable context. A consumer may supply an explicit, separately bounded
 closing-phase context for already-paid work, preserving interruption in its
 operation account and excluding new producing work; this is a new declared
 phase, not concealed continuation of the cancelled entry. The context bounds
-observation work; a producer validation attempt seals that unit's mutable
-capture/attachment state, not the immutable snapshot shared with independent
-units. Bounding only the
+observation work; a unit's closing attempt seals that unit's mutable
+registration/attachment state, not the immutable snapshot or runtime binding
+shared with independent units. Bounding only the
 optional precise-analysis tier while still answering from cheaper evidence is
 expressed through a caller-supplied analysis budget, never through cancellation:
 a proof refused under an exhausted budget names the budget in its unavailable
@@ -601,7 +582,7 @@ other comparison held — never drift.
 
 **REQ-fresh-preparation** (invariant): Every refusal an operation can decide from
 inputs it already holds — the package listing, the recorded record's shape, kind,
-and membership, the attachment set, the caller's declarations — MUST fire before
+and membership, the unit state, the caller's declarations — MUST fire before
 the operation pays any cost the refusal makes moot: before the typed load, the
 closure fold, the observation window, or any process it spawns for work the
 refusal moots. A refusal that surfaces after such a cost is wasted work the
@@ -611,14 +592,14 @@ window opens, and a refusal decided per subject — a subject the selected sourc
 does not declare — names every such subject of the batch at once, each once, in
 the batch's request order, so the caller narrows its batch in one step. That
 refusal is one typed value carrying exactly that set, and the same typed value
-names, from any re-observation of a built view — a validation, an observed
-capture, a check window's close — a subject the view held that the source no
-longer declares.
+names, from any closing re-observation of a built view — a producing unit close,
+an observability refinement, or a checking unit close — a subject the view held
+that the source no longer declares.
 
 A subject outside a selected view is distinct from a declaration absent in the
 selected source. Both membership refusals carry the complete deduplicated set
-and its truthful scope. Ordered requests preserve first-request order;
-map-backed requests use lexical package and symbol order. Recorded batches
+and its truthful scope. Ordered requests preserve first-request order; internal
+map-backed helpers use lexical package and symbol order. Recorded batches
 report every shape failure before considering result-kind mismatches, then
 every kind mismatch before membership. Thus the first refusing preparation
 tier has a complete, deterministic account, with shape-before-kind precedence
@@ -654,7 +635,8 @@ reproducible from caller-owned provenance without reimplementing closure file
 selection.
 
 **REQ-fresh-trace** (behavior): gofresh MUST support structured operational
-diagnostic tracing across the `toolchain`, `closure`, `view`, and `session`
+diagnostic tracing across the `toolchain`, `closure`, `dynstate`, `runtimeinput`,
+`cache`, `view`, and `session`
 domains when activated by `GOFRESH_TRACE` (comma-separated domain tokens or
 `all`/`1`/`*`, with optional `<domain>:<substring>` target filtering) or a
 context-attached diagnostic sink, writing atomic newline-terminated records to

@@ -3,6 +3,7 @@ package seams
 import (
 	"go/ast"
 	"go/types"
+	"math/bits"
 	"slices"
 	"strconv"
 
@@ -788,104 +789,144 @@ func (g *parGraph) buildAndSolve(out *callGraph) {
 				}
 			}
 		}
-		type hubCandidate struct {
-			id       int
-			inRoots  []syntaxutil.FuncKey
-			outRoots []syntaxutil.FuncKey
+		var uniqueRoots []syntaxutil.FuncKey
+		for _, fk := range g.rootKeys {
+			if fk.Valid() {
+				uniqueRoots = append(uniqueRoots, fk)
+			}
 		}
-		var hubCandidates []hubCandidate
-		hubStamp := make([]uint32, len(g.adj))
-		var hubEpoch uint32
-		var hubStack []int
-		for id := range g.adj {
-			if g.rootKeys[id].Valid() || g.reachesPar[id] || !canReachFromRoot[id] || !canReachRoot[id] {
-				continue
-			}
-			liveIn := 0
-			for _, prev := range revPar[id] {
-				if prev != id && !g.reachesPar[prev] && canReachFromRoot[prev] {
-					liveIn++
-				}
-			}
-			if liveIn < 2 {
-				continue
-			}
-			liveOut := 0
-			for _, next := range g.adj[id] {
-				if next != id && canReachRoot[next] {
-					liveOut++
-				}
-			}
-			if liveOut < 2 || liveIn*liveOut <= liveIn+liveOut {
-				continue
-			}
-			hubEpoch++
-			hubStamp[id] = hubEpoch
-			hubStack = append(hubStack[:0], id)
-			var inRoots []syntaxutil.FuncKey
-			for len(hubStack) > 0 {
-				cur := hubStack[len(hubStack)-1]
-				hubStack = hubStack[:len(hubStack)-1]
-				if cur != id && g.rootKeys[cur].Valid() {
-					if !g.reachesPar[cur] {
-						inRoots = append(inRoots, g.rootKeys[cur])
-					}
+		slices.SortFunc(uniqueRoots, syntaxutil.FuncKey.Compare)
+		uniqueRoots = slices.Compact(uniqueRoots)
+		if len(uniqueRoots) >= 2 {
+			inSeeds := make([][]int, len(uniqueRoots))
+			outSeeds := make([][]int, len(uniqueRoots))
+			for id, fk := range g.rootKeys {
+				if !fk.Valid() {
 					continue
 				}
-				for _, prev := range revPar[cur] {
-					if hubStamp[prev] != hubEpoch && !g.reachesPar[prev] && canReachFromRoot[prev] {
-						hubStamp[prev] = hubEpoch
-						hubStack = append(hubStack, prev)
-					}
+				r, _ := slices.BinarySearchFunc(uniqueRoots, fk, syntaxutil.FuncKey.Compare)
+				outSeeds[r] = append(outSeeds[r], id)
+				if !g.reachesPar[id] {
+					inSeeds[r] = append(inSeeds[r], id)
 				}
 			}
-			slices.SortFunc(inRoots, syntaxutil.FuncKey.Compare)
-			inRoots = slices.Compact(inRoots)
-			if len(inRoots) < 2 {
-				continue
-			}
-			hubEpoch++
-			hubStamp[id] = hubEpoch
-			hubStack = append(hubStack[:0], id)
-			var outRoots []syntaxutil.FuncKey
-			for len(hubStack) > 0 {
-				cur := hubStack[len(hubStack)-1]
-				hubStack = hubStack[:len(hubStack)-1]
-				if cur != id && g.rootKeys[cur].Valid() {
-					outRoots = append(outRoots, g.rootKeys[cur])
+			words := (len(uniqueRoots) + 63) / 64
+			inBits := make([]uint64, len(g.adj)*words)
+			outBits := make([]uint64, len(g.adj)*words)
+			hubStamp := make([]uint32, len(g.adj))
+			var hubEpoch uint32
+			var hubStack []int
+			for r, seeds := range inSeeds {
+				if len(seeds) == 0 {
 					continue
 				}
-				for _, next := range g.adj[cur] {
-					if hubStamp[next] != hubEpoch && canReachRoot[next] {
-						hubStamp[next] = hubEpoch
-						hubStack = append(hubStack, next)
+				hubEpoch++
+				hubStack = hubStack[:0]
+				wOff, bit := r/64, uint64(1)<<(uint(r)%64)
+				for _, u := range seeds {
+					for _, next := range g.adj[u] {
+						if hubStamp[next] != hubEpoch && !g.rootKeys[next].Valid() && !g.reachesPar[next] && canReachFromRoot[next] && canReachRoot[next] {
+							hubStamp[next] = hubEpoch
+							inBits[next*words+wOff] |= bit
+							hubStack = append(hubStack, next)
+						}
+					}
+				}
+				for len(hubStack) > 0 {
+					cur := hubStack[len(hubStack)-1]
+					hubStack = hubStack[:len(hubStack)-1]
+					for _, next := range g.adj[cur] {
+						if hubStamp[next] != hubEpoch && !g.rootKeys[next].Valid() && !g.reachesPar[next] && canReachFromRoot[next] && canReachRoot[next] {
+							hubStamp[next] = hubEpoch
+							inBits[next*words+wOff] |= bit
+							hubStack = append(hubStack, next)
+						}
 					}
 				}
 			}
-			slices.SortFunc(outRoots, syntaxutil.FuncKey.Compare)
-			outRoots = slices.Compact(outRoots)
-			if len(outRoots) < 2 || len(inRoots)*len(outRoots) <= len(inRoots)+len(outRoots) {
-				continue
+			for r, seeds := range outSeeds {
+				hubEpoch++
+				hubStack = hubStack[:0]
+				wOff, bit := r/64, uint64(1)<<(uint(r)%64)
+				for _, u := range seeds {
+					for _, prev := range revPar[u] {
+						if hubStamp[prev] != hubEpoch && !g.rootKeys[prev].Valid() && !g.reachesPar[prev] && canReachFromRoot[prev] && canReachRoot[prev] {
+							hubStamp[prev] = hubEpoch
+							outBits[prev*words+wOff] |= bit
+							hubStack = append(hubStack, prev)
+						}
+					}
+				}
+				for len(hubStack) > 0 {
+					cur := hubStack[len(hubStack)-1]
+					hubStack = hubStack[:len(hubStack)-1]
+					for _, prev := range revPar[cur] {
+						if hubStamp[prev] != hubEpoch && !g.rootKeys[prev].Valid() && !g.reachesPar[prev] && canReachFromRoot[prev] && canReachRoot[prev] {
+							hubStamp[prev] = hubEpoch
+							outBits[prev*words+wOff] |= bit
+							hubStack = append(hubStack, prev)
+						}
+					}
+				}
 			}
-			hubCandidates = append(hubCandidates, hubCandidate{
-				id:       id,
-				inRoots:  inRoots,
-				outRoots: outRoots,
+			type hubCandidate struct {
+				id      int
+				inBits  []uint64
+				outBits []uint64
+			}
+			var hubCandidates []hubCandidate
+			for id := range g.adj {
+				if g.rootKeys[id].Valid() || g.reachesPar[id] || !canReachFromRoot[id] || !canReachRoot[id] {
+					continue
+				}
+				liveIn := 0
+				for _, prev := range revPar[id] {
+					if prev != id && !g.reachesPar[prev] && canReachFromRoot[prev] {
+						liveIn++
+					}
+				}
+				if liveIn < 2 {
+					continue
+				}
+				liveOut := 0
+				for _, next := range g.adj[id] {
+					if next != id && canReachRoot[next] {
+						liveOut++
+					}
+				}
+				if liveOut < 2 || liveIn*liveOut <= liveIn+liveOut {
+					continue
+				}
+				inSlice := inBits[id*words : (id+1)*words]
+				inCount := popcountWords(inSlice)
+				if inCount < 2 {
+					continue
+				}
+				outSlice := outBits[id*words : (id+1)*words]
+				outCount := popcountWords(outSlice)
+				if outCount < 2 || inCount*outCount <= inCount+outCount {
+					continue
+				}
+				hubCandidates = append(hubCandidates, hubCandidate{
+					id:      id,
+					inBits:  inSlice,
+					outBits: outSlice,
+				})
+			}
+			slices.SortFunc(hubCandidates, func(a, b hubCandidate) int {
+				if c := compareRootBitsets(a.inBits, b.inBits); c != 0 {
+					return c
+				}
+				return compareRootBitsets(a.outBits, b.outBits)
 			})
-		}
-		slices.SortFunc(hubCandidates, func(a, b hubCandidate) int {
-			if c := slices.CompareFunc(a.inRoots, b.inRoots, syntaxutil.FuncKey.Compare); c != 0 {
-				return c
+			hubSeq := 0
+			for i, cand := range hubCandidates {
+				if i > 0 && (compareRootBitsets(cand.inBits, hubCandidates[i-1].inBits) != 0 ||
+					compareRootBitsets(cand.outBits, hubCandidates[i-1].outBits) != 0) {
+					hubSeq++
+				}
+				g.rootKeys[cand.id] = syntaxutil.FuncKey{Pkg: pkgPath, Name: "#par#" + strconv.Itoa(hubSeq)}
 			}
-			return slices.CompareFunc(a.outRoots, b.outRoots, syntaxutil.FuncKey.Compare)
-		})
-		hubSeq := 0
-		for i, cand := range hubCandidates {
-			if i > 0 && (slices.CompareFunc(cand.inRoots, hubCandidates[i-1].inRoots, syntaxutil.FuncKey.Compare) != 0 ||
-				slices.CompareFunc(cand.outRoots, hubCandidates[i-1].outRoots, syntaxutil.FuncKey.Compare) != 0) {
-				hubSeq++
-			}
-			g.rootKeys[cand.id] = syntaxutil.FuncKey{Pkg: pkgPath, Name: "#par#" + strconv.Itoa(hubSeq)}
 		}
 	}
 
@@ -922,4 +963,45 @@ func (g *parGraph) buildAndSolve(out *callGraph) {
 		}
 	}
 	slices.SortFunc(out.ParallelEdges, syntaxutil.FuncDepEdge.Compare)
+}
+
+func popcountWords(words []uint64) int {
+	n := 0
+	for _, w := range words {
+		n += bits.OnesCount64(w)
+	}
+	return n
+}
+
+func compareRootBitsets(a, b []uint64) int {
+	for w := range a {
+		xor := a[w] ^ b[w]
+		if xor == 0 {
+			continue
+		}
+		bitIdx := bits.TrailingZeros64(xor)
+		mask := uint64(1) << uint(bitIdx)
+		higherMask := ^((mask << 1) - 1)
+		if a[w]&mask != 0 {
+			if b[w]&higherMask != 0 {
+				return -1
+			}
+			for w2 := w + 1; w2 < len(b); w2++ {
+				if b[w2] != 0 {
+					return -1
+				}
+			}
+			return 1
+		}
+		if a[w]&higherMask != 0 {
+			return 1
+		}
+		for w2 := w + 1; w2 < len(a); w2++ {
+			if a[w2] != 0 {
+				return 1
+			}
+		}
+		return -1
+	}
+	return 0
 }

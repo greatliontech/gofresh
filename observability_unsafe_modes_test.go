@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/types"
@@ -332,7 +332,11 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fps, err := producer.CaptureObservedBatch(ctx)
+			plainFPs, err := producer.CaptureBatch(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fps, err := producer.captureObservedBatch(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -352,7 +356,7 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 				pkgDir := filepath.Join(dir, pathBase(s.Package))
 				var obs runtimeinput.Observation
 				if fps[s].ObservationProof.Observable {
-					sib, err := producer.Sibling([]Subject{s})
+					sib, err := producer.sibling([]Subject{s})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -363,20 +367,24 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				afp, err := producer.AttachObservation(s, fps[s], obs)
+				afp, err := attachObservedForTest(producer, s, fps[s], obs)
 				if err != nil {
-					t.Fatalf("AttachObservation(%v): %v", s, err)
+					t.Fatalf("attachObservedForTest(%v): %v", s, err)
 				}
 				attached[s] = afp
 			}
-			if err := producer.Validate(ctx); err != nil {
-				t.Fatalf("Validate(%s): %v", m.name, err)
+			if err := producer.validate(ctx); err != nil {
+				t.Fatalf("validate(%s): %v", m.name, err)
 			}
 			if m.mode == SingleSubjectExecution {
 				singleSubjectFPs = maps.Clone(attached)
 			}
 
 			checker, err := sess.Snapshot(ctx, allSubjects, CodeResult)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkerBind, err := checker.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -398,7 +406,7 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 				subjBanner: {
 					wantPureCheck:      Unverifiable,
 					wantObservable:     singleOK,
-					wantCheckObserved:   ternaryStatus(singleOK, Valid, Unverifiable),
+					wantCheckObserved:  ternaryStatus(singleOK, Valid, Unverifiable),
 					wantSingleSubjAuth: singleOK,
 					wantReasonSubstr:   ternaryStr(singleOK, "", "un-confined unsafe.Pointer"),
 				},
@@ -432,13 +440,13 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 				if exp.wantReasonSubstr != "" && !strings.Contains(fp.ObservationProof.Reason, exp.wantReasonSubstr) {
 					t.Fatalf("%s %v ObservationProof.Reason = %q, want substring %q", m.name, s, fp.ObservationProof.Reason, exp.wantReasonSubstr)
 				}
-				vPure, err := checker.Check(ctx, fp, s)
+				vPure, err := checkerBind.Check(ctx, s, plainFPs[s])
 				if err != nil || vPure.Status != exp.wantPureCheck {
-					t.Fatalf("%s %v Check = (%+v, %v), want %v", m.name, s, vPure, err, exp.wantPureCheck)
+					t.Fatalf("%s %v plain Check = (%+v, %v), want %v", m.name, s, vPure, err, exp.wantPureCheck)
 				}
-				vObs, err := checker.CheckObserved(ctx, fp, s)
+				vObs, err := checkerBind.Check(ctx, s, fp)
 				if err != nil || vObs.Status != exp.wantCheckObserved {
-					t.Fatalf("%s %v CheckObserved = (%+v, %v), want %v", m.name, s, vObs, err, exp.wantCheckObserved)
+					t.Fatalf("%s %v observed Check = (%+v, %v), want %v", m.name, s, vObs, err, exp.wantCheckObserved)
 				}
 				if vObs.Ground.Accepted.Observation.SingleSubject != exp.wantSingleSubjAuth {
 					t.Fatalf("%s %v Accepted.Observation = %+v, want SingleSubject=%v", m.name, s, vObs.Ground.Accepted.Observation, exp.wantSingleSubjAuth)
@@ -480,18 +488,14 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, s := range []Subject{subjBanner, subjShadow} {
-				vObs, err := snap.CheckObserved(ctx, singleSubjectFPs[s], s)
-				if err != nil || vObs.Status != Unverifiable || vObs.Ground.Accepted.Observation != (ObservationAuthority{}) {
-					t.Fatalf("mode %v replaying SingleSubject %v via CheckObserved = (%+v, %v), want Unverifiable with zero ObservationAuthority", sharedMode, s, vObs, err)
-				}
 				vBind, err := binding.Check(ctx, s, singleSubjectFPs[s])
 				if err != nil || vBind.Status != Unverifiable || vBind.Ground.Accepted.Observation != (ObservationAuthority{}) {
-					t.Fatalf("mode %v replaying SingleSubject %v via RuntimeBinding.Check = (%+v, %v), want Unverifiable", sharedMode, s, vBind, err)
+					t.Fatalf("mode %v replaying SingleSubject %v via RuntimeBinding.Check = (%+v, %v), want Unverifiable with zero ObservationAuthority", sharedMode, s, vBind, err)
 				}
 			}
 			// Meanwhile, confined's SingleSubjectExecution Fingerprint (which has :ss:false)
 			// replays Valid across GeneralExecution and PackageExecution!
-			vConf, err := snap.CheckObserved(ctx, singleSubjectFPs[subjConfined], subjConfined)
+			vConf, err := binding.Check(ctx, subjConfined, singleSubjectFPs[subjConfined])
 			if err != nil || vConf.Status != Valid || vConf.Ground.Accepted.Observation.SingleSubject {
 				t.Fatalf("mode %v replaying confined FP = (%+v, %v), want Valid with SingleSubject=false", sharedMode, vConf, err)
 			}
@@ -504,7 +508,11 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		vValid, err := soloSnap.CheckObserved(ctx, bannerFP, subjBanner)
+		soloBind, err := soloSnap.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vValid, err := soloBind.Check(ctx, subjBanner, bannerFP)
 		if err != nil || vValid.Status != Valid || !vValid.Ground.Accepted.Observation.SingleSubject {
 			t.Fatalf("fresh SingleSubjectExecution replay = (%+v, %v), want Valid with SingleSubject=true", vValid, err)
 		}
@@ -514,7 +522,7 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 		} else {
 			tampered.ObservationProof.Evidence = tampered.ObservationProof.Evidence[:len(tampered.ObservationProof.Evidence)-1] + "0"
 		}
-		vTampered, err := soloSnap.CheckObserved(ctx, tampered, subjBanner)
+		vTampered, err := soloBind.Check(ctx, subjBanner, tampered)
 		if err != nil || vTampered.Status != Unverifiable {
 			t.Fatalf("tampered Evidence replay = (%+v, %v), want Unverifiable", vTampered, err)
 		}
@@ -534,16 +542,16 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pureBaseFPs, err := soloPureProd.CaptureObservedBatch(ctx)
+		pureBaseFPs, err := soloPureProd.captureObservedBatch(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		pureObs := supportedObservation(t, soloPureProd, dir, filepath.Join(dir, "banner"), "worker-pure", logForSubject[subjBanner])
-		pureBannerFP, err := soloPureProd.AttachObservation(subjBanner, pureBaseFPs[subjBanner], pureObs)
+		pureBannerFP, err := attachObservedForTest(soloPureProd, subjBanner, pureBaseFPs[subjBanner], pureObs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := soloPureProd.Validate(ctx); err != nil {
+		if err := soloPureProd.validate(ctx); err != nil {
 			t.Fatal(err)
 		}
 		pureSess, err := NewSession(ctx, BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{
@@ -557,9 +565,13 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		vPure, err := pureSnap.CheckObserved(ctx, pureBannerFP, subjBanner)
+		pureBind, err := pureSnap.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vPure, err := pureBind.Check(ctx, subjBanner, pureBannerFP)
 		if err != nil || vPure.Status != Valid {
-			t.Fatalf("PackageExecution + PureSubjects CheckObserved = (%+v, %v), want Valid", vPure, err)
+			t.Fatalf("PackageExecution + PureSubjects Check = (%+v, %v), want Valid", vPure, err)
 		}
 		if vPure.Ground.Accepted.Purity.Recorded == 0 || vPure.Ground.Accepted.Purity.Current == 0 || vPure.Ground.Accepted.Observation != (ObservationAuthority{}) {
 			t.Fatalf("PackageExecution + PureSubjects Accepted = %+v, want Recorded+Current Purity set and zero ObservationAuthority", vPure.Ground.Accepted)
@@ -597,10 +609,6 @@ func TestCleanInBadSlicePkg(t *testing.T) {
 			t.Fatalf("PackageExecution Unit.Close verdict = %+v, want Unverifiable with zero ObservationAuthority", pkgFin.Verdict)
 		}
 
-		soloBind, err := soloSnap.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
-		if err != nil {
-			t.Fatal(err)
-		}
 		soloBuilt, err := soloSnap.BindBuilt(subjBanner.Package, "banner-solo.test")
 		if err != nil {
 			t.Fatal(err)
@@ -655,7 +663,7 @@ func TestReadExt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp1, err := prod1.captureObserved(ctx, subjExt)
+		fp1, err := captureObservedForTest(ctx, prod1, subjExt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -664,11 +672,11 @@ func TestReadExt(t *testing.T) {
 			t.Fatal(err)
 		}
 		extDir := filepath.Join(dir, "ext")
-		fp1, err = prod1.AttachObservation(subjExt, fp1, supportedObservation(t, prod1, dir, extDir, "ext-c1", "getenv EXT_KEY\n"))
+		fp1, err = attachObservedForTest(prod1, subjExt, fp1, supportedObservation(t, prod1, dir, extDir, "ext-c1", "getenv EXT_KEY\n"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := prod1.Validate(ctx); err != nil {
+		if err := prod1.validate(ctx); err != nil {
 			t.Fatal(err)
 		}
 
@@ -708,9 +716,6 @@ func corruptBanner() {
 			if len(checked) != 1 || checked[0].Verdict.Status != Stale || checked[0].Verdict.Reason != ReasonTestVariants || checked[0].Extension != nil {
 				t.Fatalf("mode %v CheckBatchWithLedgers at Commit 2 = %+v, want unextended Stale(test variants) with nil Extension", sharedMode, checked)
 			}
-			if _, _, extVerdict, err := snap2.checkInertTestVariantExtension(ctx, fp1, ledger1.Clone(), subjExt, true); err != nil || extVerdict.Status != Unverifiable {
-				t.Fatalf("mode %v checkInertTestVariantExtension at Commit 2 = (%+v, %v), want Unverifiable", sharedMode, extVerdict, err)
-			}
 		}
 
 		// Under SingleSubjectExecution, CheckBatchWithLedgers MUST extend Valid with SingleSubject=true!
@@ -743,20 +748,24 @@ func corruptBanner() {
 		if err != nil {
 			t.Fatal(err)
 		}
-		vReplayPkg, err := pkgSnap2.CheckObserved(ctx, extendedFP, subjExt)
+		pkgBind2, err := pkgSnap2.BindRuntime(ctx, RuntimeDescription{Directory: dir, Environment: env})
+		if err != nil {
+			t.Fatal(err)
+		}
+		vReplayPkg, err := pkgBind2.Check(ctx, subjExt, extendedFP)
 		if err != nil || vReplayPkg.Status != Unverifiable {
 			t.Fatalf("PackageExecution replaying Commit-2 extended FP = (%+v, %v), want Unverifiable", vReplayPkg, err)
 		}
-		vReplaySolo, err := soloSnap2.CheckObserved(ctx, extendedFP, subjExt)
+		vReplaySolo, err := soloBind2.Check(ctx, subjExt, extendedFP)
 		if err != nil || vReplaySolo.Status != Valid || !vReplaySolo.Ground.Accepted.Observation.SingleSubject {
 			t.Fatalf("SingleSubjectExecution replaying Commit-2 extended FP = (%+v, %v), want Valid with SingleSubject=true", vReplaySolo, err)
 		}
 	})
 
-	// 10. Real go-x-tools & gofresh self-hosting verification: loading internal/closure
+	// 10. Real go-x-tools & gofresh self-hosting verification: loading internal/observability
 	// with LoadAllSyntax brings in the real go-x-tools/go/ssa, go-x-tools/go/ssa/ssautil,
-	// go-x-tools/internal/typeparams, and gofresh/internal/closure packages on disk and
-	// proves PackageHasUnconfinedUnsafeMemoryHazard is false on every one of them!
+	// go-x-tools/internal/typeparams, gofresh/internal/closure, and gofresh/internal/observability
+	// packages on disk and proves PackageHasUnconfinedUnsafeMemoryHazard is false on every one of them!
 	t.Run("real_go_x_tools_self_hosting_does_not_require_single_subject", func(t *testing.T) {
 		ctx := context.Background()
 		repoRoot, err := filepath.Abs(".")
@@ -766,7 +775,7 @@ func corruptBanner() {
 		repoEnv := gotool.SetEnv(os.Environ(), "PWD", repoRoot)
 		repoEnv = gotool.SetEnv(repoEnv, "GOCACHE", goCache)
 		repoEnv = gotool.SetEnv(repoEnv, "XDG_CACHE_HOME", xdgCache)
-		roots, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax, repoRoot, repoEnv, nil, "./internal/closure")
+		roots, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax, repoRoot, repoEnv, nil, "./internal/observability")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -783,10 +792,11 @@ func corruptBanner() {
 			"github.com/greatliontech/go-x-tools/go/ssa/ssautil",
 			"github.com/greatliontech/go-x-tools/internal/typeparams",
 			"github.com/greatliontech/gofresh/internal/closure",
+			"github.com/greatliontech/gofresh/internal/observability",
 		} {
 			p := byPath[target]
 			if p == nil {
-				t.Fatalf("expected loaded package %s in ./internal/closure dependency graph", target)
+				t.Fatalf("expected loaded package %s in ./internal/observability dependency graph", target)
 			}
 			if reason := refconfine.PackageUnsafeMemoryHazardReason(p, p.TypesSizes, byTypes); reason != "" {
 				t.Fatalf("PackageHasUnconfinedUnsafeMemoryHazard(%s) = true (%s), want false on real self-hosted source", target, reason)

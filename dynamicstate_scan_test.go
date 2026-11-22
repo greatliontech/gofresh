@@ -7,8 +7,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
-	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -1848,14 +1848,13 @@ func explainViewForSubject(t *testing.T, dir string, s Subject, pkgPath, varName
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fp, s)
+	verdict, err := bindViewForTest(t, context.Background(), view).Check(context.Background(), s, fp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if verdict.Ground.Cause.Kind == SharedDynamicStateCause {
-		parsed, ok := CulpritFromReason(verdict.Reason)
-		if !ok || verdict.Ground.Cause.Culprit != parsed {
-			t.Fatalf("Verdict.Ground.Cause.Culprit = %+v, CulpritFromReason(%q) = (%+v, %v)", verdict.Ground.Cause.Culprit, verdict.Reason, parsed, ok)
+	if verdict.Ground.Cause.Kind == SharedDynamicStateCause && verdict.Ground.Cause.Condition == Refused {
+		if verdict.Ground.Cause.Culprit == (Subject{}) {
+			t.Fatalf("SharedDynamicStateCause verdict missing Culprit: %+v", verdict)
 		}
 	} else if verdict.Ground.Cause.Culprit != (Subject{}) {
 		t.Fatalf("non-shared-state verdict carried culprit: %+v", verdict.Ground.Cause)
@@ -2469,55 +2468,6 @@ func Mutate() {
 	}
 }
 
-func TestCulpritFromReason(t *testing.T) {
-	for _, tc := range []struct {
-		reason string
-		want   Subject
-		ok     bool
-	}{
-		{
-			reason: "package graph shares mutated dynamic state: example.com/pkg/sub: example.com/pkg/sub.Hooks is mutated",
-			want:   Subject{Package: "example.com/pkg/sub", Symbol: "Hooks"},
-			ok:     true,
-		},
-		{
-			reason: "gopkg.in/yaml.v3: gopkg.in/yaml.v3.structMap escapes writable",
-			want:   Subject{Package: "gopkg.in/yaml.v3", Symbol: "structMap"},
-			ok:     true,
-		},
-		{
-			reason: "post-run freshness check: package graph shares mutated dynamic state: github.com/x/b: github.com/x/b.thresholds registers function values outside the environment-free audit",
-			want:   Subject{Package: "github.com/x/b", Symbol: "thresholds"},
-			ok:     true,
-		},
-		{
-			reason: "os.Getenv (environment variable read)",
-			ok:     false,
-		},
-		{
-			reason: "example.com/a: example.com/b.Hooks is mutated",
-			ok:     false,
-		},
-		{
-			reason: ": .NoPkg is mutated",
-			ok:     false,
-		},
-		{
-			reason: "example.com/pkg: example.com/pkg.123bad is mutated",
-			ok:     false,
-		},
-		{
-			reason: "package graph shares mutated dynamic state: example.com/pkg: example.com/pkg.Hooks is mutated (reachability unjudged: analysis budget 1ms exhausted)",
-			ok:     false,
-		},
-	} {
-		got, ok := CulpritFromReason(tc.reason)
-		if ok != tc.ok || got != tc.want {
-			t.Fatalf("CulpritFromReason(%q) = (%+v, %v), want (%+v, %v)", tc.reason, got, ok, tc.want, tc.ok)
-		}
-	}
-}
-
 // A dispatch of an exported method through the receiver's own closed
 // interface field chains into every member's declaration: the field
 // is closed when every store in the package carries a concrete
@@ -2910,7 +2860,7 @@ func TestSubjectFactsHiddenObligations(t *testing.T) {
 	base.sharedState = &subjectRefusal{reason: "shared"}
 	base.ambiguous = &subjectRefusal{reason: "ambiguous"}
 	base.external = true
-	view := &Snapshot{subjects: []Subject{s}, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: base}}}
+	view := &Snapshot{subjects: []Subject{s}, facts: &observationFacts{subjects: map[Subject]subjectEntry{s: {maximal: base}}}}
 	for _, tc := range []struct {
 		name   string
 		change func(*subjectFacts)
@@ -2928,11 +2878,11 @@ func TestSubjectFactsHiddenObligations(t *testing.T) {
 			if changed.closure().Reason != base.closure().Reason {
 				t.Fatal("test did not hide the changed obligation")
 			}
-			current := observationFacts{maximal: map[Subject]subjectFacts{s: changed}}
+			current := observationFacts{subjects: map[Subject]subjectEntry{s: {maximal: changed}}}
 			if err := view.compareObservationContext(t.Context(), current); !errors.Is(err, ErrViewChanged) {
 				t.Fatalf("hidden obligation change: %v", err)
 			}
-			current.cut = map[Subject]bool{s: true}
+			current.subjects[s] = subjectEntry{maximal: changed, cut: true}
 			want := ErrViewChanged
 			if tc.name == "shared state" {
 				want = ErrAnalysisUnavailable
@@ -2968,32 +2918,32 @@ func TestSubjectFactsProjectionAndSiblingIsolation(t *testing.T) {
 	base.sharedState = &subjectRefusal{reason: "shared"}
 	load := &closure.ViewLoad{}
 	parent := &Snapshot{subjects: []Subject{s}, facts: &observationFacts{
-		maximal: map[Subject]subjectFacts{s: base}, source: load,
+		subjects: map[Subject]subjectEntry{s: {maximal: base}}, source: load,
 	}}
-	child, err := parent.Sibling([]Subject{s})
+	child, err := parent.sibling([]Subject{s})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if child.facts.source != load || !child.facts.maximal[s].equal(base, false) {
+	if child.facts.source != load || !child.facts.subjects[s].maximal.equal(base, false) {
 		t.Fatal("sibling lost its generation or an underlying obligation")
 	}
 	projection := child.facts.closure(s)
 	projection.Hash, projection.Unverifiable, projection.Reason = "foreign", false, ""
-	if !child.facts.maximal[s].equal(base, false) || !parent.facts.maximal[s].equal(base, false) {
+	if !child.facts.subjects[s].maximal.equal(base, false) || !parent.facts.subjects[s].maximal.equal(base, false) {
 		t.Fatal("local projection changed shared facts")
 	}
 	// Taking a cut may select the unavailable shared-state analysis, but
 	// never replaces the first observation's selected-source inputs.
-	other := observationFacts{maximal: map[Subject]subjectFacts{s: base}}
-	b := other.maximal[s]
-	b.sharedState = &subjectRefusal{reason: "cut"}
-	b.openWorld = nil // deliberately different; takeCut has no authority over it
-	other.maximal[s] = b
+	other := observationFacts{subjects: map[Subject]subjectEntry{s: {maximal: base}}}
+	b := other.subjects[s]
+	b.maximal.sharedState = &subjectRefusal{reason: "cut"}
+	b.maximal.openWorld = nil // deliberately different; takeCut has no authority over it
+	other.subjects[s] = b
 	child.facts.takeCut(other, s)
-	if child.facts.source != load || child.facts.maximal[s].openWorld != base.openWorld || child.facts.maximal[s].sharedState.reason != "cut" {
+	if child.facts.source != load || child.facts.subjects[s].maximal.openWorld != base.openWorld || child.facts.subjects[s].maximal.sharedState.reason != "cut" {
 		t.Fatal("cut replaced non-discharge inputs")
 	}
-	if !parent.facts.maximal[s].equal(base, false) {
+	if !parent.facts.subjects[s].maximal.equal(base, false) {
 		t.Fatal("sibling cut mutated parent facts")
 	}
 	cancelled, cancel := context.WithCancel(t.Context())
@@ -9381,35 +9331,40 @@ func TestPropCommutative(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			plainFPs, err := producer.CaptureBatch(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			obs := supportedObservation(t, producer, cleanDir, cleanDir, "worker", "")
 			checker, err := eng.newView(ctx, subjects, cleanDir)
 			if err != nil {
 				t.Fatal(err)
 			}
+			checkerBind := bindViewForTest(t, ctx, checker)
 			for _, subj := range subjects {
-				fp, err := producer.captureObserved(ctx, subj)
+				fp, err := captureObservedForTest(ctx, producer, subj)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if fp.DynamicStateVouches != "" || fp.SingleSubjectDischarges != "" || fp.PackageProcessDischarges != "" || !fp.ObservationProof.Observable {
 					t.Fatalf("%v captured fp=%+v, want Observable=true with empty vouch/attestation discharges", subj, fp)
 				}
-				fp, err = producer.AttachObservation(subj, fp, obs)
+				fp, err = attachObservedForTest(producer, subj, fp, obs)
 				if err != nil {
 					t.Fatal(err)
 				}
-				// Pure-hash Check remains Unverifiable even with attached observation.
-				if vHash, err := checker.Check(ctx, fp, subj); err != nil || vHash.Status != Unverifiable {
-					t.Fatalf("%v Check=(%+v, %v), want Unverifiable at pure-hash tier", subj, vHash, err)
+				// Plain (non-observed) Fingerprint remains Unverifiable at the pure-hash tier.
+				if vHash, err := checkerBind.Check(ctx, subj, plainFPs[subj]); err != nil || vHash.Status != Unverifiable {
+					t.Fatalf("%v plain Check=(%+v, %v), want Unverifiable at pure-hash tier", subj, vHash, err)
 				}
-				if vObs, err := checker.CheckObserved(ctx, fp, subj); err != nil || vObs.Status != Valid {
-					t.Fatalf("%v CheckObserved=(%+v, %v), want Valid", subj, vObs, err)
+				if vObs, err := checkerBind.Check(ctx, subj, fp); err != nil || vObs.Status != Valid {
+					t.Fatalf("%v observed Check=(%+v, %v), want Valid", subj, vObs, err)
 				}
 			}
 		}
 
 		// 3. User-declared package-level *rapid.Generator global still downgrades sibling unit tests under PackageExecution,
-		// even on CheckObserved!
+		// even on observed Check!
 		sharedGenDir := writePinnedRapidModule(t, map[string]string{
 			"calc.go": `package rapiduser
 
@@ -9445,17 +9400,17 @@ func TestMutateSharedGen(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fpShared, err := prodShared.captureObserved(ctx, unitSubj)
+		fpShared, err := captureObservedForTest(ctx, prodShared, unitSubj)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fpShared, err = prodShared.AttachObservation(unitSubj, fpShared, supportedObservation(t, prodShared, sharedGenDir, sharedGenDir, "worker", ""))
+		fpShared, err = attachObservedForTest(prodShared, unitSubj, fpShared, supportedObservation(t, prodShared, sharedGenDir, sharedGenDir, "worker", ""))
 		if err != nil {
 			t.Fatal(err)
 		}
-		vShared, err := prodShared.CheckObserved(ctx, fpShared, unitSubj)
+		vShared, err := bindViewForTest(t, ctx, prodShared).Check(ctx, unitSubj, fpShared)
 		if err != nil || vShared.Status != Unverifiable || !strings.Contains(vShared.Reason, "SharedGen") {
-			t.Fatalf("user-declared SharedGen CheckObserved=(%+v, %v), want Unverifiable naming SharedGen", vShared, err)
+			t.Fatalf("user-declared SharedGen Check=(%+v, %v), want Unverifiable naming SharedGen", vShared, err)
 		}
 	})
 

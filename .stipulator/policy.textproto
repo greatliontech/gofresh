@@ -39,7 +39,6 @@ invocations {
     packages: "./internal/gotool"
     packages: "./internal/guard"
     packages: "./internal/jsonrecord"
-    packages: "./internal/outcome"
     packages: "./internal/propharness"
     packages: "./internal/refconfine"
     packages: "./internal/rta"

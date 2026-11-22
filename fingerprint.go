@@ -75,7 +75,7 @@ type Fingerprint struct {
 	DynamicStateVouches string
 	// SingleSubjectDischarges names the package-level variables whose
 	// shared-dynamic-state discharge rested on the caller's
-	// single-subject-process attestation (WithSingleSubjectExecution)
+	// single-subject-process attestation (SingleSubjectExecution)
 	// and is reachable from this subject at capture — the audited
 	// pooling set's sync.Pool carriers and the single-subject
 	// directive's variables alike: sorted canonical
@@ -196,12 +196,12 @@ type observationProofRecord struct {
 }
 
 // Validate is the record ladder every reader of a stored fingerprint
-// applies before judging it — the engine at Check, the decoder on every
-// record, the encoder before writing one: the result kind is one of the
-// two kinds (zero is a recording written without one), and a code-result
-// fingerprint carries no measurement guard (a machine or
-// runtime-configuration value on a code-result recording is internally
-// inconsistent, REQ-guard-selective-capture). A non-zero applicability endpoint
+// applies before judging it — checking units, JSON decoders, and encoders
+// before writing one: the result kind is one of SourceResult, CodeResult, or
+// Measurement (zero is invalid); neither SourceResult nor CodeResult carries
+// measurement guards (REQ-guard-selective-capture); and SourceResult carries
+// no runtime, dynamic-state, observation, or purity fields
+// (REQ-fresh-fingerprint-record). A non-zero applicability endpoint
 // carries both required values; unknown non-empty strategies remain readable.
 // A refusal names the fault.
 func (f Fingerprint) Validate() error {

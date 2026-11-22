@@ -4,43 +4,33 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 
 	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/internal/observability"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
+
+type projectedSubject struct {
+	sharedState     *subjectRefusal
+	vouchDischarges string
+	discharges      attestationDischarges
+	cut             bool
+}
 
 // executionModelProjection holds one execution model's per-subject dynamic-state
 // refusals, vouch/attestation discharges, and pass-local reachability budget cuts
 // over a single Snapshot observation.
 type executionModelProjection struct {
-	sharedState     map[Subject]*subjectRefusal
-	vouchDischarges map[Subject]string
-	discharges      map[Subject]attestationDischarges
-	cut             map[Subject]bool
+	subjects map[Subject]projectedSubject
 }
 
 func (p executionModelProjection) restrict(subjects []Subject) executionModelProjection {
 	out := executionModelProjection{
-		sharedState:     make(map[Subject]*subjectRefusal, len(subjects)),
-		vouchDischarges: make(map[Subject]string, len(subjects)),
-		discharges:      make(map[Subject]attestationDischarges, len(subjects)),
-		cut:             make(map[Subject]bool),
+		subjects: make(map[Subject]projectedSubject, len(subjects)),
 	}
 	for _, s := range subjects {
-		if ref := p.sharedState[s]; ref != nil {
-			out.sharedState[s] = ref
-		}
-		if v := p.vouchDischarges[s]; v != "" {
-			out.vouchDischarges[s] = v
-		}
-		if d := p.discharges[s]; d != (attestationDischarges{}) {
-			out.discharges[s] = d
-		}
-		if p.cut[s] {
-			out.cut[s] = true
+		if entry, ok := p.subjects[s]; ok {
+			out.subjects[s] = entry
 		}
 	}
 	return out
@@ -58,15 +48,13 @@ func buildModelProjections(subjects []Subject, scan *subjectScan, attribution st
 		ms := scan.byModel[m]
 		cutSet := scan.cutByModel[m]
 		proj := executionModelProjection{
-			sharedState:     make(map[Subject]*subjectRefusal, len(subjects)),
-			vouchDischarges: make(map[Subject]string, len(subjects)),
-			discharges:      make(map[Subject]attestationDischarges, len(subjects)),
-			cut:             make(map[Subject]bool),
+			subjects: make(map[Subject]projectedSubject, len(subjects)),
 		}
 		for _, subject := range subjects {
 			if scan.staticDecl[subject] {
 				continue
 			}
+			var ps projectedSubject
 			if reason := ms.downgradeReason[subject]; reason != "" {
 				var culprit Subject
 				if !cutSet[subject] {
@@ -74,19 +62,16 @@ func buildModelProjections(subjects []Subject, scan *subjectScan, attribution st
 				} else if budgetText != "" {
 					reason += " (reachability unjudged: " + budgetText + ")"
 				}
-				proj.sharedState[subject] = &subjectRefusal{
+				ps.sharedState = &subjectRefusal{
 					reason:  closure.AttributeSelection(reason, attribution),
 					culprit: culprit,
 				}
 			}
-			if vd := ms.vouchDischarges[subject]; vd != "" {
-				proj.vouchDischarges[subject] = vd
-			}
-			if d := ms.discharges[subject]; d != (attestationDischarges{}) {
-				proj.discharges[subject] = d
-			}
-			if cutSet[subject] {
-				proj.cut[subject] = true
+			ps.vouchDischarges = ms.vouchDischarges[subject]
+			ps.discharges = ms.discharges[subject]
+			ps.cut = cutSet[subject]
+			if ps.sharedState != nil || ps.vouchDischarges != "" || ps.discharges != (attestationDischarges{}) || ps.cut {
+				proj.subjects[subject] = ps
 			}
 		}
 		projs[m] = proj
@@ -105,30 +90,19 @@ func restrictModelProjections(projs [3]executionModelProjection, has [3]bool, su
 }
 
 func takeModelCutAt(f *observationFacts, other observationFacts, m int, subject Subject) {
-	if !f.hasProjection[m] || !other.hasProjection[m] || !other.modelProjections[m].cut[subject] {
+	if !f.hasProjection[m] || !other.hasProjection[m] || !other.modelProjections[m].subjects[subject].cut {
 		return
 	}
 	proj := f.modelProjections[m]
-	if proj.sharedState == nil {
-		proj.sharedState = map[Subject]*subjectRefusal{}
+	if proj.subjects == nil {
+		proj.subjects = map[Subject]projectedSubject{}
 	}
-	if ref := other.modelProjections[m].sharedState[subject]; ref != nil {
-		proj.sharedState[subject] = ref
-	} else {
-		delete(proj.sharedState, subject)
-	}
-	if d := other.modelProjections[m].discharges[subject]; d != (attestationDischarges{}) {
-		if proj.discharges == nil {
-			proj.discharges = map[Subject]attestationDischarges{}
-		}
-		proj.discharges[subject] = d
-	} else {
-		delete(proj.discharges, subject)
-	}
-	if proj.cut == nil {
-		proj.cut = map[Subject]bool{}
-	}
-	proj.cut[subject] = true
+	ps := proj.subjects[subject]
+	otherPS := other.modelProjections[m].subjects[subject]
+	ps.sharedState = otherPS.sharedState
+	ps.discharges = otherPS.discharges
+	ps.cut = true
+	proj.subjects[subject] = ps
 	f.modelProjections[m] = proj
 }
 
@@ -149,30 +123,30 @@ func compareModelProjectionsDuringConstruction(ctx context.Context, base *observ
 		if !base.hasProjection[m] {
 			continue
 		}
-		bp := base.modelProjections[m]
-		cp := current.modelProjections[m]
-		if bp.vouchDischarges[subject] != cp.vouchDischarges[subject] {
+		bp := base.modelProjections[m].subjects[subject]
+		cp := current.modelProjections[m].subjects[subject]
+		if bp.vouchDischarges != cp.vouchDischarges {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: vouch discharges (%s) for %s.%s during construction", ErrViewChanged, ExecutionModel(m), subject.Package, subject.Symbol)
 		}
-		cutM := bp.cut[subject] || cp.cut[subject]
+		cutM := bp.cut || cp.cut
 		if !cutM {
-			if !sameRefusal(bp.sharedState[subject], cp.sharedState[subject]) {
+			if !sameRefusal(bp.sharedState, cp.sharedState) {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
 				return fmt.Errorf("%w: closure (%s) for %s.%s during construction", ErrViewChanged, ExecutionModel(m), subject.Package, subject.Symbol)
 			}
-			if bp.discharges[subject] != cp.discharges[subject] {
+			if bp.discharges != cp.discharges {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
 				return fmt.Errorf("%w: attestation discharges (%s) for %s.%s during construction", ErrViewChanged, ExecutionModel(m), subject.Package, subject.Symbol)
 			}
 		}
-		if cp.cut[subject] && !bp.cut[subject] {
+		if cp.cut && !bp.cut {
 			takeModelCutAt(base, current, m, subject)
 		}
 	}
@@ -278,47 +252,24 @@ func (v *Snapshot) WithExecution(model ExecutionModel) (*Snapshot, error) {
 		rootParent = v.parent
 	}
 
-	maximal := make(map[Subject]subjectFacts, len(v.subjects))
-	vouchDischarges := make(map[Subject]string, len(v.subjects))
-	discharges := make(map[Subject]attestationDischarges, len(v.subjects))
-	cut := make(map[Subject]bool)
-
+	entries := make(map[Subject]subjectEntry, len(v.subjects))
 	if v.kind == SourceResult || !v.facts.hasProjection[model] {
 		for _, s := range v.subjects {
-			maximal[s] = v.facts.maximal[s]
-			if vd := v.facts.vouchDischarges[s]; vd != "" {
-				vouchDischarges[s] = vd
-			}
-			if d := v.facts.discharges[s]; d != (attestationDischarges{}) {
-				discharges[s] = d
-			}
-			if v.facts.cut[s] {
-				cut[s] = true
-			}
+			entries[s] = v.facts.subjects[s]
 		}
 	} else {
 		proj := v.facts.modelProjections[model]
 		for _, s := range v.subjects {
-			sf := v.facts.maximal[s]
-			sf.sharedState = proj.sharedState[s]
-			maximal[s] = sf
-			if vd := proj.vouchDischarges[s]; vd != "" {
-				vouchDischarges[s] = vd
-			}
-			if d := proj.discharges[s]; d != (attestationDischarges{}) {
-				discharges[s] = d
-			}
-			if proj.cut[s] {
-				cut[s] = true
-			}
+			entry := v.facts.subjects[s]
+			ps := proj.subjects[s]
+			entry.maximal.sharedState = ps.sharedState
+			entry.vouchDischarges = ps.vouchDischarges
+			entry.discharges = ps.discharges
+			entry.cut = ps.cut
+			entries[s] = entry
 		}
 	}
 
-	purity := maps.Clone(v.facts.purity)
-	sourceFilesBySubject := make(map[Subject][]string, len(v.subjects))
-	for _, s := range v.subjects {
-		sourceFilesBySubject[s] = v.facts.sourceFilesBySubject[s]
-	}
 	ledgers := make(map[string]testvariant.TestVariantLedger, len(v.packages))
 	for _, pkg := range v.packages {
 		if l, ok := v.facts.testVariantLedgers[pkg]; ok {
@@ -327,31 +278,28 @@ func (v *Snapshot) WithExecution(model ExecutionModel) (*Snapshot, error) {
 	}
 
 	facts := &observationFacts{
-		snapshot:             v.facts.snapshot,
-		reader:               v.facts.reader,
-		maximal:              maximal,
-		source:               v.facts.source,
-		guards:               v.facts.guards,
-		purity:               purity,
-		vouchDischarges:      vouchDischarges,
-		discharges:           discharges,
-		cut:                  cut,
-		sourceFiles:          v.facts.sourceFiles,
-		sourceFilesBySubject: sourceFilesBySubject,
-		fileDigests:          v.facts.fileDigests,
-		testVariantLedgers:   ledgers,
-		modelProjections:     v.facts.modelProjections,
-		hasProjection:        v.facts.hasProjection,
+		snapshot:           v.facts.snapshot,
+		reader:             v.facts.reader,
+		subjects:           entries,
+		source:             v.facts.source,
+		guards:             v.facts.guards,
+		sourceFiles:        v.facts.sourceFiles,
+		fileDigests:        v.facts.fileDigests,
+		testVariantLedgers: ledgers,
+		modelProjections:   v.facts.modelProjections,
+		hasProjection:      v.facts.hasProjection,
 	}
 
 	shell := v.cloneShell(v.subjects, v.requests, v.packages, facts)
 	shell.parent = rootParent
 	shell.executionModel = model
 	shell.hasExecutionModel = true
-	if v.cutUnavailable == nil && len(v.observable) > 0 {
-		shell.observable = maps.Clone(v.observable)
-	} else {
-		shell.observable = make(map[Subject]observability.Observability, len(v.subjects))
+	if v.cutUnavailable == nil {
+		for _, s := range v.subjects {
+			if tx := v.txState[s]; tx.hasObservable {
+				shell.txState[s] = subjectTxState{observable: tx.observable, hasObservable: true}
+			}
+		}
 	}
 	if trace.AnyEnabled() && v.session != nil {
 		trace.Emit(nil, trace.DomainView, "snapshot.with_execution", v.moduleDir,

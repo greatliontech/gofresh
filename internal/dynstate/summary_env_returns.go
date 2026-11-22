@@ -31,29 +31,36 @@ type resolvedInsertionState struct {
 	methodDeps map[types.Object]map[syntaxutil.FuncKey]bool
 }
 
+type reachVisitKey struct {
+	obj           types.Object
+	allowInsParam bool
+}
+
 type outflowEvalCtx struct {
-	insMode      bool
-	resolved     resolvedInsertionState
-	localFree    map[types.Object]int // 0 unknown, 2 free, 3 refused
-	provingDepth map[types.Object]int
-	curDepth     int
-	fnDeps       map[syntaxutil.FuncKey]bool
-	useDeps      map[syntaxutil.EnvAuditTarget]bool
-	paramDeps    map[syntaxutil.ParamKey]bool
-	methodDeps   map[syntaxutil.FuncKey]bool
-	onRefusal    func(*flowir.Value)
+	insMode       bool
+	resolved      resolvedInsertionState
+	localFree     map[types.Object]int // 0 unknown, 2 free, 3 refused
+	provingDepth  map[types.Object]int
+	curDepth      int
+	reachVisiting map[reachVisitKey]bool
+	fnDeps        map[syntaxutil.FuncKey]bool
+	useDeps       map[syntaxutil.EnvAuditTarget]bool
+	paramDeps     map[syntaxutil.ParamKey]bool
+	methodDeps    map[syntaxutil.FuncKey]bool
+	onRefusal     func(*flowir.Value)
 }
 
 func newOutflowEvalCtx(insMode bool, resolved resolvedInsertionState) *outflowEvalCtx {
 	return &outflowEvalCtx{
-		insMode:      insMode,
-		resolved:     resolved,
-		localFree:    map[types.Object]int{},
-		provingDepth: map[types.Object]int{},
-		fnDeps:       map[syntaxutil.FuncKey]bool{},
-		useDeps:      map[syntaxutil.EnvAuditTarget]bool{},
-		paramDeps:    map[syntaxutil.ParamKey]bool{},
-		methodDeps:   map[syntaxutil.FuncKey]bool{},
+		insMode:       insMode,
+		resolved:      resolved,
+		localFree:     map[types.Object]int{},
+		provingDepth:  map[types.Object]int{},
+		reachVisiting: map[reachVisitKey]bool{},
+		fnDeps:        map[syntaxutil.FuncKey]bool{},
+		useDeps:       map[syntaxutil.EnvAuditTarget]bool{},
+		paramDeps:     map[syntaxutil.ParamKey]bool{},
+		methodDeps:    map[syntaxutil.FuncKey]bool{},
 	}
 }
 

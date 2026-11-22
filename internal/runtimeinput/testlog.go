@@ -15,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -460,7 +459,7 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 
 	m := manifest{Version: manifestVersion}
 	if len(cfg.outcomeSubjects) != 0 {
-		m.Outcome, m.Subjects = outcome.Method, cfg.outcomeSubjects
+		m.Outcome, m.Subjects = OutcomeMethod, cfg.outcomeSubjects
 	}
 	envSeen := map[string]bool{}
 	pathIndex := map[pathID]int{}
@@ -795,15 +794,7 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 	if err != nil {
 		return Observation{}, err
 	}
-	origin := "identity-only"
-	if m.Outcome != "" {
-		origin = "outcome-supported"
-	}
-	sealedPkgDir := ""
-	if initialPWDTruthful {
-		sealedPkgDir = packageDir
-	}
-	observation := newObservationWithPkgDir(st, cfg.process, origin, sealedPkgDir)
+	observation := newObservation(st, cfg.process)
 	// The attribution is the one of the reason the state names — the
 	// first clause of the sorted manifest; a reason the hashing pass
 	// raised carries its own attribution, in the reason itself.

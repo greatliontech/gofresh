@@ -1,6 +1,7 @@
 package seams
 
 import (
+	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -12,6 +13,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/refconfine"
 	"github.com/greatliontech/gofresh/internal/syntaxutil"
+	"pgregory.net/rapid"
 )
 
 func parseSeamTestPkg(t *testing.T, filename, src string) *packages.Package {
@@ -219,3 +221,34 @@ type importerFunc func(path string) (*types.Package, error)
 
 func (f importerFunc) Import(path string) (*types.Package, error) { return f(path) }
 
+func TestRapidCompareRootBitsetsMatchesSliceCompare(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		nRoots := rapid.IntRange(1, 200).Draw(rt, "n_roots")
+		roots := make([]syntaxutil.FuncKey, nRoots)
+		for i := range roots {
+			roots[i] = syntaxutil.FuncKey{Pkg: "example.com/p", Name: fmt.Sprintf("F%03d", i)}
+		}
+		words := (nRoots + 63) / 64
+		drawSet := func(label string) ([]uint64, []syntaxutil.FuncKey) {
+			bits := make([]uint64, words)
+			var list []syntaxutil.FuncKey
+			for i := range nRoots {
+				if rapid.Bool().Draw(rt, fmt.Sprintf("%s_%d", label, i)) {
+					bits[i/64] |= uint64(1) << (uint(i) % 64)
+					list = append(list, roots[i])
+				}
+			}
+			return bits, list
+		}
+		aBits, aList := drawSet("a")
+		bBits, bList := drawSet("b")
+		got := compareRootBitsets(aBits, bBits)
+		want := slices.CompareFunc(aList, bList, syntaxutil.FuncKey.Compare)
+		if got != want {
+			rt.Fatalf("compareRootBitsets(%x, %x) = %d, slices.CompareFunc = %d (aLen=%d bLen=%d)", aBits, bBits, got, want, len(aList), len(bList))
+		}
+		if popcountWords(aBits) != len(aList) {
+			rt.Fatalf("popcountWords = %d, want %d", popcountWords(aBits), len(aList))
+		}
+	})
+}

@@ -82,11 +82,11 @@ guard digest under this clause.
 > result. A code-determining input must be a code guard, or it is a false-valid hole
 > for exactly the consumers that drop measurement guards.
 
-**REQ-guard-explicit-build** (behavior): An explicitly described producing
-build MUST retain its complete normalized compilation environment separately
+**REQ-guard-explicit-build** (behavior): A session's producing
+build description MUST retain its complete normalized compilation environment separately
 from the runtime environment of its retained artifact. The ordinary package
 driver is pinned and the command directory supplies PWD before that description
-is used by analysis or compilation. The explicit form's build guard includes
+is used by analysis or compilation. The session's build guard includes
 the build-determining compilation-environment variables (`CGO_*FLAGS_ALLOW`,
 `CGO_*FLAGS_DISALLOW`, `PKG_CONFIG_PATH`, `PKG_CONFIG_LIBDIR`,
 `PKG_CONFIG_SYSROOT_DIR`, `SOURCE_DATE_EPOCH`), the build-determining resolved
@@ -187,17 +187,17 @@ equivalence, and evidence that disagrees with recomputation from source can neve
 make an unsound result look valid.
 
 **REQ-guard-view-lifetime** (invariant): Guard observations MUST remain scoped
-to the source/build generation and, in the explicit split form, the runtime
+to the source/build generation and the runtime
 binding whose configuration they describe, never memoized by module directory
 across generations or bindings. A derived sibling view shares its parent's
 source/build observation and the same runtime binding's guards
-(REQ-fresh-producer-view's sibling clause). Each view re-observes compilation facts under its
-engine's immutable complete compilation environment; constructing a new engine captures
-later ambient compilation-environment drift. An explicit runtime binding owns
+(REQ-fresh-producer-view's sibling clause). Each snapshot re-observes compilation facts under its
+session's immutable complete compilation environment; constructing a new session captures
+later compilation-environment drift. Each runtime binding owns
 its complete runtime environment separately: applicable runtime guards are
 derived and checked under that binding without replacing compilation facts or
-another binding's guards. A producer view therefore freezes the guards
-inherited by its producing process. A newly observed source/build generation
+another binding's guards. A producing or checking unit therefore freezes the guards
+inherited by its process. A newly observed source/build generation
 captures toolchain and build drift; a newly admitted runtime binding captures
 its applicable machine and runtime-configuration guards, independently of other
 bindings. Closing re-observes the complete applicable guard set under those same
@@ -208,11 +208,11 @@ required to evaluate a guard that applies to its result MUST be treated as stale
 valid — validity requires proof, so an unevaluable guard is absence of proof, and a
 recording written before a guard existed re-measures rather than being trusted.
 
-**REQ-guard-selective-capture** (behavior): An analysis view MUST capture exactly the
-guards applicable to its caller-declared result kind. Source-result and code-result
-views capture the code guards and leave machine and runtime-configuration values
-absent without probing machine support; a measurement view requires callable
-subjects and additionally captures both measurement guards. In the explicit split form, the source/build generation captures the
+**REQ-guard-selective-capture** (behavior): A snapshot and its runtime bindings MUST capture exactly the
+guards applicable to the snapshot's caller-declared result kind. Source-result and code-result
+snapshots and bindings capture the code guards and leave machine and runtime-configuration values
+absent without probing machine support; a measurement snapshot requires callable
+subjects and its runtime binding additionally captures both measurement guards. The source/build generation captures the
 source/build guards and its runtime binding captures the applicable measurement
 guards; neither another binding nor a later generation overwrites either set.
 Observed runtime-input evidence belongs to its producing unit and retained
